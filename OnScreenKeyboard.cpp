@@ -1,4 +1,5 @@
 #include "OnScreenKeyboard.h"
+#include "GfxPrims.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -10,10 +11,6 @@ namespace {
     static const char s_kb_r3[] = "-_.()[]{}+&";      // 12
     static const int  s_kb_cols[5] = {12,12,12,12,5}; // Back, Space, Aa, OK, Cancel
 }
-
-// simple TL vertex
-struct TLVERT { float x,y,z,rhw; D3DCOLOR color; };
-#define FVF_TLVERT (D3DFVF_XYZRHW | D3DFVF_DIFFUSE)
 
 OnScreenKeyboard::OnScreenKeyboard(){
     m_active = false; m_lower = false;
@@ -60,14 +57,7 @@ void OnScreenKeyboard::DrawAnsi(CXBFont& font, FLOAT x, FLOAT y, DWORD color, co
     font.DrawText(x,y,color,wbuf,0,0.0f);
 }
 void OnScreenKeyboard::DrawRect(LPDIRECT3DDEVICE8 dev, float x,float y,float w,float h,D3DCOLOR c){
-    TLVERT v[4];
-    v[0].x=x; v[0].y=y; v[1].x=x+w; v[1].y=y; v[2].x=x; v[2].y=y+h; v[3].x=x+w; v[3].y=y+h;
-    for(int i=0;i<4;i++){ v[i].z=0.0f; v[i].rhw=1.0f; v[i].color=c; }
-    dev->SetTexture(0,NULL);
-    dev->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_DISABLE);
-    dev->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
-    dev->SetVertexShader(FVF_TLVERT);
-    dev->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP,2,v,sizeof(TLVERT));
+    DrawSolidRect(dev, x, y, w, h, c);
 }
 void OnScreenKeyboard::MeasureTextWH(CXBFont& font, const char* s, FLOAT& outW, FLOAT& outH){
     WCHAR wbuf[256]; MultiByteToWideChar(CP_ACP, 0, s, -1, wbuf, 256);

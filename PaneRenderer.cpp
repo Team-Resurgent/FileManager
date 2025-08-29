@@ -1,10 +1,7 @@
 #include "PaneRenderer.h"
+#include "GfxPrims.h"
 #include <wchar.h>
 #include <stdio.h>  // _snprintf
-
-// local TL vertex
-struct TLVERT { float x,y,z,rhw; D3DCOLOR color; };
-#define FVF_TLVERT (D3DFVF_XYZRHW | D3DFVF_DIFFUSE)
 
 void PaneRenderer::DrawAnsi(CXBFont& font, FLOAT x, FLOAT y, DWORD color, const char* text){
     WCHAR wbuf[512];
@@ -12,12 +9,7 @@ void PaneRenderer::DrawAnsi(CXBFont& font, FLOAT x, FLOAT y, DWORD color, const 
     font.DrawText(x,y,color,wbuf,0,0.0f);
 }
 void PaneRenderer::DrawRect(LPDIRECT3DDEVICE8 dev, float x,float y,float w,float h,D3DCOLOR c){
-    TLVERT v[4]={{x,y,0,1,c},{x+w,y,0,1,c},{x,y+h,0,1,c},{x+w,y+h,0,1,c}};
-    dev->SetTexture(0,NULL);
-    dev->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_DISABLE);
-    dev->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
-    dev->SetVertexShader(FVF_TLVERT);
-    dev->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP,2,v,sizeof(TLVERT));
+    DrawSolidRect(dev, x, y, w, h, c);
 }
 void PaneRenderer::MeasureTextWH(CXBFont& font, const char* s, FLOAT& outW, FLOAT& outH){
     WCHAR wbuf[256];

@@ -1,5 +1,6 @@
 #include "FileBrowserApp.h"
 #include "AppActions.h"
+#include "GfxPrims.h"
 #include <wchar.h>
 #include <stdarg.h>
 #include <algorithm>
@@ -34,20 +35,9 @@ FileBrowserApp::FileBrowserApp(){
     m_status[0]=0; m_statusUntilMs=0;
 }
 
-// TL vertex & FVF (used by FileBrowserApp::DrawRect)
-struct TLVERT { float x,y,z,rhw; D3DCOLOR color; };
-#define FVF_TLVERT (D3DFVF_XYZRHW | D3DFVF_DIFFUSE)
-
 // ----- draw prims -----
 void FileBrowserApp::DrawRect(float x,float y,float w,float h,D3DCOLOR c){
-    TLVERT v[4];
-    v[0].x=x; v[0].y=y; v[1].x=x+w; v[1].y=y; v[2].x=x; v[2].y=y+h; v[3].x=x+w; v[3].y=y+h;
-    for(int i=0;i<4;i++){ v[i].z=0.0f; v[i].rhw=1.0f; v[i].color=c; }
-    m_pd3dDevice->SetTexture(0,NULL);
-    m_pd3dDevice->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_DISABLE);
-    m_pd3dDevice->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
-    m_pd3dDevice->SetVertexShader(FVF_TLVERT);
-    m_pd3dDevice->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP,2,v,sizeof(TLVERT));
+    DrawSolidRect(m_pd3dDevice, x, y, w, h, c);
 }
 
 // ----- status -----
@@ -307,7 +297,13 @@ void FileBrowserApp::OnPad_Browse(const XBGAMEPAD& pad){
     bool kTrig = (k > 30 && m_prevBlack <= 30);
     bool startTrig = ((btn & XINPUT_GAMEPAD_START) && !(m_prevButtons & XINPUT_GAMEPAD_START));
 
-    if (xTrig) { OpenMenu(); goto store_prev; }
+    if (xTrig) {
+    OpenMenu();
+    m_prevButtons = btn;
+    m_prevA = a; m_prevB = b; m_prevX = x;
+    m_prevWhite = w; m_prevBlack = k;
+    return;
+}
 
     if (aTrig) EnterSelection(p);
     if (bTrig) UpOne(p);

@@ -282,6 +282,9 @@
 				RelativePath=".\FsUtil.cpp">
 			</File>
 			<File
+				RelativePath=".\GfxPrims.cpp">
+			</File>
+			<File
 				RelativePath=".\main.cpp">
 			</File>
 			<File
@@ -306,6 +309,9 @@
 			</File>
 			<File
 				RelativePath=".\FsUtil.h">
+			</File>
+			<File
+				RelativePath=".\GfxPrims.h">
 			</File>
 			<File
 				RelativePath=".\OnScreenKeyboard.h">
