@@ -33,6 +33,10 @@ FileBrowserApp::FileBrowserApp(){
     m_status[0]=0; m_statusUntilMs=0;
 }
 
+// TL vertex & FVF (used by FileBrowserApp::DrawRect)
+struct TLVERT { float x,y,z,rhw; D3DCOLOR color; };
+#define FVF_TLVERT (D3DFVF_XYZRHW | D3DFVF_DIFFUSE)
+
 // ----- draw prims -----
 void FileBrowserApp::DrawRect(float x,float y,float w,float h,D3DCOLOR c){
     TLVERT v[4];
@@ -43,42 +47,6 @@ void FileBrowserApp::DrawRect(float x,float y,float w,float h,D3DCOLOR c){
     m_pd3dDevice->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
     m_pd3dDevice->SetVertexShader(FVF_TLVERT);
     m_pd3dDevice->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP,2,v,sizeof(TLVERT));
-}
-
-FLOAT FileBrowserApp::MeasureTextW(const char* s){
-    WCHAR wbuf[256];
-    MultiByteToWideChar(CP_ACP, 0, s, -1, wbuf, 256);
-    FLOAT w=0.0f, h=0.0f;
-    m_font.GetTextExtent(wbuf, &w, &h);
-    return w;
-}
-void FileBrowserApp::MeasureTextWH(const char* s, FLOAT& outW, FLOAT& outH){
-    WCHAR wbuf[256];
-    MultiByteToWideChar(CP_ACP, 0, s, -1, wbuf, 256);
-    m_font.GetTextExtent(wbuf, &outW, &outH);
-}
-void FileBrowserApp::DrawRightAligned(const char* s, FLOAT rightX, FLOAT y, DWORD color){
-    DrawAnsi(m_font, rightX - MeasureTextW(s), y, color, s);
-}
-
-// ----- size column -----
-FLOAT FileBrowserApp::ComputeSizeColW(const Pane& p){
-    FLOAT maxW = MeasureTextW("Size");
-    int limit = (int)p.items.size(); if(limit>200) limit=200;
-    char buf[64];
-    for(int i=0;i<limit;++i){
-        const Item& it = p.items[i];
-        if(!it.isDir && !it.isUpEntry){
-            FormatSize(it.size, buf, sizeof(buf));
-            FLOAT w = MeasureTextW(buf); if(w>maxW) maxW=w;
-        }
-    }
-    maxW += 16.0f;
-    const FLOAT minW = MaxF(90.0f, kLineH * 4.0f);
-    const FLOAT maxWClamp = kListW * 0.40f;
-    if(maxW < minW) maxW = minW;
-    if(maxW > maxWClamp) maxW = maxWClamp;
-    return maxW;
 }
 
 // ----- status -----
@@ -366,14 +334,7 @@ HRESULT FileBrowserApp::FrameMove(){
 void FileBrowserApp::DrawMenu(){
     if (!m_ctx.IsOpen()) return;
 
-    const FLOAT menuW = 340.0f;
-    const FLOAT rowH  = kLineH + 6.0f;
-
-    const FLOAT paneX = (m_active==0) ? kListX_L : (kListX_L + kListW + kPaneGap);
-    const FLOAT x = paneX + (kListW - menuW)*0.5f;
-    const FLOAT y = kListY + 20.0f;
-
-    // (coordinates are already set on open; draw just uses them)
+    // (coordinates already set when opening)
     m_ctx.Draw(m_font, m_pd3dDevice);
 }
 
@@ -645,9 +606,21 @@ HRESULT FileBrowserApp::Render(){
     m_pd3dDevice->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
     m_pd3dDevice->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
 
-    // left + right panes
-    DrawPane(kListX_L,                     m_pane[0], m_active==0);
-    DrawPane(kListX_L + kListW + kPaneGap, m_pane[1], m_active==1);
+    // left + right panes (now via PaneRenderer)
+    PaneStyle st;
+    st.listW       = kListW;
+    st.listY       = kListY;
+    st.lineH       = kLineH;
+    st.hdrY        = kHdrY;
+    st.hdrH        = kHdrH;
+    st.hdrW        = kHdrW;
+    st.gutterW     = kGutterW;
+    st.paddingX    = kPaddingX;
+    st.scrollBarW  = kScrollBarW;
+    st.visibleRows = m_visible;
+
+    m_renderer.DrawPane(m_font, m_pd3dDevice, kListX_L,                     m_pane[0], m_active==0, st);
+    m_renderer.DrawPane(m_font, m_pd3dDevice, kListX_L + kListW + kPaneGap, m_pane[1], m_active==1, st);
 
     // footer
     D3DVIEWPORT8 vp2; m_pd3dDevice->GetViewport(&vp2);
@@ -678,75 +651,6 @@ HRESULT FileBrowserApp::Render(){
 
     m_pd3dDevice->EndScene(); m_pd3dDevice->Present(NULL,NULL,NULL,NULL);
     return S_OK;
-}
-
-// ----- pane draw -----
-void FileBrowserApp::DrawPane(FLOAT baseX, Pane& p, bool active){
-    FLOAT hx = HdrX(baseX);
-    DrawRect(hx, kHdrY, kHdrW, kHdrH, active ? 0xFF3A3A3A : 0x802A2A2A);
-    if (p.mode==0) DrawAnsi(m_font, hx+5.0f, kHdrY+6.0f, 0xFFFFFFFF, "Detected Drives");
-    else { char hdr[600]; _snprintf(hdr,sizeof(hdr),"%s", p.curPath); hdr[sizeof(hdr)-1]=0; DrawAnsi(m_font, hx+5.0f, kHdrY+6.0f, 0xFFFFFFFF, hdr); }
-
-    // compute Size column width/X
-    const FLOAT sizeColW = ComputeSizeColW(p);
-    const FLOAT sizeColX = baseX + kListW - (kScrollBarW + kPaddingX + sizeColW);
-    const FLOAT sizeRight = sizeColX + sizeColW;
-
-    // column header
-    DrawRect(baseX-10.0f, kHdrY+kHdrH+6.0f, kListW+20.0f, 22.0f, 0x60333333);
-    DrawAnsi(m_font, NameColX(baseX),      kHdrY+kHdrH+10.0f, 0xFFDDDDDD, "Name");
-    DrawRightAligned("Size",               sizeRight,         kHdrY+kHdrH+10.0f, 0xFFDDDDDD);
-    DrawHLine(baseX-10.0f, kHdrY+kHdrH+28.0f, kListW+20.0f, 0x80444444);
-    DrawVLine(sizeColX - 8.0f, kHdrY+kHdrH+7.0f, 22.0f, 0x40444444);
-
-    // list bg
-    DrawRect(baseX-10.0f, kListY-6.0f, kListW+20.0f, kLineH*m_visible+12.0f, 0x30101010);
-
-    // stripes + selection
-    int end=p.scroll+m_visible; if(end>(int)p.items.size()) end=(int)p.items.size();
-    int rowIndex=0;
-    for(int i=p.scroll;i<end;++i,++rowIndex){
-        D3DCOLOR stripe=(rowIndex&1)?0x201E1E1E:0x10000000;
-        DrawRect(baseX, kListY + rowIndex*kLineH - 2.0f, kListW-8.0f, kLineH, stripe);
-    }
-    if(!p.items.empty() && p.sel>=p.scroll && p.sel<end){
-        int selRow=p.sel-p.scroll;
-        DrawRect(baseX, kListY + selRow*kLineH - 2.0f, kListW-8.0f, kLineH, active?0x60FFFF00:0x30FFFF00);
-    }
-
-    // rows
-    FLOAT y=kListY;
-    for(int i=p.scroll, r=0; i<end; ++i,++r){
-        const Item& it=p.items[i];
-        DWORD nameCol=(i==p.sel)?0xFFFFFF00:0xFFE0E0E0;
-        DWORD sizeCol=(i==p.sel)?0xFFFFFF00:0xFFB0B0B0;
-        D3DCOLOR ico = it.isUpEntry ? 0xFFAAAAAA : ( it.isDir ? 0xFF5EA4FF : 0xFF89D07E );
-        DrawRect(baseX+2.0f, y+6.0f, kGutterW-8.0f, kLineH-12.0f, ico);
-        const char* glyph = it.isUpEntry ? ".." : (it.isDir?"+":"-");
-        DrawAnsi(m_font, baseX+4.0f, y+4.0f, 0xFFFFFFFF, glyph);
-
-        char nameBuf[300]; _snprintf(nameBuf,sizeof(nameBuf),"%s",it.name); nameBuf[sizeof(nameBuf)-1]=0;
-        DrawAnsi(m_font, NameColX(baseX), y, nameCol, nameBuf);
-
-        char sz[64]=""; if(!it.isDir && !it.isUpEntry){ FormatSize(it.size, sz, sizeof(sz)); }
-        DrawRightAligned(sz, sizeRight, y, sizeCol);
-
-        y += kLineH;
-    }
-
-    // scrollbar
-    if((int)p.items.size()>m_visible){
-        FLOAT trackX = baseX + kListW - kScrollBarW - 4.0f;
-        FLOAT trackY = kListY - 2.0f;
-        FLOAT trackH = m_visible * kLineH;
-        DrawRect(trackX, trackY, kScrollBarW, trackH, 0x40282828);
-        int total=(int)p.items.size();
-        FLOAT thumbH=(FLOAT)m_visible/(FLOAT)total*trackH; if(thumbH<10.0f) thumbH=10.0f;
-        FLOAT maxScroll=(FLOAT)(total-m_visible);
-        FLOAT t=(maxScroll>0.0f)?((FLOAT)p.scroll/maxScroll):0.0f;
-        FLOAT thumbY=trackY + t*(trackH-thumbH);
-        DrawRect(trackX, thumbY, kScrollBarW, thumbH, 0x80C0C0C0);
-    }
 }
 
 // ---- static layout defaults (overwritten in Initialize) ----

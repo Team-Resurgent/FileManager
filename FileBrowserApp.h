@@ -4,15 +4,14 @@
 #include <xtl.h>
 #include <vector>
 #include <wchar.h>
-
 #include "XBApp.h"
 #include "XBFont.h"
 #include "XBInput.h"
 #include "FsUtil.h"
-
 #include "OnScreenKeyboard.h"
 #include "ContextMenu.h"
-#include "AppActions.h"   // enum Action
+#include "PaneModel.h"
+#include "PaneRenderer.h"
 
 // Dual-pane file browser application (OG Xbox XDK / VS2003)
 class FileBrowserApp : public CXBApplication {
@@ -31,33 +30,11 @@ public:
     static FLOAT kPaneGap;
 
 private:
-    // ----- Pane model -----
-    struct Pane {
-        std::vector<Item> items;
-        char  curPath[512];
-        int   mode;   // 0=drives, 1=dir
-        int   sel;
-        int   scroll;
-        Pane(){ curPath[0]=0; mode=0; sel=0; scroll=0; }
-    };
-
-    // TL vertex for solid rects (scoped to class)
-    struct TLVERT { float x,y,z,rhw; D3DCOLOR color; };
-    enum { FVF_TLVERT = D3DFVF_XYZRHW | D3DFVF_DIFFUSE };
-
     // ----- UI helpers -----
-    static FLOAT NameColX(FLOAT baseX){ return baseX + kGutterW + kPaddingX; }
-    static FLOAT HdrX   (FLOAT baseX){ return baseX - 15.0f; }
-
-    FLOAT MeasureTextW(const char* s);
-    void  MeasureTextWH(const char* s, FLOAT& outW, FLOAT& outH);
-    void  DrawRightAligned(const char* s, FLOAT rightX, FLOAT y, DWORD color);
+    static FLOAT HdrX(FLOAT baseX){ return baseX - 15.0f; }
     void  DrawRect(float x,float y,float w,float h,D3DCOLOR c);
     void  DrawHLine(float x,float y,float w,D3DCOLOR c){ DrawRect(x,y,w,1.0f,c); }
     void  DrawVLine(float x,float y,float h,D3DCOLOR c){ DrawRect(x,y,1.0f,h,c); }
-
-    // ----- Layout / columns -----
-    FLOAT ComputeSizeColW(const Pane& p);
 
     // ----- Status line -----
     void  SetStatus(const char* fmt, ...);
@@ -71,13 +48,11 @@ private:
     bool  ResolveDestDir(char* outDst, size_t cap);
     void  SelectItemInPane(Pane& p, const char* name);
 
-    // ----- Context menu (delegates to ContextMenu) -----
+    // ----- Context menu (delegated) -----
     void  AddMenuItem(const char* label, Action act, bool enabled);
     void  BuildContextMenu();
     void  OpenMenu();
     void  CloseMenu();
-    void  ExecuteAction(Action act);
-    void  DrawMenu();
 
     // ----- Rename OSD / keyboard -----
     void  BeginRename(const char* parentDir, const char* oldName);
@@ -108,19 +83,21 @@ private:
     int   m_navUDDir;       // -1 up, +1 down
     DWORD m_navUDNext;      // next repeat time (ms)
 
-    // mode
+    // mode & UI components
     enum { MODE_BROWSE, MODE_MENU, MODE_RENAME } m_mode;
+    ContextMenu      m_ctx;
+    OnScreenKeyboard m_kb;
+    PaneRenderer     m_renderer;
+	
+	// draws the already-open context menu
+	void DrawMenu();
 
     // status
     char  m_status[256];
     DWORD m_statusUntilMs;
 
-    // drawing
-    void DrawPane(FLOAT baseX, Pane& p, bool active);
-
-    // Components
-    OnScreenKeyboard m_kb;  // rename keyboard
-    ContextMenu      m_ctx; // context menu
+    // actions (still here for now)
+    void ExecuteAction(Action act);
 };
 
 #endif // FILEBROWSERAPP_H

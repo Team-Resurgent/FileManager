@@ -284,6 +284,9 @@
 			<File
 				RelativePath=".\OnScreenKeyboard.cpp">
 			</File>
+			<File
+				RelativePath=".\PaneRenderer.cpp">
+			</File>
 		</Filter>
 		<Filter
 			Name="Header Files"
@@ -303,6 +306,12 @@
 			</File>
 			<File
 				RelativePath=".\OnScreenKeyboard.h">
+			</File>
+			<File
+				RelativePath=".\PaneModel.h">
+			</File>
+			<File
+				RelativePath=".\PaneRenderer.h">
 			</File>
 		</Filter>
 		<Filter
