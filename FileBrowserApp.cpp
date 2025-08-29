@@ -1,4 +1,5 @@
 #include "FileBrowserApp.h"
+#include "AppActions.h"
 #include <wchar.h>
 #include <stdarg.h>
 #include <algorithm>
@@ -198,28 +199,43 @@ void FileBrowserApp::AcceptRename(){
     CancelRename();
 }
 
+// Absorb current pad state so the press that closes the keyboard (A/B/Start) doesn’t fall through into browse mode.
+void FileBrowserApp::AbsorbPadState(const XBGAMEPAD& pad){
+    m_prevButtons = pad.wButtons;
+    m_prevA       = pad.bAnalogButtons[XINPUT_GAMEPAD_A];
+    m_prevB       = pad.bAnalogButtons[XINPUT_GAMEPAD_B];
+    m_prevX       = pad.bAnalogButtons[XINPUT_GAMEPAD_X];
+    m_prevY       = pad.bAnalogButtons[XINPUT_GAMEPAD_Y];
+    m_prevWhite   = pad.bAnalogButtons[XINPUT_GAMEPAD_WHITE];
+    m_prevBlack   = pad.bAnalogButtons[XINPUT_GAMEPAD_BLACK];
+}
+
 // ----- input: rename modal -----
 void FileBrowserApp::OnPad_Rename(const XBGAMEPAD& pad){
     OnScreenKeyboard::Result r = m_kb.OnPad(pad);
-    if (r == OnScreenKeyboard::ACCEPTED){ AcceptRename(); return; }
-    if (r == OnScreenKeyboard::CANCELED){ CancelRename(); return; }
 
-    // keep edge state roughly synced (optional)
-    m_prevButtons = pad.wButtons;
-    m_prevA = pad.bAnalogButtons[XINPUT_GAMEPAD_A];
-    m_prevB = pad.bAnalogButtons[XINPUT_GAMEPAD_B];
-    m_prevX = pad.bAnalogButtons[XINPUT_GAMEPAD_X];
-    m_prevY = pad.bAnalogButtons[XINPUT_GAMEPAD_Y];
-    m_prevWhite = pad.bAnalogButtons[XINPUT_GAMEPAD_WHITE];
-    m_prevBlack = pad.bAnalogButtons[XINPUT_GAMEPAD_BLACK];
+    if (r == OnScreenKeyboard::ACCEPTED){
+        AbsorbPadState(pad);
+        AcceptRename();
+        return;
+    }
+    if (r == OnScreenKeyboard::CANCELED){
+        AbsorbPadState(pad);
+        CancelRename();
+        return;
+    }
+
+    // Still in keyboard: keep edge state roughly synced
+    AbsorbPadState(pad);
 }
+
 
 // ----- input: context menu (delegated) -----
 void FileBrowserApp::OnPad_Menu(const XBGAMEPAD& pad){
     Action act;
     ContextMenu::Result r = m_ctx.OnPad(pad, act);
     if (r == ContextMenu::CHOSEN){
-        ExecuteAction(act);
+        AppActions::Execute(act, *this);   // <-- call external actions
         CloseMenu();
     } else if (r == ContextMenu::CLOSED){
         CloseMenu();
@@ -341,190 +357,6 @@ void FileBrowserApp::DrawMenu(){
 void FileBrowserApp::DrawRename(){
     if (!m_kb.Active()) return;
     m_kb.Draw(m_font, m_pd3dDevice, kLineH);
-}
-
-void FileBrowserApp::ExecuteAction(Action act){
-    Pane& src = m_pane[m_active];
-    Pane& dst = m_pane[1 - m_active];
-
-    const Item* sel = NULL;
-    if (!src.items.empty()) sel = &src.items[src.sel];
-
-    char srcFull[512]="";
-    if (sel && src.mode==1 && !sel->isUpEntry) JoinPath(srcFull, sizeof(srcFull), src.curPath, sel->name);
-
-    switch (act){
-    case ACT_OPEN:
-        if (sel){
-            if (sel->isUpEntry) { UpOne(src); }
-            else if (sel->isDir) { EnterSelection(src); }
-        }
-        CloseMenu(); break;
-
-    case ACT_COPY:
-    {
-        if (!sel || sel->isUpEntry) { SetStatus("Nothing to copy"); CloseMenu(); break; }
-
-        char dstDir[512];
-        if (!ResolveDestDir(dstDir, sizeof(dstDir))) {
-            SetStatus("Pick a destination (open a folder or select a drive)");
-            CloseMenu(); break;
-        }
-        if ((dstDir[0]=='D' || dstDir[0]=='d') && dstDir[1]==':') {
-            SetStatus("Cannot copy to D:\\ (read-only)");
-            CloseMenu(); break;
-        }
-
-        NormalizeDirA(dstDir);
-        if (!CanWriteHereA(dstDir)){ SetStatusLastErr("Dest not writable"); CloseMenu(); break; }
-
-        if (CopyRecursiveA(srcFull, dstDir)) {
-            Pane& dstp = m_pane[1 - m_active];
-            if (dstp.mode==1 && _stricmp(dstp.curPath, dstDir)==0) ListDirectory(dstp.curPath, dstp.items);
-            SetStatus("Copied to %s", dstDir);
-        } else {
-            SetStatusLastErr("Copy failed");
-        }
-        RefreshPane(m_pane[0]); RefreshPane(m_pane[1]);
-        CloseMenu();
-        break;
-    }
-
-    case ACT_MOVE:
-    {
-        if (!sel || sel->isUpEntry) { SetStatus("Nothing to move"); CloseMenu(); break; }
-
-        char dstDir[512];
-        if (!ResolveDestDir(dstDir, sizeof(dstDir))) {
-            SetStatus("Pick a destination (open a folder or select a drive)");
-            CloseMenu(); break;
-        }
-        if ((dstDir[0]=='D' || dstDir[0]=='d') && dstDir[1]==':') {
-            SetStatus("Cannot move to D:\\ (read-only)");
-            CloseMenu(); break;
-        }
-
-        NormalizeDirA(dstDir);
-        if (!CanWriteHereA(dstDir)){ SetStatusLastErr("Dest not writable"); CloseMenu(); break; }
-
-        if (CopyRecursiveA(srcFull, dstDir)) {
-            if (!DeleteRecursiveA(srcFull)) {
-                SetStatusLastErr("Move: delete source failed");
-            } else {
-                Pane& srcp = m_pane[m_active];
-                Pane& dstp = m_pane[1 - m_active];
-                if (dstp.mode==1 && _stricmp(dstp.curPath, dstDir)==0) ListDirectory(dstp.curPath, dstp.items);
-                if (srcp.mode==1) { ListDirectory(srcp.curPath, srcp.items); if (srcp.sel >= (int)srcp.items.size()) srcp.sel = (int)srcp.items.size()-1; }
-                SetStatus("Moved to %s", dstDir);
-            }
-        } else {
-            SetStatusLastErr("Move: copy failed");
-        }
-        RefreshPane(m_pane[0]); RefreshPane(m_pane[1]);
-        CloseMenu();
-        break;
-    }
-
-    case ACT_DELETE:
-        if (sel){
-            if (DeleteRecursiveA(srcFull)){
-                ListDirectory(src.curPath, src.items);
-                if (src.sel >= (int)src.items.size()) src.sel = (int)src.items.size()-1;
-                SetStatus("Deleted");
-            } else SetStatus("Delete failed");
-        }
-        RefreshPane(m_pane[0]); RefreshPane(m_pane[1]);
-        CloseMenu(); break;
-
-    case ACT_RENAME:
-        if (sel && src.mode==1 && !sel->isUpEntry){
-            BeginRename(src.curPath, sel->name); CloseMenu();
-        } else {
-            SetStatus("Open a folder and select an item"); CloseMenu();
-        }
-        break;
-
-    case ACT_MKDIR:
-    {
-        char baseDir[512] = {0};
-
-        if (src.mode == 1) {
-            _snprintf(baseDir, sizeof(baseDir), "%s", src.curPath);
-        } else if (!src.items.empty()) {
-            const Item& di = src.items[src.sel];
-            if (di.isDir && !di.isUpEntry) {
-                _snprintf(baseDir, sizeof(baseDir), "%s", di.name); // e.g. "E:\"
-            }
-        }
-        baseDir[sizeof(baseDir)-1] = 0;
-        if (!baseDir[0]) { SetStatus("Open a folder or select a drive first"); CloseMenu(); break; }
-
-        if ((baseDir[0]=='D' || baseDir[0]=='d') && baseDir[1]==':') {
-            SetStatus("Cannot create on D:\\ (read-only)"); CloseMenu(); break;
-        }
-
-        NormalizeDirA(baseDir);
-        if (!CanWriteHereA(baseDir)) { SetStatusLastErr("Dest not writable"); CloseMenu(); break; }
-
-        char nameBuf[64]; 
-        char target[512];
-        int idx = 0;
-        for (;;){
-            if (idx == 0) _snprintf(nameBuf, sizeof(nameBuf), "NewFolder");
-            else          _snprintf(nameBuf, sizeof(nameBuf), "NewFolder%d", idx);
-            nameBuf[sizeof(nameBuf)-1]=0;
-
-            JoinPath(target, sizeof(target), baseDir, nameBuf);
-
-            if (!DirExistsA(target)) {
-                if (CreateDirectoryA(target, NULL)) {
-                    SetStatus("Created %s", nameBuf);
-                } else {
-                    SetStatusLastErr("Create folder failed");
-                }
-                break;
-            }
-            if (++idx > 999){ SetStatus("Create folder failed (names exhausted)"); break; }
-        }
-
-        RefreshPane(m_pane[0]); RefreshPane(m_pane[1]);
-
-        if (src.mode == 1 && _stricmp(src.curPath, baseDir) == 0) {
-            SelectItemInPane(src, nameBuf);
-        }
-
-        CloseMenu();
-        break;
-    }
-
-    case ACT_CALCSIZE:
-        if (sel){
-            ULONGLONG bytes = DirSizeRecursiveA(srcFull);
-            char tmp[64]; FormatSize(bytes, tmp, sizeof(tmp));
-            SetStatus("%s", tmp);
-        }
-        CloseMenu(); break;
-
-    case ACT_GOROOT:
-        if (src.mode == 1){
-            if (!IsDriveRoot(src.curPath)){
-                char root[4] = { src.curPath[0], ':', '\\', 0 };
-                strncpy(src.curPath, root, sizeof(src.curPath)-1);
-                src.curPath[3] = 0;
-                src.sel = 0; src.scroll = 0;
-                ListDirectory(src.curPath, src.items);
-            } else {
-                src.mode = 0; src.curPath[0] = 0; src.sel = 0; src.scroll = 0;
-                BuildDriveItems(src.items);
-            }
-        } else {
-            BuildDriveItems(src.items);
-        }
-        CloseMenu(); break;
-
-    case ACT_SWITCHMEDIA:
-        m_active = 1 - m_active; CloseMenu(); break;
-    }
 }
 
 // ----- listing / navigation -----

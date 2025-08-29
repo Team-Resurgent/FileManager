@@ -12,10 +12,18 @@
 #include "ContextMenu.h"
 #include "PaneModel.h"
 #include "PaneRenderer.h"
+#include "AppActions.h"
 
 // Dual-pane file browser application (OG Xbox XDK / VS2003)
+
+// Forward the friend so AppActions can call our private helpers
+namespace AppActions { void Execute(Action, class FileBrowserApp&); }
+
 class FileBrowserApp : public CXBApplication {
 public:
+	// Allow the centralized action runner to call our private helpers/members
+    friend void AppActions::Execute(Action, FileBrowserApp&);
+
     FileBrowserApp();
 
     // CXBApplication overrides
@@ -98,6 +106,22 @@ private:
 
     // actions (still here for now)
     void ExecuteAction(Action act);
+
+
+	// per-action helpers (implementation in .cpp; easy to move to AppActions.cpp later)
+	void Act_Open();
+	void Act_Copy();
+	void Act_Move();
+	void Act_Delete();
+	void Act_Rename();
+	void Act_Mkdir();
+	void Act_CalcSize();
+	void Act_GoRoot();
+	void Act_SwitchMedia();
+
+	// absorb pad helper
+	void AbsorbPadState(const XBGAMEPAD& pad);
+
 };
 
 #endif // FILEBROWSERAPP_H
