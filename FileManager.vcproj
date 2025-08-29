@@ -324,73 +324,19 @@
 				RelativePath="C:\Program Files\Microsoft Xbox SDK\Samples\Xbox\Common\Src\xbapp.cpp">
 			</File>
 			<File
-				RelativePath="C:\Program Files\Microsoft Xbox SDK\Samples\Xbox\Common\Src\xbconfig.cpp">
-			</File>
-			<File
 				RelativePath="C:\Program Files\Microsoft Xbox SDK\Samples\Xbox\Common\Src\xbfont.cpp">
-			</File>
-			<File
-				RelativePath="C:\Program Files\Microsoft Xbox SDK\Samples\Xbox\Common\Src\xbhelp.cpp">
 			</File>
 			<File
 				RelativePath="C:\Program Files\Microsoft Xbox SDK\Samples\Xbox\Common\Src\xbinput.cpp">
 			</File>
 			<File
-				RelativePath="C:\Program Files\Microsoft Xbox SDK\Samples\Xbox\Common\Src\xbMediaDebug.cpp">
-			</File>
-			<File
-				RelativePath="C:\Program Files\Microsoft Xbox SDK\Samples\Xbox\Common\Src\xbmemunit.cpp">
-			</File>
-			<File
-				RelativePath="C:\Program Files\Microsoft Xbox SDK\Samples\Xbox\Common\Src\xbmesh.cpp">
-			</File>
-			<File
-				RelativePath="C:\Program Files\Microsoft Xbox SDK\Samples\Xbox\Common\Src\xbNet.cpp">
-			</File>
-			<File
-				RelativePath="C:\Program Files\Microsoft Xbox SDK\Samples\Xbox\Common\Src\xbNetMsg.cpp">
-			</File>
-			<File
-				RelativePath="C:\Program Files\Microsoft Xbox SDK\Samples\Xbox\Common\Src\xbOnline.cpp">
-			</File>
-			<File
-				RelativePath="C:\Program Files\Microsoft Xbox SDK\Samples\Xbox\Common\Src\xbOnlineTask.cpp">
-			</File>
-			<File
-				RelativePath="C:\Program Files\Microsoft Xbox SDK\Samples\Xbox\Common\Src\xbperf.cpp">
-			</File>
-			<File
-				RelativePath="C:\Program Files\Microsoft Xbox SDK\Samples\Xbox\Common\Src\xbprofiling.cpp">
-			</File>
-			<File
-				RelativePath="C:\Program Files\Microsoft Xbox SDK\Samples\Xbox\Common\Src\xbRandName.cpp">
-			</File>
-			<File
 				RelativePath="C:\Program Files\Microsoft Xbox SDK\Samples\Xbox\Common\Src\xbresource.cpp">
-			</File>
-			<File
-				RelativePath="C:\Program Files\Microsoft Xbox SDK\Samples\Xbox\Common\Src\xbsavedgame.cpp">
-			</File>
-			<File
-				RelativePath="C:\Program Files\Microsoft Xbox SDK\Samples\Xbox\Common\Src\xbsocket.cpp">
-			</File>
-			<File
-				RelativePath="C:\Program Files\Microsoft Xbox SDK\Samples\Xbox\Common\Src\xbsound.cpp">
 			</File>
 			<File
 				RelativePath="C:\Program Files\Microsoft Xbox SDK\Samples\Xbox\Common\Src\xbstopwatch.cpp">
 			</File>
 			<File
-				RelativePath="C:\Program Files\Microsoft Xbox SDK\Samples\Xbox\Common\Src\xbstoragedevice.cpp">
-			</File>
-			<File
-				RelativePath="C:\Program Files\Microsoft Xbox SDK\Samples\Xbox\Common\Src\xbstrip.cpp">
-			</File>
-			<File
 				RelativePath="C:\Program Files\Microsoft Xbox SDK\Samples\Xbox\Common\Src\xbutil.cpp">
-			</File>
-			<File
-				RelativePath="C:\Program Files\Microsoft Xbox SDK\Samples\Xbox\Common\Src\xbVoice.cpp">
 			</File>
 		</Filter>
 		<File
