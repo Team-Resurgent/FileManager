@@ -29,7 +29,7 @@ FileBrowserApp::FileBrowserApp(){
     m_d3dpp.AutoDepthStencilFormat=D3DFMT_D24S8;
     m_d3dpp.Flags = D3DPRESENTFLAG_PROGRESSIVE | D3DPRESENTFLAG_WIDESCREEN;
 
-    m_menuOpen=false; m_menuSel=0; m_menuCount=0; m_mode=MODE_BROWSE;
+    m_mode=MODE_BROWSE;
     m_status[0]=0; m_statusUntilMs=0;
 }
 
@@ -154,19 +154,16 @@ void FileBrowserApp::SelectItemInPane(Pane& p, const char* name){
     }
 }
 
-// ----- context menu -----
+// ----- context menu (delegated) -----
 void FileBrowserApp::AddMenuItem(const char* label, Action act, bool enabled){
-    m_menu[m_menuCount].label   = label;
-    m_menu[m_menuCount].act     = act;
-    m_menu[m_menuCount].enabled = enabled;
-    ++m_menuCount;
+    m_ctx.AddItem(label, act, enabled);
 }
 void FileBrowserApp::BuildContextMenu(){
     Pane& p   = m_pane[m_active];
     bool inDir  = (p.mode == 1);
     bool hasSel = !p.items.empty();
 
-    m_menuCount = 0;
+    m_ctx.Clear();
     if (inDir) AddMenuItem("Open",            ACT_OPEN,       hasSel);
     AddMenuItem("Copy",            ACT_COPY,       hasSel);
     AddMenuItem("Move",            ACT_MOVE,       hasSel);
@@ -176,17 +173,28 @@ void FileBrowserApp::BuildContextMenu(){
     AddMenuItem("Calculate size",  ACT_CALCSIZE,   hasSel);
     AddMenuItem("Go to root",      ACT_GOROOT,     inDir);
     AddMenuItem("Switch pane",     ACT_SWITCHMEDIA,true);
-
-    if (m_menuSel >= m_menuCount) m_menuSel = m_menuCount-1;
-    if (m_menuSel < 0)            m_menuSel = 0;
 }
-void FileBrowserApp::OpenMenu(){ BuildContextMenu(); m_menuOpen=true; m_mode=MODE_MENU; }
-void FileBrowserApp::CloseMenu(){ m_menuOpen=false; if (m_mode==MODE_MENU) m_mode=MODE_BROWSE; }
+void FileBrowserApp::OpenMenu(){
+    BuildContextMenu();
 
-// ----- rename lifecycle (now fully delegated to OnScreenKeyboard) -----
+    const FLOAT menuW = 340.0f;
+    const FLOAT rowH  = kLineH + 6.0f;
+
+    const FLOAT paneX = (m_active==0) ? kListX_L : (kListX_L + kListW + kPaneGap);
+    const FLOAT x = paneX + (kListW - menuW)*0.5f;
+    const FLOAT y = kListY + 20.0f;
+
+    m_ctx.OpenAt(x, y, menuW, rowH);
+    m_mode=MODE_MENU;
+}
+void FileBrowserApp::CloseMenu(){
+    m_ctx.Close();
+    if (m_mode==MODE_MENU) m_mode=MODE_BROWSE;
+}
+
+// ----- rename lifecycle (delegated to OnScreenKeyboard) -----
 void FileBrowserApp::BeginRename(const char* parentDir, const char* oldName){
-    m_menuOpen = false;
-    // Start the external keyboard (case choice handled internally; start upper by default)
+    m_ctx.Close();             // ensure menu closes
     m_kb.Open(parentDir ? parentDir : "", oldName ? oldName : "");
     m_mode = MODE_RENAME;
 }
@@ -198,7 +206,6 @@ void FileBrowserApp::AcceptRename(){
     const char* newName = m_kb.Buffer();
     if (!newName) { CancelRename(); return; }
 
-    // Use current active pane for parent/old (we're modal during rename, so selection hasn't changed)
     Pane& ap = m_pane[m_active];
     if (ap.mode != 1 || ap.items.empty()) { SetStatus("Rename failed: no selection"); CancelRename(); return; }
 
@@ -215,7 +222,7 @@ void FileBrowserApp::AcceptRename(){
     if (MoveFileA(oldPath, newPath)){
         SetStatus("Renamed to %s", clean);
         RefreshPane(m_pane[0]); RefreshPane(m_pane[1]);
-        if (_stricmp(ap.curPath, ap.curPath)==0) SelectItemInPane(ap, clean);
+        SelectItemInPane(ap, clean);
     }else{
         SetStatusLastErr("Rename failed");
         RefreshPane(m_pane[0]); RefreshPane(m_pane[1]);
@@ -223,13 +230,13 @@ void FileBrowserApp::AcceptRename(){
     CancelRename();
 }
 
-// ----- input: rename modal (delegates to OnScreenKeyboard) -----
+// ----- input: rename modal -----
 void FileBrowserApp::OnPad_Rename(const XBGAMEPAD& pad){
     OnScreenKeyboard::Result r = m_kb.OnPad(pad);
     if (r == OnScreenKeyboard::ACCEPTED){ AcceptRename(); return; }
     if (r == OnScreenKeyboard::CANCELED){ CancelRename(); return; }
 
-    // keep edge state roughly synced with app (not required, but harmless)
+    // keep edge state roughly synced (optional)
     m_prevButtons = pad.wButtons;
     m_prevA = pad.bAnalogButtons[XINPUT_GAMEPAD_A];
     m_prevB = pad.bAnalogButtons[XINPUT_GAMEPAD_B];
@@ -239,32 +246,22 @@ void FileBrowserApp::OnPad_Rename(const XBGAMEPAD& pad){
     m_prevBlack = pad.bAnalogButtons[XINPUT_GAMEPAD_BLACK];
 }
 
-// ----- input: context menu -----
+// ----- input: context menu (delegated) -----
 void FileBrowserApp::OnPad_Menu(const XBGAMEPAD& pad){
-    const DWORD btn = pad.wButtons;
-    bool up    = ((btn & XINPUT_GAMEPAD_DPAD_UP)   && !(m_prevButtons & XINPUT_GAMEPAD_DPAD_UP))   || (pad.sThumbLY >  16000);
-    bool down  = ((btn & XINPUT_GAMEPAD_DPAD_DOWN) && !(m_prevButtons & XINPUT_GAMEPAD_DPAD_DOWN)) || (pad.sThumbLY < -16000);
-
-    if (up)   { if (m_menuSel > 0)              --m_menuSel; }
-    if (down) { if (m_menuSel < m_menuCount-1)  ++m_menuSel; }
-
-    unsigned char a = pad.bAnalogButtons[XINPUT_GAMEPAD_A];
-    unsigned char b = pad.bAnalogButtons[XINPUT_GAMEPAD_B];
-    unsigned char x = pad.bAnalogButtons[XINPUT_GAMEPAD_X];
-
-    bool aTrig = (a > 30 && m_prevA <= 30);
-    bool bTrig = (b > 30 && m_prevB <= 30);
-    bool xTrig = (x > 30 && m_prevX <= 30);
-
-    if (aTrig) {
-        const MenuItem& mi = m_menu[m_menuSel];
-        if (mi.enabled) ExecuteAction(mi.act);
-    } else if (bTrig || xTrig) {
+    Action act;
+    ContextMenu::Result r = m_ctx.OnPad(pad, act);
+    if (r == ContextMenu::CHOSEN){
+        ExecuteAction(act);
+        CloseMenu();
+    } else if (r == ContextMenu::CLOSED){
         CloseMenu();
     }
 
-    m_prevButtons = btn;
-    m_prevA = a; m_prevB = b; m_prevX = x;
+    // sync browse edge state to avoid carry-over triggers
+    m_prevButtons = pad.wButtons;
+    m_prevA = pad.bAnalogButtons[XINPUT_GAMEPAD_A];
+    m_prevB = pad.bAnalogButtons[XINPUT_GAMEPAD_B];
+    m_prevX = pad.bAnalogButtons[XINPUT_GAMEPAD_X];
     m_prevWhite = pad.bAnalogButtons[XINPUT_GAMEPAD_WHITE];
     m_prevBlack = pad.bAnalogButtons[XINPUT_GAMEPAD_BLACK];
 }
@@ -367,33 +364,17 @@ HRESULT FileBrowserApp::FrameMove(){
 
 // ----- draw: menu / rename / panes -----
 void FileBrowserApp::DrawMenu(){
-    if (!m_menuOpen) return;
+    if (!m_ctx.IsOpen()) return;
 
     const FLOAT menuW = 340.0f;
     const FLOAT rowH  = kLineH + 6.0f;
-    const FLOAT menuH = 12.0f + m_menuCount*rowH + 12.0f;
 
     const FLOAT paneX = (m_active==0) ? kListX_L : (kListX_L + kListW + kPaneGap);
     const FLOAT x = paneX + (kListW - menuW)*0.5f;
     const FLOAT y = kListY + 20.0f;
 
-    DrawRect(x-6.0f, y-6.0f, menuW+12.0f, menuH+12.0f, 0xA0101010);
-    DrawRect(x, y, menuW, menuH, 0xE0222222);
-
-    DrawAnsi(m_font, x+10.0f, y+6.0f, 0xFFFFFFFF, "Select action");
-    DrawHLine(x, y+26.0f, menuW, 0x60FFFFFF);
-
-    FLOAT iy = y + 30.0f;
-    for (int i=0;i<m_menuCount;++i){
-        bool sel = (i == m_menuSel);
-        D3DCOLOR row = sel ? 0x60FFFF00 : 0x20202020;
-        DrawRect(x+6.0f, iy-2.0f, menuW-12.0f, rowH, row);
-
-        const MenuItem& mi = m_menu[i];
-        DWORD col = mi.enabled? (sel?0xFF202020:0xFFE0E0E0) : 0xFF7A7A7A;
-        DrawAnsi(m_font, x+16.0f, iy, col, mi.label);
-        iy += rowH;
-    }
+    // (coordinates are already set on open; draw just uses them)
+    m_ctx.Draw(m_font, m_pd3dDevice);
 }
 
 void FileBrowserApp::DrawRename(){

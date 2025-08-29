@@ -3,11 +3,16 @@
 
 #include <xtl.h>
 #include <vector>
+#include <wchar.h>
+
 #include "XBApp.h"
 #include "XBFont.h"
 #include "XBInput.h"
 #include "FsUtil.h"
+
 #include "OnScreenKeyboard.h"
+#include "ContextMenu.h"
+#include "AppActions.h"   // enum Action
 
 // Dual-pane file browser application (OG Xbox XDK / VS2003)
 class FileBrowserApp : public CXBApplication {
@@ -36,7 +41,7 @@ private:
         Pane(){ curPath[0]=0; mode=0; sel=0; scroll=0; }
     };
 
-    // TL vertex for solid rects
+    // TL vertex for solid rects (scoped to class)
     struct TLVERT { float x,y,z,rhw; D3DCOLOR color; };
     enum { FVF_TLVERT = D3DFVF_XYZRHW | D3DFVF_DIFFUSE };
 
@@ -66,13 +71,7 @@ private:
     bool  ResolveDestDir(char* outDst, size_t cap);
     void  SelectItemInPane(Pane& p, const char* name);
 
-    // ----- Context menu -----
-    enum Action {
-        ACT_OPEN, ACT_COPY, ACT_MOVE, ACT_DELETE, ACT_RENAME,
-        ACT_MKDIR, ACT_CALCSIZE, ACT_GOROOT, ACT_SWITCHMEDIA
-    };
-    struct MenuItem { const char* label; Action act; bool enabled; };
-
+    // ----- Context menu (delegates to ContextMenu) -----
     void  AddMenuItem(const char* label, Action act, bool enabled);
     void  BuildContextMenu();
     void  OpenMenu();
@@ -109,11 +108,7 @@ private:
     int   m_navUDDir;       // -1 up, +1 down
     DWORD m_navUDNext;      // next repeat time (ms)
 
-    // context menu
-    bool      m_menuOpen;
-    int       m_menuSel;
-    MenuItem  m_menu[9];
-    int       m_menuCount;
+    // mode
     enum { MODE_BROWSE, MODE_MENU, MODE_RENAME } m_mode;
 
     // status
@@ -123,8 +118,9 @@ private:
     // drawing
     void DrawPane(FLOAT baseX, Pane& p, bool active);
 
-    // On-screen keyboard (new, self-contained)
-    OnScreenKeyboard m_kb;
+    // Components
+    OnScreenKeyboard m_kb;  // rename keyboard
+    ContextMenu      m_ctx; // context menu
 };
 
 #endif // FILEBROWSERAPP_H
