@@ -42,32 +42,69 @@ void ContextMenu::DrawRect(LPDIRECT3DDEVICE8 dev, float x,float y,float w,float 
 }
 
 void ContextMenu::Draw(CXBFont& font, LPDIRECT3DDEVICE8 dev) const{
-    if (!m_open || m_count<=0) return;
+    if (!m_open || m_count <= 0) return;
 
     const FLOAT menuW = m_w;
     const FLOAT rowH  = m_rowH;
-    const FLOAT menuH = 12.0f + m_count*rowH + 12.0f;
+
+    // --- measure header text height (ANSI -> wide, then GetTextExtent) ---
+    FLOAT hdrW = 0.0f, hdrH = 0.0f;
+    {
+        const char* title = "Select action";
+        WCHAR wbuf[128];
+        MultiByteToWideChar(CP_ACP, 0, title, -1, wbuf, 128);
+        font.GetTextExtent(wbuf, &hdrW, &hdrH);
+    }
+
+    // --- layout constants (breathing room around header) ---
+    const FLOAT headerTopPad    = 8.0f;   // space from top border to header text
+    const FLOAT headerBottomPad = 6.0f;   // space below header text before divider
+    const FLOAT bottomPad       = 12.0f;  // space below last row
+
     const FLOAT x = m_x;
     const FLOAT y = m_y;
 
-    DrawRect(dev, x-6.0f, y-6.0f, menuW+12.0f, menuH+12.0f, 0xA0101010);
+    // divider line goes below the header text + padding
+    const FLOAT lineY   = y + headerTopPad + hdrH + headerBottomPad;
+    const FLOAT listTop = lineY + 6.0f;   // little gap below the divider
+
+    // total height now accounts for dynamic header height
+    const FLOAT menuH = (listTop - y) + (m_count * rowH) + bottomPad;
+
+    // frame
+    DrawRect(dev, x - 6.0f, y - 6.0f, menuW + 12.0f, menuH + 12.0f, 0xA0101010);
     DrawRect(dev, x, y, menuW, menuH, 0xE0222222);
 
-    DrawAnsi(font, x+10.0f, y+6.0f, 0xFFFFFFFF, "Select action");
-    DrawRect(dev, x, y+26.0f, menuW, 1.0f, 0x60FFFFFF);
+    // header title
+    DrawAnsi(font, x + 10.0f, y + headerTopPad, 0xFFFFFFFF, "Select action");
 
-    FLOAT iy = y + 30.0f;
-    for (int i=0;i<m_count;++i){
+    // header divider
+    DrawRect(dev, x, lineY, menuW, 1.0f, 0x60FFFFFF);
+
+    // rows
+    for (int i = 0; i < m_count; ++i){
+        const FLOAT rowY = listTop + i * rowH;
+
         bool sel = (i == m_sel);
         D3DCOLOR row = sel ? 0x60FFFF00 : 0x20202020;
-        DrawRect(dev, x+6.0f, iy-2.0f, menuW-12.0f, rowH, row);
+        DrawRect(dev, x + 6.0f, rowY - 2.0f, menuW - 12.0f, rowH, row);
 
         const Item& it = m_items[i];
-        DWORD col = it.enabled? (sel?0xFF202020:0xFFE0E0E0) : 0xFF7A7A7A;
-        DrawAnsi(font, x+16.0f, iy, col, it.label);
-        iy += rowH;
+        DWORD col = it.enabled ? (sel ? 0xFF202020 : 0xFFE0E0E0) : 0xFF7A7A7A;
+
+        // center label vertically in its row
+        FLOAT tw = 0.0f, th = 0.0f;
+        {
+            WCHAR wbuf[256];
+            MultiByteToWideChar(CP_ACP, 0, it.label, -1, wbuf, 256);
+            font.GetTextExtent(wbuf, &tw, &th);
+        }
+        const FLOAT textY = rowY + (rowH - th) * 0.5f;
+
+        DrawAnsi(font, x + 16.0f, textY, col, it.label);
     }
 }
+
 
 ContextMenu::Result ContextMenu::OnPad(const XBGAMEPAD& pad, Action& outAct){
     outAct = ACT_OPEN;
