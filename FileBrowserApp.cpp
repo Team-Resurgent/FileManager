@@ -323,7 +323,6 @@ void FileBrowserApp::OnPad_Browse(const XBGAMEPAD& pad){
         EnsureListing(m_pane[0]); EnsureListing(m_pane[1]);
     }
 
-store_prev:
     m_prevButtons = btn;
     m_prevA = a; m_prevB = b; m_prevX = x;
     m_prevWhite = w; m_prevBlack = k;

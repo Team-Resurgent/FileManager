@@ -11,8 +11,15 @@ public:
 
     OnScreenKeyboard();
 
+    // --- Global default for case at open time (change here only) ---
+    static const bool kDefaultStartLowerCase = true;  // flip to false for UPPERCASE by default
+
     // Open with parent directory and initial file/folder name
-    void Open(const char* parentDir, const char* initialName, bool startLowerCase=false);
+    void Open(const char* parentDir, const char* initialName, bool startLowerCase);
+    inline void Open(const char* parentDir, const char* initialName) {
+        Open(parentDir, initialName, kDefaultStartLowerCase);
+    }
+
     void Close();
     bool Active() const { return m_active; }
 
@@ -41,15 +48,21 @@ private:
     // --- state ---
     bool  m_active;
     bool  m_lower;
+    bool  m_symbols;
     char  m_parent[512];
     char  m_old[256];
     char  m_buf[256];
     int   m_cursor;
     int   m_row, m_col;
     bool  m_waitRelease;
-
+    bool  m_sideFocus;   // are we in the left control column?
+    int   m_sideRow;     // 0..3 within the control column
+    bool  m_shiftOnce;   // one-shot shift (case flips for next char)
 
     // input edge detection (internal; independent of FileBrowserApp)
-    unsigned char m_prevA, m_prevB, m_prevY, m_prevWhite, m_prevBlack;
+    unsigned char m_prevA, m_prevB, m_prevY, m_prevLT, m_prevRT;
     DWORD         m_prevButtons;
+
+    const char* RowChars(int row) const;
+    int         RowCols (int row) const;
 };
