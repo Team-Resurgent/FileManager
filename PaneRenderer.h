@@ -1,3 +1,4 @@
+// PaneRenderer.h
 #ifndef PANERENDERER_H
 #define PANERENDERER_H
 
@@ -5,7 +6,6 @@
 #include "XBFont.h"
 #include "PaneModel.h"
 
-// Style/config for drawing a pane (filled from FileBrowserApp layout)
 struct PaneStyle {
     FLOAT listW, listY, lineH;
     FLOAT hdrY, hdrH, hdrW;
@@ -13,19 +13,39 @@ struct PaneStyle {
     int   visibleRows;
 };
 
+struct MarqueeState {
+    int   row;          // scrolling row (-1 if none)
+    FLOAT px;           // pixel offset
+    DWORD nextTick;     // next advance time
+    DWORD resetPause;   // pause-at-end timer
+    MarqueeState() : row(-1), px(0.0f), nextTick(0), resetPause(0) {}
+};
+
 class PaneRenderer {
 public:
-    // Draw a single pane at baseX
     void DrawPane(
         CXBFont& font,
         LPDIRECT3DDEVICE8 dev,
         FLOAT baseX,
         const Pane& p,
         bool active,
-        const PaneStyle& st);
+        const PaneStyle& st,
+        int paneIndex);                // <-- NEW
 
 private:
-    // Local helpers (no global pollution)
+    // --- NEW: marquee helpers ---
+    void  DrawNameFittedOrMarquee(CXBFont& font, FLOAT x, FLOAT y, FLOAT maxW,
+                                  DWORD color, const char* name,
+                                  bool isSelected, int paneIndex, int rowIndex);
+    void  RightEllipsizeToFit(CXBFont& font, const char* src, FLOAT maxW,
+                              char* out, size_t cap);
+    const char* SkipToPixelOffset(CXBFont& font, const char* s, FLOAT px, FLOAT& skippedW);
+
+    // state for left(0) / right(1) pane
+    MarqueeState m_marq[2];            // <-- NEW
+
+private:
+    // existing helpers
     static void  DrawAnsi(CXBFont& font, FLOAT x, FLOAT y, DWORD color, const char* text);
     static void  DrawRect(LPDIRECT3DDEVICE8 dev, float x,float y,float w,float h,D3DCOLOR c);
     static void  DrawRightAligned(CXBFont& font, const char* s, FLOAT rightX, FLOAT y, DWORD color);

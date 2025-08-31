@@ -60,6 +60,27 @@ namespace {
 		out[cap-1]=0;
 	}
 
+	// --- marquee helpers for progress overlay ---
+	inline void MbToW(const char* s, WCHAR* w, int capW){
+		MultiByteToWideChar(CP_ACP, 0, s ? s : "", -1, w, capW);
+	}
+
+	// Return pointer to the first byte that starts at (or just before) pixel offset px.
+	static const char* SkipToPixelOffset(CXBFont& font, const char* s, FLOAT px, FLOAT& skippedW){
+		skippedW = 0.0f;
+		if (!s || px <= 0.0f) return s ? s : "";
+		const char* p = s;
+		WCHAR wtmp[256]; FLOAT tw=0, th=0;
+		while (*p){
+			int len = (int)(p - s + 1); if (len > 255) len = 255;
+			char tmp[256]; _snprintf(tmp, sizeof(tmp), "%.*s", len, s);
+			MbToW(tmp, wtmp, 256); font.GetTextExtent(wtmp, &tw, &th);
+			if (tw >= px) break;
+			++p;
+		}
+		skippedW = tw;
+		return p;
+	}
 
 	
 	inline unsigned int BuildDriveMask(){
@@ -71,6 +92,8 @@ namespace {
         }
         return mask;
     }
+
+
 }
 
 FileBrowserApp::FileBrowserApp(){
@@ -668,9 +691,63 @@ void FileBrowserApp::DrawProgressOverlay(){
     }
 
     // left-truncate folder if too long for the content width
-    char folderFit[512];
-    LeftEllipsizeToFit(m_font, folder, barW, folderFit, sizeof(folderFit));
-    DrawAnsi(m_font, x + margin, folderY, 0xFF5EA4FF, folderFit);
+    // Marquee the folder path if too wide
+{
+    static char  s_lastFolder[512] = {0};
+    static DWORD s_nextTick = 0;
+    static FLOAT s_px = 0.0f;
+    static int   s_dir = +1; // +1 forward, -1 backward
+
+    // measure full width
+    WCHAR wfull[512]; MbToW(folder, wfull, 512);
+    FLOAT fullW=0, fullH=0; m_font.GetTextExtent(wfull, &fullW, &fullH);
+
+    const FLOAT drawX = x + margin;
+    const DWORD now   = GetTickCount();
+
+    // Reset scroll when a new operation starts or the folder path changes
+    if (m_prog.done == 0 || _stricmp(s_lastFolder, folder) != 0){
+        _snprintf(s_lastFolder, sizeof(s_lastFolder), "%s", folder);
+        s_px      = 0.0f;
+        s_dir     = +1;
+        s_nextTick= now + 600; // initial pause
+    }
+
+    if (fullW <= barW){
+        // Fits: draw as-is
+        DrawAnsi(m_font, drawX, folderY, 0xFF5EA4FF, folder);
+    }else{
+        // Advance the marquee
+        const DWORD kStepMs     = 25;
+        const FLOAT kStepPx     = 2.0f;
+        const DWORD kInitPause  = 600;
+        const DWORD kEndPause   = 800;
+        const FLOAT maxScroll   = fullW - barW;
+
+        if (now >= s_nextTick){
+            s_px += (s_dir > 0 ? kStepPx : -kStepPx);
+            if (s_px <= 0.0f){ s_px = 0.0f; s_dir = +1; s_nextTick = now + kInitPause; }
+            else if (s_px >= maxScroll){ s_px = maxScroll; s_dir = -1; s_nextTick = now + kEndPause; }
+            else { s_nextTick = now + kStepMs; }
+        }
+
+        // Build visible slice starting at pixel offset s_px
+        FLOAT skipped=0.0f;
+        const char* start = SkipToPixelOffset(m_font, folder, s_px, skipped);
+
+        char vis[512]; vis[0]=0; int n=0;
+        WCHAR wtmp[512]; FLOAT tw=0, th=0;
+        const char* p = start;
+        while (*p && n < (int)sizeof(vis)-2){
+            vis[n++] = *p; vis[n] = 0;
+            MbToW(vis, wtmp, 512); m_font.GetTextExtent(wtmp, &tw, &th);
+            if (tw > barW){ vis[--n] = 0; break; }
+            ++p;
+        }
+
+        DrawAnsi(m_font, drawX, folderY, 0xFF5EA4FF, vis);
+    }
+}
 
     // filename (shown as-is; 42-char names fit due to width above)
     DrawAnsi(m_font, x + margin, fileY, 0xFF89D07E, file);
@@ -717,8 +794,8 @@ HRESULT FileBrowserApp::Render(){
     st.scrollBarW  = kScrollBarW;
     st.visibleRows = m_visible;
 
-    m_renderer.DrawPane(m_font, m_pd3dDevice, kListX_L,                     m_pane[0], m_active==0, st);
-    m_renderer.DrawPane(m_font, m_pd3dDevice, kListX_L + kListW + kPaneGap, m_pane[1], m_active==1, st);
+    m_renderer.DrawPane(m_font, m_pd3dDevice, kListX_L,                     m_pane[0], m_active==0, st, 0);
+	m_renderer.DrawPane(m_font, m_pd3dDevice, kListX_L + kListW + kPaneGap, m_pane[1], m_active==1, st, 1);
 
     // footer
     D3DVIEWPORT8 vp2; m_pd3dDevice->GetViewport(&vp2);
