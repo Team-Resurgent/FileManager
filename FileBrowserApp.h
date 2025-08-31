@@ -19,7 +19,17 @@
 // Forward the friend so AppActions can call our private helpers
 namespace AppActions { void Execute(Action, class FileBrowserApp&); }
 
+struct ProgState {
+    bool active;
+    ULONGLONG done;
+    ULONGLONG total;
+    char current[256];
+    DWORD lastPaintMs;
+    ProgState():active(false),done(0),total(0),lastPaintMs(0){ current[0]=0; }
+};
+
 class FileBrowserApp : public CXBApplication {
+	    ProgState m_prog;
 public:
 	// Allow the centralized action runner to call our private helpers/members
     friend void AppActions::Execute(Action, FileBrowserApp&);
@@ -36,6 +46,12 @@ public:
     static FLOAT kHdrX_L,  kHdrY,  kHdrW,  kHdrH;
     static FLOAT kGutterW, kPaddingX, kScrollBarW;
     static FLOAT kPaneGap;
+
+	// progress bar
+	void BeginProgress(ULONGLONG total, const char* firstLabel);
+    void UpdateProgress(ULONGLONG done, ULONGLONG total, const char* label);
+    void EndProgress();
+    void DrawProgressOverlay(); // call from Render()
 
 private:
     // ----- UI helpers -----
@@ -121,6 +137,7 @@ private:
 
 	// absorb pad helper
 	void AbsorbPadState(const XBGAMEPAD& pad);
+
 
 };
 

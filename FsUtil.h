@@ -16,6 +16,7 @@ struct Item {
     bool        isDir;
     ULONGLONG   size;
     bool        isUpEntry;
+	bool        marked;
 };
 
 // ----- Drive mapping / discovery -----
@@ -36,9 +37,7 @@ bool IsDriveRoot(const char* p);             // "E:\" -> true
 // ----- Simple file/dir ops -----
 bool DirExistsA(const char* path);
 bool EnsureDirA(const char* path);
-bool CopyFileSimpleA(const char* src, const char* dst);
 bool DeleteRecursiveA(const char* path);     // files and folders
-bool CopyRecursiveA(const char* srcPath, const char* dstDir);
 ULONGLONG DirSizeRecursiveA(const char* path);
 
 // ----- Misc -----
@@ -51,5 +50,20 @@ bool CanWriteHereA(const char* dir);         // quick writability probe
 // FATX-ish name rules
 bool IsBadFatxChar(char c);
 void SanitizeFatxNameInPlace(char* s);
+
+// --- progress callback (return false to cancel, true to continue) ---
+typedef bool (*CopyProgressFn)(ULONGLONG bytesDone,
+                               ULONGLONG bytesTotal,
+                               const char* currentPath,
+                               void* user);
+
+void SetCopyProgressCallback(CopyProgressFn fn, void* user);
+
+// Convenience wrappers
+bool CopyRecursiveWithProgressA(const char* srcPath, const char* dstDir,
+                                ULONGLONG totalBytes);
+// Xbe launching
+bool HasXbeExt(const char* name);
+bool LaunchXbeA(const char* pathOrDir);
 
 #endif // FSUTIL_H

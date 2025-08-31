@@ -1,6 +1,7 @@
 #include "FileBrowserApp.h"
 #include "AppActions.h"
 #include "GfxPrims.h"
+#include "FsUtil.h"
 #include <wchar.h>
 #include <stdarg.h>
 #include <algorithm>
@@ -16,6 +17,59 @@ namespace {
         WCHAR wbuf[512];
         MultiByteToWideChar(CP_ACP,0,text,-1,wbuf,512);
         font.DrawText(x,y,color,wbuf,0,0.0f);
+    }
+
+    // NEW: center a single-line ANSI string within [left, left+width]
+    inline void DrawAnsiCenteredX(CXBFont& font, FLOAT left, FLOAT width, FLOAT y, DWORD color, const char* text){
+        WCHAR wbuf[512];
+        MultiByteToWideChar(CP_ACP,0,text,-1,wbuf,512);
+        FLOAT tw=0, th=0; font.GetTextExtent(wbuf, &tw, &th);
+        const FLOAT x = Snap(left + (width - tw) * 0.5f);
+        font.DrawText(x, y, color, wbuf, 0, 0.0f);
+    }
+
+	// measure ANSI text
+	inline void MeasureTextWH(CXBFont& font, const char* s, FLOAT& outW, FLOAT& outH){
+		WCHAR wbuf[512];
+		MultiByteToWideChar(CP_ACP, 0, s ? s : "", -1, wbuf, 512);
+		font.GetTextExtent(wbuf, &outW, &outH);
+	}
+
+	// left-ellipsize: keep the tail, prefix "..."
+	inline void LeftEllipsizeToFit(CXBFont& font, const char* src, FLOAT maxW,
+								char* out, size_t cap){
+		if (!src) { out[0]=0; return; }
+		FLOAT w=0,h=0; MeasureTextWH(font, src, w, h);
+		if (w <= maxW){ _snprintf(out, (int)cap, "%s", src); out[cap-1]=0; return; }
+
+		const char* tail = src + strlen(src);
+		const char* p    = tail;
+		char buf[1024];  // temp
+		// grow suffix until it would overflow
+		for (;;){
+			if (p == src) break;
+			--p;
+			_snprintf(buf, sizeof(buf), "...%s", p);
+			MeasureTextWH(font, buf, w, h);
+			if (w > maxW){
+				++p; // step back one char, previous was the last that fit
+				break;
+			}
+		}
+		_snprintf(out, (int)cap, "...%s", p);
+		out[cap-1]=0;
+	}
+
+
+	
+	inline unsigned int BuildDriveMask(){
+        unsigned int mask = 0;
+        for (char d='A'; d<='Z'; ++d){
+            char root[4] = { d, ':', '\\', 0 };
+            DWORD attr = GetFileAttributesA(root);
+            if (attr != 0xFFFFFFFF) mask |= (1u << (d - 'A'));
+        }
+        return mask;
     }
 }
 
@@ -121,9 +175,36 @@ void FileBrowserApp::BuildContextMenu(){
     Pane& p   = m_pane[m_active];
     bool inDir  = (p.mode == 1);
     bool hasSel = !p.items.empty();
+    int  marked = 0; for (size_t i=0;i<p.items.size();++i) if (p.items[i].marked) ++marked;
 
     m_ctx.Clear();
-    if (inDir) AddMenuItem("Open",            ACT_OPEN,       hasSel);
+
+    // Decide whether to show "Open" or "Launch" (or nothing)
+    if (hasSel) {
+        const Item& cur = p.items[p.sel];
+
+        bool showPrimary = false;
+        const char* primaryLabel = "Open";
+
+        if (p.mode == 0) {
+            // Drive list: always allow Open (items are drives)
+            showPrimary = true;
+            primaryLabel = "Open";
+        } else if (!cur.isUpEntry) {
+            if (cur.isDir) {
+                showPrimary = true;
+                primaryLabel = "Open";
+            } else if (HasXbeExt(cur.name)) {
+                showPrimary = true;
+                primaryLabel = "Launch";
+            }
+        }
+
+        if (showPrimary)
+            AddMenuItem(primaryLabel, ACT_OPEN, true);
+    }
+
+    // The rest of your menu (unchanged)
     AddMenuItem("Copy",            ACT_COPY,       hasSel);
     AddMenuItem("Move",            ACT_MOVE,       hasSel);
     AddMenuItem("Delete",          ACT_DELETE,     hasSel);
@@ -132,7 +213,21 @@ void FileBrowserApp::BuildContextMenu(){
     AddMenuItem("Calculate size",  ACT_CALCSIZE,   hasSel);
     AddMenuItem("Go to root",      ACT_GOROOT,     inDir);
     AddMenuItem("Switch pane",     ACT_SWITCHMEDIA,true);
+
+    if (inDir) {
+        // count selectable (exclude "..")
+        int selectable = 0;
+        for (size_t i=0;i<p.items.size(); ++i) if (!p.items[i].isUpEntry) ++selectable;
+        if (selectable > 0) {
+            AddMenuItem("Mark all",     ACT_MARK_ALL,      true);
+            AddMenuItem("Invert marks", ACT_INVERT_MARKS,  true);
+        }
+    }
+
+    if (marked) AddMenuItem("Clear marks", ACT_CLEAR_MARKS, true);
 }
+
+
 void FileBrowserApp::OpenMenu(){
     BuildContextMenu();
 
@@ -287,15 +382,16 @@ void FileBrowserApp::OnPad_Browse(const XBGAMEPAD& pad){
     unsigned char a = pad.bAnalogButtons[XINPUT_GAMEPAD_A];
     unsigned char b = pad.bAnalogButtons[XINPUT_GAMEPAD_B];
     unsigned char x = pad.bAnalogButtons[XINPUT_GAMEPAD_X];
+	unsigned char y = pad.bAnalogButtons[XINPUT_GAMEPAD_Y];
     unsigned char w = pad.bAnalogButtons[XINPUT_GAMEPAD_WHITE]; // page down
     unsigned char k = pad.bAnalogButtons[XINPUT_GAMEPAD_BLACK]; // page up
 
     bool aTrig = (a > 30 && m_prevA <= 30);
     bool bTrig = (b > 30 && m_prevB <= 30);
     bool xTrig = (x > 30 && m_prevX <= 30);
+	bool yTrig = (y > 30 && m_prevY <= 30);
     bool wTrig = (w > 30 && m_prevWhite <= 30);
     bool kTrig = (k > 30 && m_prevBlack <= 30);
-    bool startTrig = ((btn & XINPUT_GAMEPAD_START) && !(m_prevButtons & XINPUT_GAMEPAD_START));
 
     if (xTrig) {
     OpenMenu();
@@ -318,15 +414,29 @@ void FileBrowserApp::OnPad_Browse(const XBGAMEPAD& pad){
         if (p.sel >= p.scroll + m_visible) p.scroll = p.sel - (m_visible - 1);
     }
 
-    if (startTrig){
-        MapStandardDrives_Io(); RescanDrives();
-        EnsureListing(m_pane[0]); EnsureListing(m_pane[1]);
+	if (yTrig) {
+    if (p.mode==1 && !p.items.empty()) {
+        Item& it = p.items[p.sel];
+        if (!it.isUpEntry) {
+            it.marked = !it.marked;
+            SetStatus(it.marked ? "Marked" : "Unmarked");
+
+            // (optional) auto-advance for quick marking
+            int maxSel = (int)p.items.size()-1;
+            if (p.sel < maxSel) {
+                ++p.sel;
+                if (p.sel >= p.scroll + m_visible) p.scroll = p.sel - (m_visible - 1);
+            }
+        }
     }
+}
 
     m_prevButtons = btn;
-    m_prevA = a; m_prevB = b; m_prevX = x;
+    m_prevA = a; m_prevB = b; m_prevX = x; m_prevY = y;
     m_prevWhite = w; m_prevBlack = k;
 }
+
+
 
 // ----- input router -----
 void FileBrowserApp::OnPad(const XBGAMEPAD& pad){
@@ -337,6 +447,32 @@ void FileBrowserApp::OnPad(const XBGAMEPAD& pad){
 
 HRESULT FileBrowserApp::FrameMove(){
     XBInput_GetInput();
+
+    // --- Auto Map+Rescan if drive set changes ---
+    {
+        static DWORD        s_nextPollMs = 0;
+        static unsigned int s_lastMask   = 0;
+
+        DWORD now = GetTickCount();
+        if (now >= s_nextPollMs) {
+            s_nextPollMs = now + 1200;              // poll ~1.2s we can weak this if needed.
+
+            MapStandardDrives_Io();                 // ensure standard links are present
+            unsigned int mask = BuildDriveMask();   // cheap presence mask A:..Z:
+
+            if (s_lastMask == 0) {
+				s_lastMask = mask;					// prime on first run to avoid immediate toast
+			} else if (mask != s_lastMask) {
+				s_lastMask = mask;
+                RescanDrives();                     // re-enumerate volumes
+                EnsureListing(m_pane[0]);           // refresh both panes
+                EnsureListing(m_pane[1]);
+                SetStatus("Drives refreshed");      // brief toast (optional)
+            }
+        }
+    }
+    // --------------------------------------------
+
     OnPad(g_Gamepads[0]);
     return S_OK;
 }
@@ -384,7 +520,24 @@ void FileBrowserApp::EnterSelection(Pane& p){
         strncpy(p.curPath,next,sizeof(p.curPath)-1); p.curPath[sizeof(p.curPath)-1]=0;
         p.sel=0; p.scroll=0; ListDirectory(p.curPath,p.items); return;
     }
-    // files: no-op
+
+
+   // files:
+	if (!it.isDir && !it.isUpEntry) {
+		if (HasXbeExt(it.name)) {
+			char full[512]; 
+			JoinPath(full, sizeof(full), p.curPath, it.name);
+
+			// Optional cosmetic flush so the screen updates before the jump
+			m_pd3dDevice->Present(NULL, NULL, NULL, NULL);
+			Sleep(10);
+
+			if (!LaunchXbeA(full)) {
+				SetStatusLastErr("Launch failed");
+			}
+		}
+		return;
+	}
 }
 
 void FileBrowserApp::UpOne(Pane& p){
@@ -426,6 +579,119 @@ HRESULT FileBrowserApp::Initialize(){
     return S_OK;
 }
 
+void FileBrowserApp::BeginProgress(ULONGLONG total, const char* firstLabel){
+    m_prog.active = true;
+    m_prog.done   = 0;
+    m_prog.total  = total;
+    _snprintf(m_prog.current, sizeof(m_prog.current), "%s", firstLabel ? firstLabel : "");
+    m_prog.current[sizeof(m_prog.current)-1] = 0;
+    m_prog.lastPaintMs = 0;
+}
+
+void FileBrowserApp::UpdateProgress(ULONGLONG done, ULONGLONG total, const char* label){
+    m_prog.done  = done;
+    m_prog.total = (total ? total : m_prog.total);
+    if (label){
+        _snprintf(m_prog.current, sizeof(m_prog.current), "%s", label);
+        m_prog.current[sizeof(m_prog.current)-1] = 0;
+    }
+
+    // Throttle paints to ~25fps so copying isn't slowed too much
+    DWORD now = GetTickCount();
+    if (now - m_prog.lastPaintMs >= 40){
+        m_prog.lastPaintMs = now;
+
+        // redraw one frame (keep your normal Render path)
+        Render();
+        // tiny yield
+        Sleep(0);
+    }
+}
+
+void FileBrowserApp::EndProgress(){
+    m_prog.active = false;
+}
+
+void FileBrowserApp::DrawProgressOverlay(){
+    if (!m_prog.active) return;
+
+    D3DVIEWPORT8 vp; m_pd3dDevice->GetViewport(&vp);
+
+    // ensure room for ~42 chars (worst-case with wide glyphs)
+    char fortyTwo[64]; for (int i=0;i<42;++i) fortyTwo[i]='W'; fortyTwo[42]=0;
+    FLOAT fileW=0, fileH=0; MeasureTextWH(m_font, fortyTwo, fileW, fileH);
+
+    const FLOAT margin = 18.0f;
+    FLOAT w = MaxF(MaxF(420.0f, vp.Width * 0.50f), fileW + margin*2.0f);
+    if (w > vp.Width - margin*2.0f) w = vp.Width - margin*2.0f;
+
+    const FLOAT h = 116.0f; // a bit taller so bar + % sit well below text
+    const FLOAT x = Snap((vp.Width  - w)*0.5f);
+    const FLOAT y = Snap((vp.Height - h)*0.5f);
+
+    DrawRect(x-6, y-6, w+12, h+12, 0xA0101010);
+    DrawRect(x,   y,   w,    h,    0xE0222222);
+
+    // lines layout
+    const FLOAT titleY  = y + 10.0f;
+    const FLOAT folderY = titleY + 24.0f;
+    const FLOAT fileY   = folderY + 22.0f;
+    const FLOAT barY    = fileY   + 26.0f;   // << moved down
+    const FLOAT barH    = 20.0f;
+    const FLOAT barX    = x + margin;
+    const FLOAT barW    = w - margin*2.0f;
+
+    // title
+    DrawAnsi(m_font, x + margin, titleY, 0xFFFFFFFF, "Copying...");
+
+    // split folder/file from current label
+    const char* label = m_prog.current;
+    const char* slash = label ? strrchr(label, '\\') : NULL;
+
+    char folder[512] = {0};
+    char file  [256] = {0};
+
+    if (slash){
+        size_t n = (size_t)(slash - label + 1); // include trailing '\'
+        if (n >= sizeof(folder)) n = sizeof(folder)-1;
+        memcpy(folder, label, n); folder[n] = 0;
+        _snprintf(file, sizeof(file), "%s", slash + 1); file[sizeof(file)-1]=0;
+    } else {
+        folder[0] = 0;
+        _snprintf(file, sizeof(file), "%s", label ? label : "");
+        file[sizeof(file)-1]=0;
+    }
+
+    // left-truncate folder if too long for the content width
+    char folderFit[512];
+    LeftEllipsizeToFit(m_font, folder, barW, folderFit, sizeof(folderFit));
+    DrawAnsi(m_font, x + margin, folderY, 0xFF5EA4FF, folderFit);
+
+    // filename (shown as-is; 42-char names fit due to width above)
+    DrawAnsi(m_font, x + margin, fileY, 0xFF89D07E, file);
+
+    // progress value
+    FLOAT pct = 0.0f;
+    if (m_prog.total > 0){
+        pct = (FLOAT)((double)m_prog.done / (double)m_prog.total);
+        if (pct < 0) pct = 0; if (pct > 1) pct = 1;
+    }
+
+    // bar
+    DrawRect(barX, barY, barW,       barH, 0xFF0E0E0E);
+    DrawRect(barX, barY, barW * pct, barH, 0x90FFFF00);
+
+    // % label aligned with the bar, right side and vertically centered to it
+    char t[32]; _snprintf(t, sizeof(t), "%u%%", (unsigned int)(pct*100.0f + 0.5f)); t[sizeof(t)-1]=0;
+    FLOAT tw=0, th=0; MeasureTextWH(m_font, t, tw, th);
+    const FLOAT tx = Snap(barX + barW - tw);
+    const FLOAT ty = Snap(barY + (barH - th) * 0.5f);
+    DrawAnsi(m_font, tx, ty, 0xFFEEEEEE, t);
+}
+
+
+
+
 HRESULT FileBrowserApp::Render(){
     m_pd3dDevice->Clear(0,NULL,D3DCLEAR_TARGET,0x20202020,1.0f,0);
     m_pd3dDevice->BeginScene();
@@ -451,21 +717,29 @@ HRESULT FileBrowserApp::Render(){
 
     // footer
     D3DVIEWPORT8 vp2; m_pd3dDevice->GetViewport(&vp2);
-    const FLOAT footerY = (FLOAT)vp2.Height - MaxF(48.0f, vp2.Height * 0.09f);
-    DrawRect(HdrX(kListX_L), footerY, kHdrW*2 + kPaneGap + 30.0f, 28.0f, 0x802A2A2A);
-    if (m_pane[m_active].mode==0){
-        DrawAnsi(m_font, HdrX(kListX_L)+5.0f, footerY+4.0f, 0xFFCCCCCC,
-                 "D-Pad: Move  |  Left/Right: Switch pane  |  A: Enter  |  X: Menu  |  Start: Map+Rescan  |  Black/White: Page");
-    } else {
-        ULONGLONG fb=0, tb=0; GetDriveFreeTotal(m_pane[m_active].curPath, fb, tb);
-        char fstr[64], tstr[64], bar[420];
-        FormatSize(fb, fstr, sizeof(fstr)); FormatSize(tb, tstr, sizeof(tstr));
-        _snprintf(bar,sizeof(bar),
-                  "Active: %s   |   B: Up   |   Free: %s / Total: %s   |   Left/Right: Switch pane   |   X: Menu   |   Black/White: Page",
-                  m_active==0?"Left":"Right", fstr, tstr);
-        bar[sizeof(bar)-1]=0;
-        DrawAnsi(m_font, HdrX(kListX_L)+5.0f, footerY+4.0f, 0xFFCCCCCC, bar);
-    }
+	const FLOAT footerY = (FLOAT)vp2.Height - MaxF(48.0f, vp2.Height * 0.09f);
+	const FLOAT footerX = HdrX(kListX_L);
+	const FLOAT footerW = kHdrW*2 + kPaneGap + 30.0f;
+
+	const Pane& ap = m_pane[m_active];
+	const Item* cur = (ap.items.empty()? NULL : &ap.items[ap.sel]);
+	const char* yLabel = (cur && !cur->isUpEntry && cur->marked) ? "Unmark" : "Mark";
+
+	DrawRect(footerX, footerY, footerW, 28.0f, 0x802A2A2A);
+
+	if (m_pane[m_active].mode==0){
+		const char* hints = "D-Pad: Move  |  Left/Right: Switch pane  |  A: Enter  |  X: Menu  |  Black/White: Page";
+		DrawAnsiCenteredX(m_font, footerX, footerW, footerY+4.0f, 0xFFCCCCCC, hints);
+	} else {
+		ULONGLONG fb=0, tb=0; GetDriveFreeTotal(m_pane[m_active].curPath, fb, tb);
+		char fstr[64], tstr[64], bar[420];
+		FormatSize(fb, fstr, sizeof(fstr)); FormatSize(tb, tstr, sizeof(tstr));
+		_snprintf(bar,sizeof(bar),
+				"Active: %s   |   B: Up   |   Free: %s / Total: %s   |   X: Menu   |   Y: %s   |   Black/White: Page",
+    (			m_active==0?"Left":"Right"), fstr, tstr, yLabel);
+		bar[sizeof(bar)-1]=0;
+		DrawAnsiCenteredX(m_font, footerX, footerW, footerY+4.0f, 0xFFCCCCCC, bar);
+	}
 
     // transient status
     DWORD now = GetTickCount();
@@ -475,6 +749,7 @@ HRESULT FileBrowserApp::Render(){
 
     DrawMenu();
     DrawRename();
+    DrawProgressOverlay();
 
     m_pd3dDevice->EndScene(); m_pd3dDevice->Present(NULL,NULL,NULL,NULL);
     return S_OK;

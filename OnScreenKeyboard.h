@@ -60,7 +60,7 @@ private:
     bool  m_shiftOnce;   // one-shot shift (case flips for next char)
 
     // input edge detection (internal; independent of FileBrowserApp)
-    unsigned char m_prevA, m_prevB, m_prevY, m_prevLT, m_prevRT;
+    unsigned char m_prevA, m_prevB, m_prevY, m_prevX, m_prevLT, m_prevRT;
     DWORD         m_prevButtons;
 
     const char* RowChars(int row) const;

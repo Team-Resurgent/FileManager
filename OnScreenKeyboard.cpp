@@ -126,7 +126,7 @@ OnScreenKeyboard::OnScreenKeyboard(){
     m_parent[0] = m_old[0] = m_buf[0] = 0;
     m_cursor = 0; m_row = 0; m_col = 0;
 
-    m_prevA = m_prevB = m_prevY = m_prevLT = m_prevRT = 0;
+    m_prevA = m_prevB = m_prevY = m_prevLT = m_prevRT = m_prevX = 0;
     m_prevButtons = 0;
 
     // side-column UI
@@ -234,7 +234,7 @@ void OnScreenKeyboard::Draw(CXBFont& font, LPDIRECT3DDEVICE8 dev, FLOAT lineH){
 
     const FLOAT panelW = MaxF(520.0f, vp.Width * 0.55f);
     const FLOAT panelH = MaxF(320.0f, vp.Height*0.52f); // a bit taller to fit 5 rows
-    const FLOAT x = Snap((vp.Width  - panelW)*0.5f);
+    const FLOAT x = Snap((vp.Width  - panelW)*0.55f);
     const FLOAT y = Snap((vp.Height - panelH)*0.5f);
 
     // frame
@@ -300,28 +300,34 @@ void OnScreenKeyboard::Draw(CXBFont& font, LPDIRECT3DDEVICE8 dev, FLOAT lineH){
 
     // Split content into side column + character grid
     const FLOAT colW12_full = contentW / 12.0f;
-    const FLOAT sideW = MaxF(110.0f, colW12_full * 1.8f);
+    const FLOAT sideW = MaxF(130.0f, colW12_full * 2.2f);
     const FLOAT keysW = contentW - sideW - gapX;
 
     // ---- side column (4 buttons stacked) ----
     const char* sideLbl[4] = {
         "Done",
         m_shiftOnce ? "Shift*" : "Shift",
-        m_lower ? "Caps" : "Caps*",
-        m_symbols ? "ABC" : "Symbols"
+		m_lower ? "Caps (L3)" : "Caps (L3)*",
+        m_symbols ? "ABC (R3)" : "Symbols (R3)"
     };
     for (int r=0;r<4;++r){
-        const FLOAT sx = x + padX;
-        const FLOAT sw = sideW;
-        const FLOAT sy = Snap(gridTop + r*(cellH + gapY));
-        const bool  sel = (m_sideFocus && m_sideRow==r);
-        DrawRect(dev, sx, sy, sw, cellH, sel ? 0x60FFFF00 : 0x30202020);
+		const FLOAT sx = x + padX;
+		const FLOAT sw = sideW;
+		const FLOAT sy = Snap(gridTop + r*(cellH + gapY));
 
-        FLOAT tw, th; MeasureTextWH(font, sideLbl[r], tw, th);
-        const FLOAT tx = Snap(sx + (sw - tw) * 0.5f);
-        const FLOAT ty = Snap(sy + (cellH - th) * 0.5f);
-        DrawAnsi(font, tx, ty, 0xFFE0E0E0, sideLbl[r]);
-    }
+		const bool disabled = (m_symbols && (r == 1 || r == 2)); // Shift/Caps disabled in Symbols
+		const bool sel      = (!disabled && m_sideFocus && m_sideRow == r);
+
+		D3DCOLOR bg = sel ? 0x60FFFF00 : 0x30202020;
+		DrawRect(dev, sx, sy, sw, cellH, bg);
+
+		FLOAT tw, th; MeasureTextWH(font, sideLbl[r], tw, th);
+		const FLOAT tx = Snap(sx + (sw - tw) * 0.5f);
+		const FLOAT ty = Snap(sy + (cellH - th) * 0.5f);
+
+		DWORD textCol = disabled ? 0xFF7A7A7A : 0xFFE0E0E0;
+		DrawAnsi(font, tx, ty, textCol, sideLbl[r]);
+	}
 
     // ---- character rows ----
     const FLOAT keysX = x + padX + sideW + gapX;
@@ -365,12 +371,12 @@ void OnScreenKeyboard::Draw(CXBFont& font, LPDIRECT3DDEVICE8 dev, FLOAT lineH){
 
             DrawRect(dev, drawX, rowY, drawW, cellH, sel ? 0x60FFFF00 : 0x30202020);
 
-            char c = visChars[col];
-            if (!m_symbols) {
-                if (m_lower && c >= 'A' && c <= 'Z') c = (char)(c + ('a' - 'A'));
-                if (!m_symbols && m_shiftOnce && c >= 'A' && c <= 'Z')
-                    c = (char)(c + ('a' - 'A'));
-            }
+			char c = visChars[col];
+			if (!m_symbols && c >= 'A' && c <= 'Z') {
+				bool lowerEff = m_lower;
+				if (m_shiftOnce) lowerEff = !lowerEff; // one-shot inverts caps
+				if (lowerEff) c = (char)(c + ('a' - 'A')); // show lowercase
+			}
 
             char s[2] = { c, 0 };
             FLOAT tw, th; MeasureTextWH(font, s, tw, th);
@@ -388,7 +394,7 @@ void OnScreenKeyboard::Draw(CXBFont& font, LPDIRECT3DDEVICE8 dev, FLOAT lineH){
         DrawRect(dev, bx, bottomY, bw, cellH, sel ? 0x60FFFF00 : 0x30202020);
 
         FLOAT tw, th; MeasureTextWH(font, "Backspace", tw, th);
-        DrawAnsi(font, Snap(bx + (bw - tw) * 0.5f), Snap(bottomY + (cellH - th) * 0.5f), 0xFFE0E0E0, "Backspace");
+        DrawAnsi(font, Snap(bx + (bw - tw) * 0.5f), Snap(bottomY + (cellH - th) * 0.5f), 0xFFE0E0E0, "Backspace (X)");
     }
     {
         const FLOAT sw = keysW * 0.64f;
@@ -397,13 +403,15 @@ void OnScreenKeyboard::Draw(CXBFont& font, LPDIRECT3DDEVICE8 dev, FLOAT lineH){
         DrawRect(dev, sx2, bottomY, sw, cellH, sel ? 0x60FFFF00 : 0x30202020);
 
         FLOAT tw, th; MeasureTextWH(font, "Space", tw, th);
-        DrawAnsi(font, Snap(sx2 + (sw - tw) * 0.5f), Snap(bottomY + (cellH - th) * 0.5f), 0xFFE0E0E0, "Space");
+        DrawAnsi(font, Snap(sx2 + (sw - tw) * 0.5f), Snap(bottomY + (cellH - th) * 0.5f), 0xFFE0E0E0, "Space (Y)");
     }
 
-    // hints
-    DrawAnsi(font, x+12, y+panelH-20, 0xFFBBBBBB,
-             "A: Select   B: Cancel   Start: Done   Y: Caps   LT/RT Move Cursor");
-}
+    // centered footer hints
+    const char* hints = "A: Select   B: Cancel   Start: Done   LT/RT Move Cursor";
+	FLOAT hintsW = MeasureTextW(font, hints);
+	FLOAT hintsX = Snap(x + (panelW - hintsW) * 0.5f);
+	DrawAnsi(font, hintsX, y + panelH - 25, 0xFFBBBBBB, hints);
+	}
 
 
 // ------------------ input ------------------
@@ -415,20 +423,23 @@ OnScreenKeyboard::Result OnScreenKeyboard::OnPad(const XBGAMEPAD& pad){
     unsigned char a  = pad.bAnalogButtons[XINPUT_GAMEPAD_A];
     unsigned char b  = pad.bAnalogButtons[XINPUT_GAMEPAD_B];
     unsigned char y  = pad.bAnalogButtons[XINPUT_GAMEPAD_Y];
+	unsigned char x  = pad.bAnalogButtons[XINPUT_GAMEPAD_X];
     unsigned char lt = pad.bAnalogButtons[XINPUT_GAMEPAD_LEFT_TRIGGER];
     unsigned char rt = pad.bAnalogButtons[XINPUT_GAMEPAD_RIGHT_TRIGGER];
 
     // Debounce after opening
-    if (m_waitRelease) {
-        bool anyHeld = (a > 30) || (b > 30) || (y > 30) ||
-                       (lt > 30) || (rt > 30) ||
-                       (btn & XINPUT_GAMEPAD_START);
-        m_prevA = a; m_prevB = b; m_prevY = y;
-        m_prevLT = lt; m_prevRT = rt; m_prevButtons = btn;
+	if (m_waitRelease) {
+		bool anyHeld = (a > 30) || (b > 30) || (y > 30) || (x > 30) ||
+					(lt > 30) || (rt > 30) ||
+					(btn & XINPUT_GAMEPAD_START) ||
+					(btn & XINPUT_GAMEPAD_LEFT_THUMB) ||
+					(btn & XINPUT_GAMEPAD_RIGHT_THUMB);
+		m_prevA = a; m_prevB = b; m_prevY = y; m_prevX = x; 
+		m_prevLT = lt; m_prevRT = rt; m_prevButtons = btn;
 
-        if (!anyHeld) m_waitRelease = false;
-        return NONE;
-    }
+		if (!anyHeld) m_waitRelease = false;
+		return NONE;
+	}
 
     // how many character rows are visible?
     const int charRows = m_symbols ? 5 : 4;
@@ -441,8 +452,18 @@ OnScreenKeyboard::Result OnScreenKeyboard::OnPad(const XBGAMEPAD& pad){
     bool right = ((btn & XINPUT_GAMEPAD_DPAD_RIGHT) && !(m_prevButtons & XINPUT_GAMEPAD_DPAD_RIGHT)) || (pad.sThumbLX >  16000);
 
     if (m_sideFocus){
-        if (up)   { if (m_sideRow > 0) m_sideRow--; Sleep(120); }
-        if (down) { if (m_sideRow < 3) m_sideRow++; Sleep(120); }
+        if (up) {
+            if (m_sideRow > 0) m_sideRow--;
+            // Skip disabled rows (1=Shift, 2=Caps) when in Symbols
+            if (m_symbols && (m_sideRow == 1 || m_sideRow == 2)) m_sideRow = 0;
+            Sleep(120);
+        }
+        if (down) {
+            if (m_sideRow < 3) m_sideRow++;
+            // Skip disabled rows (1=Shift, 2=Caps) when in Symbols
+            if (m_symbols && (m_sideRow == 1 || m_sideRow == 2)) m_sideRow = 3;
+            Sleep(120);
+        }
         if (right){ m_sideFocus = false; Sleep(120); }
     } else {
         if (up)   { if (m_row > 0) m_row--; Sleep(120); }
@@ -453,7 +474,13 @@ OnScreenKeyboard::Result OnScreenKeyboard::OnPad(const XBGAMEPAD& pad){
 
         if (left)  {
             if (m_col > 0) { m_col--; Sleep(120); }
-            else { m_sideFocus = true; Sleep(120); }
+            else {
+                m_sideFocus = true;
+                // Entering side column while in Symbols lands on an enabled item
+                if (m_symbols && (m_sideRow == 1 || m_sideRow == 2))
+                    m_sideRow = 0; // choose "Done"
+                Sleep(120);
+            }
         }
         if (right) {
             if (m_col < colsNow - 1) { m_col++; Sleep(120); }
@@ -463,28 +490,50 @@ OnScreenKeyboard::Result OnScreenKeyboard::OnPad(const XBGAMEPAD& pad){
     // edges
     bool aTrig     = (a > 30 && m_prevA <= 30);
     bool bTrig     = (b > 30 && m_prevB <= 30);
+	bool xTrig     = (x > 30 && m_prevX <= 30);
     bool yTrig     = (y > 30 && m_prevY <= 30);
     bool startTrig = ((btn & XINPUT_GAMEPAD_START) && !(m_prevButtons & XINPUT_GAMEPAD_START));
+	bool l3Trig    = ((btn & XINPUT_GAMEPAD_LEFT_THUMB) && !(m_prevButtons & XINPUT_GAMEPAD_LEFT_THUMB)); // L3 toggle symbols
+	bool r3Trig    = ((btn & XINPUT_GAMEPAD_RIGHT_THUMB) && !(m_prevButtons & XINPUT_GAMEPAD_RIGHT_THUMB)); // R3 = Symbols
 
-    if (yTrig){ m_lower = !m_lower; Sleep(120); }
+
+	// --- Y inserts Space ---
+	if (yTrig) {
+		int len = (int)strlen(m_buf);
+		const int cap = (int)sizeof(m_buf) - 1;
+		if (len < cap && len < kFatxMaxName) {
+			for (int i = len; i >= m_cursor; --i) m_buf[i+1] = m_buf[i];
+			m_buf[m_cursor++] = ' ';
+		}
+		Sleep(120);
+	}
 
     if (aTrig){
         if (m_sideFocus){
-            // side column actions: 0 Done, 1 Shift (one-shot), 2 Caps toggle, 3 Symbols toggle
-            if (m_sideRow == 0){
+            // Make disabled rows inert in Symbols
+            if ((m_sideRow == 1 || m_sideRow == 2) && m_symbols) {
+                Sleep(120);
+            } else if (m_sideRow == 0){
                 m_prevA=a; m_prevB=b; m_prevY=y; m_prevButtons=btn; m_prevLT=lt; m_prevRT=rt;
                 return ACCEPTED;
             } else if (m_sideRow == 1){
-                m_shiftOnce = !m_shiftOnce; // consume after next char insert
+                // Shift (one-shot) — alpha only
+                if (!m_symbols) m_shiftOnce = !m_shiftOnce;
+                Sleep(140);
             } else if (m_sideRow == 2){
-                m_lower = !m_lower;
+                // Caps — alpha only
+                if (!m_symbols) m_lower = !m_lower;
+                Sleep(140);
             } else if (m_sideRow == 3){
+                // ABC/Symbols toggle
                 m_symbols = !m_symbols;
-                // clamp selection if the current row count changed
+                // If we just turned Symbols on while focused on a disabled row, jump to an enabled one
+                if (m_symbols && (m_sideRow == 1 || m_sideRow == 2)) m_sideRow = 3;
+                // Re-clamp grid selection columns
                 int newCols = VisibleColsForRowHelper(m_symbols, m_row);
                 if (m_col >= newCols) m_col = newCols - 1;
+                Sleep(140);
             }
-            Sleep(140);
         } else {
             if (m_row <= (charRows-1)){ // character rows
                 int len = (int)strlen(m_buf);
@@ -523,13 +572,44 @@ OnScreenKeyboard::Result OnScreenKeyboard::OnPad(const XBGAMEPAD& pad){
     }
 
     if (startTrig){
-        m_prevA=a; m_prevB=b; m_prevY=y; m_prevButtons=btn; m_prevLT=lt; m_prevRT=rt;
+        m_prevA=a; m_prevB=b; m_prevY=y; m_prevX=x; m_prevButtons=btn; m_prevLT=lt; m_prevRT=rt;
         return ACCEPTED;
     }
     if (bTrig){
-        m_prevA=a; m_prevB=b; m_prevY=y; m_prevButtons=btn; m_prevLT=lt; m_prevRT=rt;
+        m_prevA=a; m_prevB=b; m_prevY=y; m_prevX=x; m_prevButtons=btn; m_prevLT=lt; m_prevRT=rt;
         return CANCELED;
     }
+
+	// --- L3 toggles Caps (alpha only) ---
+	if (l3Trig) {
+		if (!m_symbols) m_lower = !m_lower;
+		Sleep(140);
+	}
+
+	if (r3Trig) {
+		m_symbols = !m_symbols;
+
+		// If entering Symbols while focused on a disabled side item, bump to enabled
+		if (m_sideFocus && m_symbols && (m_sideRow == 1 || m_sideRow == 2))
+			m_sideRow = 3;
+
+		// Re-clamp grid selection columns for the current row count
+		int newCols = VisibleColsForRowHelper(m_symbols, m_row);
+		if (m_col >= newCols) m_col = (newCols > 0) ? (newCols - 1) : 0;
+
+		Sleep(140);
+	}
+
+	// X performs Backspace (anywhere)
+	if (xTrig) {
+		if (m_cursor > 0) {
+			int len = (int)strlen(m_buf);
+			for (int i = m_cursor - 1; i <= len; ++i)
+				m_buf[i] = m_buf[i + 1];
+			m_cursor--;
+		}
+		Sleep(120);
+	}
 
     bool ltTrig = (lt > 30 && m_prevLT <= 30);
     bool rtTrig = (rt > 30 && m_prevRT <= 30);
@@ -544,7 +624,7 @@ OnScreenKeyboard::Result OnScreenKeyboard::OnPad(const XBGAMEPAD& pad){
     }
 
     // save prev
-    m_prevA = a; m_prevB = b; m_prevY = y;
+    m_prevA = a; m_prevB = b; m_prevY = y; m_prevX = x;
     m_prevButtons = btn; m_prevLT = lt; m_prevRT = rt;
 
     return NONE;

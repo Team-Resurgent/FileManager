@@ -112,8 +112,12 @@ void PaneRenderer::DrawPane(
         const Item& it = p.items[i];
         DWORD nameCol = (i==p.sel)?0xFFFFFF00:0xFFE0E0E0;
         DWORD sizeCol = (i==p.sel)?0xFFFFFF00:0xFFB0B0B0;
-        D3DCOLOR ico  = it.isUpEntry ? 0xFFAAAAAA : ( it.isDir ? 0xFF5EA4FF : 0xFF89D07E );
+        D3DCOLOR ico = it.isUpEntry ? 0xFFAAAAAA
+                            : (it.marked ? 0xFFFF4040               // RED when marked
+                                         : (it.isDir ? 0xFF5EA4FF   // folder blue
+                                                     : 0xFF89D07E));// file green
         DrawRect(dev, baseX+2.0f, y+6.0f, st.gutterW-8.0f, st.lineH-12.0f, ico);
+
         const char* glyph = it.isUpEntry ? ".." : (it.isDir?"+":"-");
         DrawAnsi(font, baseX+4.0f, y+4.0f, 0xFFFFFFFF, glyph);
 
