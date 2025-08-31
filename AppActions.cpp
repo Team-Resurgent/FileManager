@@ -24,6 +24,30 @@ static bool CopyProgThunk(ULONGLONG done, ULONGLONG total, const char* label, vo
     return true; // (add cancel logic later if desired)
 }
 
+static int SameDriveLetter(const char* a, const char* b){
+    if (!a || !b || !a[0] || !b[0]) return 0;
+    return toupper((unsigned char)a[0]) == toupper((unsigned char)b[0]);
+}
+
+static void NormalizeSlashEndLocal(char* s, size_t cap){
+    size_t n = s ? strlen(s) : 0;
+    if (n && s[n-1] != '\\' && n+1 < cap){ s[n] = '\\'; s[n+1] = 0; }
+}
+
+static int IsSubPathCaseI(const char* parent, const char* child){
+    char p[512], c[512];
+    _snprintf(p, sizeof(p), "%s", parent ? parent : ""); p[sizeof(p)-1] = 0;
+    _snprintf(c, sizeof(c), "%s", child  ? child  : ""); c[sizeof(c)-1] = 0;
+    NormalizeSlashEndLocal(p, sizeof(p));
+    NormalizeSlashEndLocal(c, sizeof(c));
+    return _strnicmp(p, c, (int)strlen(p)) == 0; // child starts with parent?
+}
+
+static const char* BaseNameOf(const char* path){
+    const char* s = path ? strrchr(path, '\\') : 0;
+    return s ? (s+1) : path;
+}
+
 namespace AppActions {
 
 static void GatherMarkedOrSelectedFullPaths(const Pane& src, std::vector<std::string>& out) {
@@ -96,7 +120,7 @@ void Execute(Action act, FileBrowserApp& app)
 		ULONGLONG total=0;
 		for (size_t i=0;i<srcs.size();++i) total += DirSizeRecursiveA(srcs[i].c_str());
 
-		app.BeginProgress(total, srcs[0].c_str());
+		app.BeginProgress(total, srcs[0].c_str(), "Copying...");
 		CopyProgCtx ctx = { &app, 0 };
 		SetCopyProgressCallback(CopyProgThunk, &ctx);
 
@@ -123,7 +147,7 @@ void Execute(Action act, FileBrowserApp& app)
 	}
 
 
-    case ACT_MOVE:
+	case ACT_MOVE:
 	{
 		if (src.mode != 1) { app.SetStatus("Open a folder"); break; }
 
@@ -137,37 +161,68 @@ void Execute(Action act, FileBrowserApp& app)
 		GatherMarkedOrSelectedFullPaths(src, srcs);
 		if (srcs.empty()) { app.SetStatus("Nothing to move"); break; }
 
+		// total for progress
 		ULONGLONG total=0;
 		for (size_t i=0;i<srcs.size();++i) total += DirSizeRecursiveA(srcs[i].c_str());
 
-		app.BeginProgress(total, srcs[0].c_str());
+		app.BeginProgress(total, srcs[0].c_str(), "Moving...");
 		CopyProgCtx ctx = { &app, 0 };
 		SetCopyProgressCallback(CopyProgThunk, &ctx);
 
+		size_t movedOk = 0, failed = 0;
 		ULONGLONG base = 0;
+
 		for (size_t i=0;i<srcs.size();++i){
 			const char* sp = srcs[i].c_str();
 			ULONGLONG thisSize = DirSizeRecursiveA(sp);
 			ctx.base = base;
-			if (!CopyRecursiveWithProgressA(sp, dstDir, total)) { /* optional: status */ }
+
+			// build destination top (dstDir + basename(sp))
+			const char* baseName = BaseNameOf(sp);
+			char dstTop[512]; JoinPath(dstTop, sizeof(dstTop), dstDir, baseName);
+
+			BOOL doneThis = FALSE;
+
+			// Fast path: same drive + not moving into own subfolder
+			if (SameDriveLetter(sp, dstDir) && !IsSubPathCaseI(sp, dstTop)) {
+				if (MoveFileA(sp, dstTop)) {
+					doneThis = TRUE;  // instant
+				}
+				// if rename fails (exists, etc), we fall back to copy+delete below
+			}
+
+			// Fallback: copy -> delete original (delete only if copy succeeded)
+			if (!doneThis) {
+				if (CopyRecursiveWithProgressA(sp, dstDir, total)) {
+					if (DeleteRecursiveA(sp)) {
+						doneThis = TRUE;
+					} else {
+						// optional: consider removing the just-copied dstTop on failure to delete original
+					}
+				}
+			}
+
+			if (doneThis) ++movedOk; else ++failed;
 			base += thisSize;
 		}
 
 		SetCopyProgressCallback(NULL, NULL);
 		app.EndProgress();
 
-		// delete originals
-		for (size_t i=0;i<srcs.size();++i) DeleteRecursiveA(srcs[i].c_str());
-
 		// refresh panes & clear marks
 		for (size_t i=0;i<src.items.size();++i) src.items[i].marked=false;
 		if (src.mode==1) ListDirectory(src.curPath, src.items);
-		Pane& dstp = app.m_pane[1 - app.m_active];
-		if (dstp.mode==1 && _stricmp(dstp.curPath, dstDir)==0) ListDirectory(dstp.curPath, dstp.items);
+		{
+			Pane& dstp = app.m_pane[1 - app.m_active];
+			if (dstp.mode==1 && _stricmp(dstp.curPath, dstDir)==0) ListDirectory(dstp.curPath, dstp.items);
+		}
 		app.RefreshPane(app.m_pane[0]); app.RefreshPane(app.m_pane[1]);
-		app.SetStatus("Moved %d item(s)", (int)srcs.size());
+
+		if (failed == 0) app.SetStatus("Moved %u item(s)", (unsigned)movedOk);
+		else             app.SetStatus("Moved %u, %u failed", (unsigned)movedOk, (unsigned)failed);
 		break;
 	}
+
 
 
 

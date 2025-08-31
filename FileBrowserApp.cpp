@@ -579,12 +579,17 @@ HRESULT FileBrowserApp::Initialize(){
     return S_OK;
 }
 
-void FileBrowserApp::BeginProgress(ULONGLONG total, const char* firstLabel){
+void FileBrowserApp::BeginProgress(ULONGLONG total, const char* firstLabel, const char* title) {
     m_prog.active = true;
     m_prog.done   = 0;
     m_prog.total  = total;
+
     _snprintf(m_prog.current, sizeof(m_prog.current), "%s", firstLabel ? firstLabel : "");
     m_prog.current[sizeof(m_prog.current)-1] = 0;
+
+    _snprintf(m_prog.title, sizeof(m_prog.title), "%s", title ? title : "Working...");
+    m_prog.title[sizeof(m_prog.title)-1] = 0;
+
     m_prog.lastPaintMs = 0;
 }
 
@@ -642,7 +647,7 @@ void FileBrowserApp::DrawProgressOverlay(){
     const FLOAT barW    = w - margin*2.0f;
 
     // title
-    DrawAnsi(m_font, x + margin, titleY, 0xFFFFFFFF, "Copying...");
+    DrawAnsi(m_font, x + margin, titleY, 0xFFFFFFFF, m_prog.title[0] ? m_prog.title : "Working...");
 
     // split folder/file from current label
     const char* label = m_prog.current;
