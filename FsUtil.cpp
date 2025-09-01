@@ -253,10 +253,25 @@ bool HasXbeExt(const char* name){
 static bool CopyFileChunkedA(const char* s, const char* d,
                              ULONGLONG& inoutBytesDone, ULONGLONG totalBytes)
 {
+    // open source
     HANDLE hs = CreateFileA(s, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING,
                             FILE_ATTRIBUTE_NORMAL, NULL);
     if (hs == INVALID_HANDLE_VALUE) return false;
 
+    // ---- preflight destination: allow overwrite even if dest is read-only/hidden/system
+    DWORD da = GetFileAttributesA(d);
+    if (da != INVALID_FILE_ATTRIBUTES) {
+        if (da & FILE_ATTRIBUTE_DIRECTORY) {
+            // name collision with a directory
+            CloseHandle(hs);
+            SetLastError(ERROR_ALREADY_EXISTS);
+            return false;
+        }
+        DWORD na = da & ~(FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_SYSTEM | FILE_ATTRIBUTE_HIDDEN);
+        if (na != da) SetFileAttributesA(d, na);
+    }
+
+    // open/create dest
     HANDLE hd = CreateFileA(d, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
                             FILE_ATTRIBUTE_NORMAL, NULL);
     if (hd == INVALID_HANDLE_VALUE){ CloseHandle(hs); return false; }
@@ -276,10 +291,10 @@ static bool CopyFileChunkedA(const char* s, const char* d,
 
         inoutBytesDone += wr;
 
-        // tell UI (and give it a chance to cancel)
+        // progress/cancel callback
         if (g_copyProgFn){
             if (!g_copyProgFn(inoutBytesDone, totalBytes, s, g_copyProgUser)){
-                ok = false; break;
+                ok = false; break; // canceled
             }
         }
     }
@@ -288,11 +303,35 @@ static bool CopyFileChunkedA(const char* s, const char* d,
     CloseHandle(hs);
     CloseHandle(hd);
 
+	// File Attributes preserve some
+    //if (!ok) {
+    //    // best-effort cleanup of partial file (clear attrs in case they flipped)
+    //    StripROSysHiddenA(d);
+    //    DeleteFileA(d);
+    //    return false;
+    //}
+
+    //// ---- optional: normalize/preserve some source attributes on the copy
+    //// (keeps HIDDEN/ARCHIVE; never sets READONLY/SYSTEM on the dest)
+    //DWORD sa = GetFileAttributesA(s);
+    //if (sa != INVALID_FILE_ATTRIBUTES) {
+    //    DWORD keep = sa & (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_ARCHIVE);
+    //    SetFileAttributesA(d, FILE_ATTRIBUTE_NORMAL | keep);
+    //}
+
+    //return true;
+
+
+	//Remove All File Attributes when copying files to destination.
+
 	if (!ok) {
-    // Best-effort: remove partial file when canceled or on error
+    // Best-effort: remove partial when canceled/error
     DeleteFileA(d);
+	} else {
+		// Do NOT preserve any attributes from source
+		SetFileAttributesA(d, FILE_ATTRIBUTE_NORMAL);
 	}
-    return ok;
+return ok;
 }
 
 static bool CopyRecursiveCoreA(const char* srcPath, const char* dstDir,
@@ -306,6 +345,9 @@ static bool CopyRecursiveCoreA(const char* srcPath, const char* dstDir,
 
     if (a & FILE_ATTRIBUTE_DIRECTORY){
         if (!EnsureDirA(dstPath)) return false;
+		    
+		// Do NOT preserve any attributes from source folder comment line to preserve
+		SetFileAttributesA(dstPath, FILE_ATTRIBUTE_NORMAL);
 
         char mask[512]; JoinPath(mask, sizeof(mask), srcPath, "*");
         WIN32_FIND_DATAA fd; HANDLE h = FindFirstFileA(mask, &fd);
