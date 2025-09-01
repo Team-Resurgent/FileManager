@@ -287,6 +287,11 @@ static bool CopyFileChunkedA(const char* s, const char* d,
     LocalFree(buf);
     CloseHandle(hs);
     CloseHandle(hd);
+
+	if (!ok) {
+    // Best-effort: remove partial file when canceled or on error
+    DeleteFileA(d);
+	}
     return ok;
 }
 

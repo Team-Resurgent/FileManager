@@ -1,29 +1,66 @@
 #include "AppActions.h"
 #include "FileBrowserApp.h"
 #include "FsUtil.h"
+#include "XBInput.h"   // <- for XBInput_GetInput, g_Gamepads
 
 #include <stdio.h>
 #include <string.h>
+#include <ctype.h>   // toupper
 
-static bool CopyProgressThunk(ULONGLONG done, ULONGLONG total,
-                              const char* current, void* user)
-{
-    FileBrowserApp* app = (FileBrowserApp*)user;
-    if (app) app->UpdateProgress(done, total, current);
-    return true; // return false to support cancel later
-}
 
+// ---- Cancel-aware progress context + thunk (with “toast window” confirmation) ----
 struct CopyProgCtx {
     FileBrowserApp* app;
-    ULONGLONG base;     // bytes already completed from previous items
+    ULONGLONG base;        // bytes completed from previous items
+    bool      canceled;    // set when user confirms cancel
+
+    // confirmation state
+    bool      confirmArmed;   // we’ve shown the prompt; waiting for 2nd B
+    DWORD     confirmUntil;   // (informational) snapshot of status expiry
+    bool      prevB;          // rising-edge detection
 };
 
 static bool CopyProgThunk(ULONGLONG done, ULONGLONG total, const char* label, void* user){
     CopyProgCtx* c = (CopyProgCtx*)user;
+
+    // Pump input to read 'B'
+    XBInput_GetInput();
+    const XBGAMEPAD& pad = g_Gamepads[0];
+    const bool  bNow = (pad.bAnalogButtons[XINPUT_GAMEPAD_B] > 30);
+    const DWORD now  = GetTickCount();
+
+    // Update progress UI
     c->app->UpdateProgress(c->base + done, total, label);
-    return true; // (add cancel logic later if desired)
+
+    // If B newly pressed…
+    if (bNow && !c->prevB){
+        const DWORD statusUntil = c->app->StatusUntilMs();  // when the toast goes away
+        const bool  toastAlive  = (now < statusUntil);
+
+        if (c->confirmArmed && toastAlive){
+            // 2nd press while the “Press B again to cancel” toast is still visible
+            c->canceled = true;
+            SetLastError(ERROR_OPERATION_ABORTED);
+            c->prevB = bNow;
+            return false; // abort copy/move
+        } else {
+            // 1st press: arm and show toast; the “window” == toast lifetime
+            c->confirmArmed = true;
+            c->app->SetStatus("Press B again to cancel");
+            c->confirmUntil = c->app->StatusUntilMs(); // snapshot (optional)
+        }
+    }
+
+    // Disarm if toast expired
+    if (c->confirmArmed && now >= c->app->StatusUntilMs()){
+        c->confirmArmed = false;
+    }
+
+    c->prevB = bNow;
+    return true;
 }
 
+// ---- local helpers ----
 static int SameDriveLetter(const char* a, const char* b){
     if (!a || !b || !a[0] || !b[0]) return 0;
     return toupper((unsigned char)a[0]) == toupper((unsigned char)b[0]);
@@ -73,7 +110,6 @@ static void GatherMarkedOrSelectedFullPaths(const Pane& src, std::vector<std::st
 
 void Execute(Action act, FileBrowserApp& app)
 {
-    // Access the panes (allowed because this function is a friend)
     Pane& src = app.m_pane[app.m_active];
     Pane& dst = app.m_pane[1 - app.m_active];
 
@@ -87,163 +123,195 @@ void Execute(Action act, FileBrowserApp& app)
     switch (act)
     {
     case ACT_OPEN:
-		if (sel){
-			if (sel->isUpEntry) { app.UpOne(src); }
-			else if (sel->isDir) { app.EnterSelection(src); }
-			else {
-				// If it's an XBE, launch it
-				if (HasXbeExt(sel->name)){
-					char full[512]; JoinPath(full, sizeof(full), src.curPath, sel->name);
-					if (!LaunchXbeA(full)){
-						app.SetStatusLastErr("Launch failed");
-					}
-				}
-			}
-		}
-		break;
+        if (sel){
+            if (sel->isUpEntry) { app.UpOne(src); }
+            else if (sel->isDir) { app.EnterSelection(src); }
+            else if (HasXbeExt(sel->name)){
+                char full[512]; JoinPath(full, sizeof(full), src.curPath, sel->name);
+                if (!LaunchXbeA(full)) app.SetStatusLastErr("Launch failed");
+            }
+        }
+        break;
 
     case ACT_COPY:
-	{
-		if (src.mode != 1) { app.SetStatus("Open a folder"); break; }
+    {
+        if (src.mode != 1) { app.SetStatus("Open a folder"); break; }
 
-		char dstDir[512];
-		if (!app.ResolveDestDir(dstDir, sizeof(dstDir))) { app.SetStatus("Pick a destination"); break; }
-		if ((dstDir[0]=='D'||dstDir[0]=='d') && dstDir[1]==':'){ app.SetStatus("Cannot copy to D:\\"); break; }
-		NormalizeDirA(dstDir);
-		if (!CanWriteHereA(dstDir)){ app.SetStatusLastErr("Dest not writable"); break; }
+        char dstDir[512];
+        if (!app.ResolveDestDir(dstDir, sizeof(dstDir))) { app.SetStatus("Pick a destination"); break; }
+        if ((dstDir[0]=='D'||dstDir[0]=='d') && dstDir[1]==':'){ app.SetStatus("Cannot copy to D:\\"); break; }
+        NormalizeDirA(dstDir);
+        if (!CanWriteHereA(dstDir)){ app.SetStatusLastErr("Dest not writable"); break; }
 
-		std::vector<std::string> srcs;
-		GatherMarkedOrSelectedFullPaths(src, srcs);
-		if (srcs.empty()) { app.SetStatus("Nothing to copy"); break; }
+        std::vector<std::string> srcs;
+        GatherMarkedOrSelectedFullPaths(src, srcs);
+        if (srcs.empty()) { app.SetStatus("Nothing to copy"); break; }
 
-		// total bytes across all items
-		ULONGLONG total=0;
-		for (size_t i=0;i<srcs.size();++i) total += DirSizeRecursiveA(srcs[i].c_str());
+        // total bytes across all items
+        ULONGLONG total=0;
+        for (size_t i=0;i<srcs.size();++i) total += DirSizeRecursiveA(srcs[i].c_str());
 
-		app.BeginProgress(total, srcs[0].c_str(), "Copying...");
-		CopyProgCtx ctx = { &app, 0 };
-		SetCopyProgressCallback(CopyProgThunk, &ctx);
+        app.BeginProgress(total, srcs[0].c_str(), "Copying...");
+        CopyProgCtx ctx = { &app, 0, false, false, 0, false };
+        SetCopyProgressCallback(CopyProgThunk, &ctx);
 
-		ULONGLONG base = 0;
-		for (size_t i=0;i<srcs.size();++i){
-			ULONGLONG thisSize = DirSizeRecursiveA(srcs[i].c_str());
-			ctx.base = base;
-			CopyRecursiveWithProgressA(srcs[i].c_str(), dstDir, total);
-			base += thisSize;
-		}
+        ULONGLONG base = 0;
+        char lastDstTop[512] = {0};
 
-		SetCopyProgressCallback(NULL, NULL);
-		app.EndProgress();
+        for (size_t i=0;i<srcs.size();++i){
+            const char* sp = srcs[i].c_str();
 
-		// refresh dest pane listing if we copied into it
-		Pane& dstp = app.m_pane[1 - app.m_active];
-		if (dstp.mode==1 && _stricmp(dstp.curPath, dstDir)==0) ListDirectory(dstp.curPath, dstp.items);
+            // compute top-level destination path for cleanup on cancel
+            const char* bn = BaseNameOf(sp);
+            JoinPath(lastDstTop, sizeof(lastDstTop), dstDir, bn);
 
-		// clear marks on source and refresh both panes
-		for (size_t i=0;i<src.items.size();++i) src.items[i].marked=false;
-		app.RefreshPane(app.m_pane[0]); app.RefreshPane(app.m_pane[1]);
-		app.SetStatus("Copied %d item(s)", (int)srcs.size());
-		break;
-	}
+            ULONGLONG thisSize = DirSizeRecursiveA(sp);
+            ctx.base = base;
 
+            if (!CopyRecursiveWithProgressA(sp, dstDir, total)){
+                if (ctx.canceled){
+                    // best-effort cleanup of the partially created destination
+                    DeleteRecursiveA(lastDstTop);
+                    break;
+                }
+                // non-cancel failure: continue to next item
+            } else {
+                base += thisSize;
+            }
+        }
 
-	case ACT_MOVE:
-	{
-		if (src.mode != 1) { app.SetStatus("Open a folder"); break; }
+        SetCopyProgressCallback(NULL, NULL);
+        app.EndProgress();
 
-		char dstDir[512];
-		if (!app.ResolveDestDir(dstDir, sizeof(dstDir))) { app.SetStatus("Pick a destination"); break; }
-		if ((dstDir[0]=='D'||dstDir[0]=='d') && dstDir[1]==':'){ app.SetStatus("Cannot move to D:\\"); break; }
-		NormalizeDirA(dstDir);
-		if (!CanWriteHereA(dstDir)){ app.SetStatusLastErr("Dest not writable"); break; }
+        if (ctx.canceled){
+            app.SetStatus("Copy canceled");
+            app.RefreshPane(app.m_pane[0]); app.RefreshPane(app.m_pane[1]);
+            break;
+        }
 
-		std::vector<std::string> srcs;
-		GatherMarkedOrSelectedFullPaths(src, srcs);
-		if (srcs.empty()) { app.SetStatus("Nothing to move"); break; }
+        // refresh dest pane listing if we copied into it
+        Pane& dstp = app.m_pane[1 - app.m_active];
+        if (dstp.mode==1 && _stricmp(dstp.curPath, dstDir)==0) ListDirectory(dstp.curPath, dstp.items);
 
-		// total for progress
-		ULONGLONG total=0;
-		for (size_t i=0;i<srcs.size();++i) total += DirSizeRecursiveA(srcs[i].c_str());
+        // clear marks on source and refresh both panes
+        for (size_t i=0;i<src.items.size();++i) src.items[i].marked=false;
+        app.RefreshPane(app.m_pane[0]); app.RefreshPane(app.m_pane[1]);
+        app.SetStatus("Copied %d item(s)", (int)srcs.size());
+        break;
+    }
 
-		app.BeginProgress(total, srcs[0].c_str(), "Moving...");
-		CopyProgCtx ctx = { &app, 0 };
-		SetCopyProgressCallback(CopyProgThunk, &ctx);
+    case ACT_MOVE:
+    {
+        if (src.mode != 1) { app.SetStatus("Open a folder"); break; }
 
-		size_t movedOk = 0, failed = 0;
-		ULONGLONG base = 0;
+        char dstDir[512];
+        if (!app.ResolveDestDir(dstDir, sizeof(dstDir))) { app.SetStatus("Pick a destination"); break; }
+        if ((dstDir[0]=='D'||dstDir[0]=='d') && dstDir[1]==':'){ app.SetStatus("Cannot move to D:\\"); break; }
+        NormalizeDirA(dstDir);
+        if (!CanWriteHereA(dstDir)){ app.SetStatusLastErr("Dest not writable"); break; }
 
-		for (size_t i=0;i<srcs.size();++i){
-			const char* sp = srcs[i].c_str();
-			ULONGLONG thisSize = DirSizeRecursiveA(sp);
-			ctx.base = base;
+        std::vector<std::string> srcs;
+        GatherMarkedOrSelectedFullPaths(src, srcs);
+        if (srcs.empty()) { app.SetStatus("Nothing to move"); break; }
 
-			// build destination top (dstDir + basename(sp))
-			const char* baseName = BaseNameOf(sp);
-			char dstTop[512]; JoinPath(dstTop, sizeof(dstTop), dstDir, baseName);
+        // total for progress
+        ULONGLONG total=0;
+        for (size_t i=0;i<srcs.size();++i) total += DirSizeRecursiveA(srcs[i].c_str());
 
-			BOOL doneThis = FALSE;
+        app.BeginProgress(total, srcs[0].c_str(), "Moving...");
+        CopyProgCtx ctx = { &app, 0, false, false, 0, false };
+        SetCopyProgressCallback(CopyProgThunk, &ctx);
 
-			// Fast path: same drive + not moving into own subfolder
-			if (SameDriveLetter(sp, dstDir) && !IsSubPathCaseI(sp, dstTop)) {
-				if (MoveFileA(sp, dstTop)) {
-					doneThis = TRUE;  // instant
-				}
-				// if rename fails (exists, etc), we fall back to copy+delete below
-			}
+        size_t movedOk = 0, failed = 0;
+        ULONGLONG base = 0;
 
-			// Fallback: copy -> delete original (delete only if copy succeeded)
-			if (!doneThis) {
-				if (CopyRecursiveWithProgressA(sp, dstDir, total)) {
-					if (DeleteRecursiveA(sp)) {
-						doneThis = TRUE;
-					} else {
-						// optional: consider removing the just-copied dstTop on failure to delete original
-					}
-				}
-			}
+        for (size_t i=0;i<srcs.size();++i){
+            const char* sp = srcs[i].c_str();
+            ULONGLONG thisSize = DirSizeRecursiveA(sp);
+            ctx.base = base;
 
-			if (doneThis) ++movedOk; else ++failed;
-			base += thisSize;
-		}
+            // build destination top (dstDir + basename(sp))
+            const char* baseName = BaseNameOf(sp);
+            char dstTop[512]; JoinPath(dstTop, sizeof(dstTop), dstDir, baseName);
 
-		SetCopyProgressCallback(NULL, NULL);
-		app.EndProgress();
+            BOOL doneThis = FALSE;
 
-		// refresh panes & clear marks
-		for (size_t i=0;i<src.items.size();++i) src.items[i].marked=false;
-		if (src.mode==1) ListDirectory(src.curPath, src.items);
-		{
-			Pane& dstp = app.m_pane[1 - app.m_active];
-			if (dstp.mode==1 && _stricmp(dstp.curPath, dstDir)==0) ListDirectory(dstp.curPath, dstp.items);
-		}
-		app.RefreshPane(app.m_pane[0]); app.RefreshPane(app.m_pane[1]);
+            // Fast path: same drive + not moving into own subfolder
+            if (SameDriveLetter(sp, dstDir) && !IsSubPathCaseI(sp, dstTop)) {
+                if (MoveFileA(sp, dstTop)) {
+                    doneThis = TRUE;  // instant
+                }
+            }
 
-		if (failed == 0) app.SetStatus("Moved %u item(s)", (unsigned)movedOk);
-		else             app.SetStatus("Moved %u, %u failed", (unsigned)movedOk, (unsigned)failed);
-		break;
-	}
+            // Fallback: copy -> delete original (delete only if copy succeeded)
+            if (!doneThis) {
+                if (!CopyRecursiveWithProgressA(sp, dstDir, total)){
+                    if (ctx.canceled){
+                        // user canceled mid-copy: remove partial dest and stop
+                        DeleteRecursiveA(dstTop);
+                        break;
+                    }
+                    // non-cancel failure: continue
+                } else {
+                    if (DeleteRecursiveA(sp)) {
+                        doneThis = TRUE;
+                    } else {
+                        // optional: consider removing dstTop if source delete failed
+                    }
+                }
+            }
 
+            if (doneThis) ++movedOk; else ++failed;
+            base += thisSize;
+        }
 
+        SetCopyProgressCallback(NULL, NULL);
+        app.EndProgress();
 
+        if (ctx.canceled){
+            app.SetStatus("Move canceled");
+            // Do NOT delete originals when canceled
+            for (size_t i=0;i<src.items.size();++i) src.items[i].marked=false;
+            if (src.mode==1) ListDirectory(src.curPath, src.items);
+            {
+                Pane& dstp = app.m_pane[1 - app.m_active];
+                if (dstp.mode==1 && _stricmp(dstp.curPath, dstDir)==0) ListDirectory(dstp.curPath, dstp.items);
+            }
+            app.RefreshPane(app.m_pane[0]); app.RefreshPane(app.m_pane[1]);
+            break;
+        }
+
+        // refresh panes & clear marks
+        for (size_t i=0;i<src.items.size();++i) src.items[i].marked=false;
+        if (src.mode==1) ListDirectory(src.curPath, src.items);
+        {
+            Pane& dstp = app.m_pane[1 - app.m_active];
+            if (dstp.mode==1 && _stricmp(dstp.curPath, dstDir)==0) ListDirectory(dstp.curPath, dstp.items);
+        }
+        app.RefreshPane(app.m_pane[0]); app.RefreshPane(app.m_pane[1]);
+
+        if (failed == 0) app.SetStatus("Moved %u item(s)", (unsigned)movedOk);
+        else             app.SetStatus("Moved %u, %u failed", (unsigned)movedOk, (unsigned)failed);
+        break;
+    }
 
     case ACT_DELETE:
-	{
-		if (src.mode != 1) { app.SetStatus("Open a folder"); break; }
+    {
+        if (src.mode != 1) { app.SetStatus("Open a folder"); break; }
 
-		std::vector<std::string> srcs;
-		GatherMarkedOrSelectedFullPaths(src, srcs);
-		if (srcs.empty()) { app.SetStatus("Nothing to delete"); break; }
+        std::vector<std::string> srcs;
+        GatherMarkedOrSelectedFullPaths(src, srcs);
+        if (srcs.empty()) { app.SetStatus("Nothing to delete"); break; }
 
-		int ok=0;
-		for (size_t i=0;i<srcs.size();++i) if (DeleteRecursiveA(srcs[i].c_str())) ++ok;
+        int ok=0;
+        for (size_t i=0;i<srcs.size();++i) if (DeleteRecursiveA(srcs[i].c_str())) ++ok;
 
-		for (size_t i=0;i<src.items.size();++i) src.items[i].marked=false;
-		if (src.mode==1) ListDirectory(src.curPath, src.items);
-		app.RefreshPane(app.m_pane[0]); app.RefreshPane(app.m_pane[1]);
-		app.SetStatus("Deleted %d / %d", ok, (int)srcs.size());
-		break;
-	}
-
+        for (size_t i=0;i<src.items.size();++i) src.items[i].marked=false;
+        if (src.mode==1) ListDirectory(src.curPath, src.items);
+        app.RefreshPane(app.m_pane[0]); app.RefreshPane(app.m_pane[1]);
+        app.SetStatus("Deleted %d / %d", ok, (int)srcs.size());
+        break;
+    }
 
     case ACT_RENAME:
         if (sel && src.mode==1 && !sel->isUpEntry){
@@ -329,50 +397,50 @@ void Execute(Action act, FileBrowserApp& app)
         }
         break;
 
-	case ACT_MARK_ALL:
-	{
-		Pane& p = app.m_pane[app.m_active];
-		if (p.mode==1 && !p.items.empty()){
-			int n=0;
-			for (size_t i=0;i<p.items.size(); ++i){
-				if (!p.items[i].isUpEntry && !p.items[i].marked){
-					p.items[i].marked = true; ++n;
-				}
-			}
-			if (n>0) app.SetStatus("Marked %d item%s", n, (n==1?"":"s"));
-			else     app.SetStatus("All already marked");
-		}
-		break;
-	}
+    case ACT_MARK_ALL:
+    {
+        Pane& p = app.m_pane[app.m_active];
+        if (p.mode==1 && !p.items.empty()){
+            int n=0;
+            for (size_t i=0;i<p.items.size(); ++i){
+                if (!p.items[i].isUpEntry && !p.items[i].marked){
+                    p.items[i].marked = true; ++n;
+                }
+            }
+            if (n>0) app.SetStatus("Marked %d item%s", n, (n==1?"":"s"));
+            else     app.SetStatus("All already marked");
+        }
+        break;
+    }
 
-	case ACT_INVERT_MARKS:
-	{
-		Pane& p = app.m_pane[app.m_active];
-		if (p.mode==1 && !p.items.empty()){
-			int toggled=0;
-			for (size_t i=0;i<p.items.size(); ++i){
-				if (!p.items[i].isUpEntry){
-					p.items[i].marked = !p.items[i].marked;
-					++toggled;
-				}
-			}
-			app.SetStatus("Inverted marks (%d)", toggled);
-		}
-		break;
-	}
+    case ACT_INVERT_MARKS:
+    {
+        Pane& p = app.m_pane[app.m_active];
+        if (p.mode==1 && !p.items.empty()){
+            int toggled=0;
+            for (size_t i=0;i<p.items.size(); ++i){
+                if (!p.items[i].isUpEntry){
+                    p.items[i].marked = !p.items[i].marked;
+                    ++toggled;
+                }
+            }
+            app.SetStatus("Inverted marks (%d)", toggled);
+        }
+        break;
+    }
 
-	case ACT_CLEAR_MARKS:
-	{
-		Pane& p = app.m_pane[app.m_active];
-		if (p.mode==1 && !p.items.empty()){
-			int cleared=0;
-			for (size_t i=0;i<p.items.size(); ++i){
-				if (p.items[i].marked){ p.items[i].marked=false; ++cleared; }
-			}
-			app.SetStatus(cleared ? "Cleared %d" : "No marks", cleared);
-		}
-		break;
-	}
+    case ACT_CLEAR_MARKS:
+    {
+        Pane& p = app.m_pane[app.m_active];
+        if (p.mode==1 && !p.items.empty()){
+            int cleared=0;
+            for (size_t i=0;i<p.items.size(); ++i){
+                if (p.items[i].marked){ p.items[i].marked=false; ++cleared; }
+            }
+            app.SetStatus(cleared ? "Cleared %d" : "No marks", cleared);
+        }
+        break;
+    }
 
     case ACT_SWITCHMEDIA:
         app.m_active = 1 - app.m_active;

@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <stdio.h> // _snprintf
 
+DWORD FileBrowserApp::StatusUntilMs() const { return m_statusUntilMs; }
 // ---- local helpers (no header pollution) ----
 namespace {
     inline FLOAT MaxF(FLOAT a, FLOAT b){ return (a>b)?a:b; }
@@ -92,7 +93,6 @@ namespace {
         }
         return mask;
     }
-
 
 }
 
@@ -672,6 +672,12 @@ void FileBrowserApp::DrawProgressOverlay(){
     // title
     DrawAnsi(m_font, x + margin, titleY, 0xFFFFFFFF, m_prog.title[0] ? m_prog.title : "Working...");
 
+	{
+    const char* hint = "B: Cancel";
+    FLOAT hw=0, hh=0; MeasureTextWH(m_font, hint, hw, hh);
+    DrawAnsi(m_font, x + w - margin - hw, titleY, 0xFFCCCCCC, hint);
+	}
+
     // split folder/file from current label
     const char* label = m_prog.current;
     const char* slash = label ? strrchr(label, '\\') : NULL;
@@ -826,7 +832,8 @@ HRESULT FileBrowserApp::Render(){
     // transient status
     DWORD now = GetTickCount();
     if (now < m_statusUntilMs && m_status[0]){
-        DrawAnsi(m_font, HdrX(kListX_L)+5.0f, footerY-18.0f, 0xFFBBDDEE, m_status);
+        DrawAnsiCenteredX(m_font, footerX, footerW, footerY +25.0f, 0xFFBBDDEE, m_status);
+
     }
 
     DrawMenu();

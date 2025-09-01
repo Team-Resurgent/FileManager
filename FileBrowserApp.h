@@ -60,16 +60,17 @@ public:
     void EndProgress();
     void DrawProgressOverlay(); // call from Render()
 
+	// ----- Status line -----
+    void  SetStatus(const char* fmt, ...);
+    void  SetStatusLastErr(const char* prefix);
+	DWORD StatusUntilMs() const;
+
 private:
     // ----- UI helpers -----
     static FLOAT HdrX(FLOAT baseX){ return baseX - 15.0f; }
     void  DrawRect(float x,float y,float w,float h,D3DCOLOR c);
     void  DrawHLine(float x,float y,float w,D3DCOLOR c){ DrawRect(x,y,w,1.0f,c); }
     void  DrawVLine(float x,float y,float h,D3DCOLOR c){ DrawRect(x,y,1.0f,h,c); }
-
-    // ----- Status line -----
-    void  SetStatus(const char* fmt, ...);
-    void  SetStatusLastErr(const char* prefix);
 
     // ----- Data refresh / navigation -----
     void  EnsureListing(Pane& p);
