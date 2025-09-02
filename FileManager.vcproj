@@ -209,7 +209,8 @@
 				Name="XboxDeploymentTool"/>
 			<Tool
 				Name="XboxImageTool"
-				StackSize="65536"/>
+				StackSize="65536"
+				FormatUD="TRUE"/>
 		</Configuration>
 		<Configuration
 			Name="Release_LTCG|Xbox"

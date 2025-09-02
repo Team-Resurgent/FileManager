@@ -1,76 +1,97 @@
 #include "AppActions.h"
 #include "FileBrowserApp.h"
 #include "FsUtil.h"
-#include "XBInput.h"   // <- for XBInput_GetInput, g_Gamepads
+#include "XBInput.h"   // XBInput_GetInput, g_Gamepads
 
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>   // toupper
 
+/*
+============================================================================
+ AppActions
+  - Centralized execution of menu actions for FileBrowserApp
+  - Cancel-aware copy/move with a "press B twice to cancel" toast window
+  - Uses FsUtil.* helpers for I/O and FileBrowserApp methods for UI refresh
+============================================================================
+*/
 
-// ---- Cancel-aware progress context + thunk (with “toast window” confirmation) ----
+// ---- Cancel-aware progress context + thunk ---------------------------------
+// CopyProgCtx: tracks progress, cancel state, and the 2-press B confirmation.
+// The "toast window" behavior:
+//   1) First B press shows "Press B again to cancel" and arms a window.
+//   2) If the second B happens while the toast is still visible, we cancel.
+//   3) If toast expires before second B, the next B just re-arms the window.
 struct CopyProgCtx {
     FileBrowserApp* app;
-    ULONGLONG base;        // bytes completed from previous items
+    ULONGLONG base;        // bytes completed from previous items (offset)
     bool      canceled;    // set when user confirms cancel
 
-    // confirmation state
-    bool      confirmArmed;   // we’ve shown the prompt; waiting for 2nd B
-    DWORD     confirmUntil;   // (informational) snapshot of status expiry
-    bool      prevB;          // rising-edge detection
+    // confirmation state (toast window)
+    bool      confirmArmed;   // true after the first B press
+    DWORD     confirmUntil;   // snapshot of when the toast will expire (informational)
+    bool      prevB;          // for rising-edge detection of B
 };
 
+// Progress callback used by file copy/move loops.
+// - Pumps gamepad input to detect B presses
+// - Updates the app's progress overlay
+// - Implements the "press B twice" cancel logic
 static bool CopyProgThunk(ULONGLONG done, ULONGLONG total, const char* label, void* user){
     CopyProgCtx* c = (CopyProgCtx*)user;
 
-    // Pump input to read 'B'
+    // Poll controller to read B presses while copying
     XBInput_GetInput();
     const XBGAMEPAD& pad = g_Gamepads[0];
     const bool  bNow = (pad.bAnalogButtons[XINPUT_GAMEPAD_B] > 30);
     const DWORD now  = GetTickCount();
 
-    // Update progress UI
+    // Paint progress (done is per-current-item, base is previous items)
     c->app->UpdateProgress(c->base + done, total, label);
 
-    // If B newly pressed…
+    // Rising-edge B?
     if (bNow && !c->prevB){
-        const DWORD statusUntil = c->app->StatusUntilMs();  // when the toast goes away
+        const DWORD statusUntil = c->app->StatusUntilMs();
         const bool  toastAlive  = (now < statusUntil);
 
         if (c->confirmArmed && toastAlive){
-            // 2nd press while the “Press B again to cancel” toast is still visible
+            // Second B while the toast is still up => cancel
             c->canceled = true;
             SetLastError(ERROR_OPERATION_ABORTED);
             c->prevB = bNow;
             return false; // abort copy/move
         } else {
-            // 1st press: arm and show toast; the “window” == toast lifetime
+            // First B: arm and show "press B again" toast
             c->confirmArmed = true;
             c->app->SetStatus("Press B again to cancel");
             c->confirmUntil = c->app->StatusUntilMs(); // snapshot (optional)
         }
     }
 
-    // Disarm if toast expired
+    // Disarm if toast has expired
     if (c->confirmArmed && now >= c->app->StatusUntilMs()){
         c->confirmArmed = false;
     }
 
     c->prevB = bNow;
-    return true;
+    return true; // keep going
 }
 
-// ---- local helpers ----
+// ---- local helpers ----------------------------------------------------------
+
+// Return 1 if both paths are on the same drive letter (case-insensitive).
 static int SameDriveLetter(const char* a, const char* b){
     if (!a || !b || !a[0] || !b[0]) return 0;
     return toupper((unsigned char)a[0]) == toupper((unsigned char)b[0]);
 }
 
+// Ensure trailing backslash on non-empty strings (local, VC7.1-safe).
 static void NormalizeSlashEndLocal(char* s, size_t cap){
     size_t n = s ? strlen(s) : 0;
     if (n && s[n-1] != '\\' && n+1 < cap){ s[n] = '\\'; s[n+1] = 0; }
 }
 
+// Case-insensitive: is `child` a subpath of `parent`?
 static int IsSubPathCaseI(const char* parent, const char* child){
     char p[512], c[512];
     _snprintf(p, sizeof(p), "%s", parent ? parent : ""); p[sizeof(p)-1] = 0;
@@ -80,6 +101,7 @@ static int IsSubPathCaseI(const char* parent, const char* child){
     return _strnicmp(p, c, (int)strlen(p)) == 0; // child starts with parent?
 }
 
+// Basename (pointer into input string), e.g., "E:\A\B\C" -> "C".
 static const char* BaseNameOf(const char* path){
     const char* s = path ? strrchr(path, '\\') : 0;
     return s ? (s+1) : path;
@@ -87,6 +109,10 @@ static const char* BaseNameOf(const char* path){
 
 namespace AppActions {
 
+// Collects selected sources for copy/move/delete:
+// - If any items are marked, returns all marked (excluding "..").
+// - Else returns the single current selection (if not "..").
+// - Writes full paths (dir + name) into 'out'.
 static void GatherMarkedOrSelectedFullPaths(const Pane& src, std::vector<std::string>& out) {
     if (src.mode != 1 || src.items.empty()) return;
 
@@ -108,20 +134,22 @@ static void GatherMarkedOrSelectedFullPaths(const Pane& src, std::vector<std::st
     }
 }
 
+// Main dispatcher: runs the action the user picked from the context menu.
 void Execute(Action act, FileBrowserApp& app)
 {
     Pane& src = app.m_pane[app.m_active];
-    Pane& dst = app.m_pane[1 - app.m_active];
 
     const Item* sel = NULL;
     if (!src.items.empty()) sel = &src.items[src.sel];
 
+    // Full path of selection (if any)
     char srcFull[512] = "";
     if (sel && src.mode == 1 && !sel->isUpEntry)
         JoinPath(srcFull, sizeof(srcFull), src.curPath, sel->name);
 
     switch (act)
     {
+    // ---- Open / Enter / Launch ------------------------------------------------
     case ACT_OPEN:
         if (sel){
             if (sel->isUpEntry) { app.UpOne(src); }
@@ -133,35 +161,39 @@ void Execute(Action act, FileBrowserApp& app)
         }
         break;
 
+    // ---- Copy -----------------------------------------------------------------
     case ACT_COPY:
     {
         if (src.mode != 1) { app.SetStatus("Open a folder"); break; }
 
+        // Resolve destination (other pane preferred)
         char dstDir[512];
         if (!app.ResolveDestDir(dstDir, sizeof(dstDir))) { app.SetStatus("Pick a destination"); break; }
         if ((dstDir[0]=='D'||dstDir[0]=='d') && dstDir[1]==':'){ app.SetStatus("Cannot copy to D:\\"); break; }
         NormalizeDirA(dstDir);
         if (!CanWriteHereA(dstDir)){ app.SetStatusLastErr("Dest not writable"); break; }
 
+        // Gather sources
         std::vector<std::string> srcs;
         GatherMarkedOrSelectedFullPaths(src, srcs);
         if (srcs.empty()) { app.SetStatus("Nothing to copy"); break; }
 
-        // total bytes across all items
+        // Compute total bytes for progress bar
         ULONGLONG total=0;
         for (size_t i=0;i<srcs.size();++i) total += DirSizeRecursiveA(srcs[i].c_str());
 
+        // Begin progress + set callback
         app.BeginProgress(total, srcs[0].c_str(), "Copying...");
         CopyProgCtx ctx = { &app, 0, false, false, 0, false };
         SetCopyProgressCallback(CopyProgThunk, &ctx);
 
-        ULONGLONG base = 0;
-        char lastDstTop[512] = {0};
+        ULONGLONG base = 0;     // cumulative bytes completed
+        char lastDstTop[512] = {0}; // for cancel cleanup
 
         for (size_t i=0;i<srcs.size();++i){
             const char* sp = srcs[i].c_str();
 
-            // compute top-level destination path for cleanup on cancel
+            // Compute top-level destination path (dstDir\basename(sp)) for cleanup
             const char* bn = BaseNameOf(sp);
             JoinPath(lastDstTop, sizeof(lastDstTop), dstDir, bn);
 
@@ -170,16 +202,17 @@ void Execute(Action act, FileBrowserApp& app)
 
             if (!CopyRecursiveWithProgressA(sp, dstDir, total)){
                 if (ctx.canceled){
-                    // best-effort cleanup of the partially created destination
+                    // Remove partial destination of the current item, then stop
                     DeleteRecursiveA(lastDstTop);
                     break;
                 }
-                // non-cancel failure: continue to next item
+                // Non-cancel failure: continue to next item
             } else {
                 base += thisSize;
             }
         }
 
+        // End progress and clear callback
         SetCopyProgressCallback(NULL, NULL);
         app.EndProgress();
 
@@ -189,17 +222,18 @@ void Execute(Action act, FileBrowserApp& app)
             break;
         }
 
-        // refresh dest pane listing if we copied into it
+        // If we copied into the currently displayed dest folder, refresh it
         Pane& dstp = app.m_pane[1 - app.m_active];
         if (dstp.mode==1 && _stricmp(dstp.curPath, dstDir)==0) ListDirectory(dstp.curPath, dstp.items);
 
-        // clear marks on source and refresh both panes
+        // Clear marks and refresh both panes
         for (size_t i=0;i<src.items.size();++i) src.items[i].marked=false;
         app.RefreshPane(app.m_pane[0]); app.RefreshPane(app.m_pane[1]);
         app.SetStatus("Copied %d item(s)", (int)srcs.size());
         break;
     }
 
+    // ---- Move -----------------------------------------------------------------
     case ACT_MOVE:
     {
         if (src.mode != 1) { app.SetStatus("Open a folder"); break; }
@@ -214,7 +248,7 @@ void Execute(Action act, FileBrowserApp& app)
         GatherMarkedOrSelectedFullPaths(src, srcs);
         if (srcs.empty()) { app.SetStatus("Nothing to move"); break; }
 
-        // total for progress
+        // Total bytes for progress
         ULONGLONG total=0;
         for (size_t i=0;i<srcs.size();++i) total += DirSizeRecursiveA(srcs[i].c_str());
 
@@ -230,33 +264,33 @@ void Execute(Action act, FileBrowserApp& app)
             ULONGLONG thisSize = DirSizeRecursiveA(sp);
             ctx.base = base;
 
-            // build destination top (dstDir + basename(sp))
+            // Destination top (dstDir\basename(sp))
             const char* baseName = BaseNameOf(sp);
             char dstTop[512]; JoinPath(dstTop, sizeof(dstTop), dstDir, baseName);
 
             BOOL doneThis = FALSE;
 
-            // Fast path: same drive + not moving into own subfolder
+            // Fast path: same drive and not moving into own subfolder -> MoveFileA
             if (SameDriveLetter(sp, dstDir) && !IsSubPathCaseI(sp, dstTop)) {
                 if (MoveFileA(sp, dstTop)) {
-                    doneThis = TRUE;  // instant
+                    doneThis = TRUE;  // instant rename/move within volume
                 }
             }
 
-            // Fallback: copy -> delete original (delete only if copy succeeded)
+            // Fallback: copy -> delete original (only delete if copy succeeded)
             if (!doneThis) {
                 if (!CopyRecursiveWithProgressA(sp, dstDir, total)){
                     if (ctx.canceled){
-                        // user canceled mid-copy: remove partial dest and stop
+                        // Clean partial dest and stop
                         DeleteRecursiveA(dstTop);
                         break;
                     }
-                    // non-cancel failure: continue
+                    // Non-cancel failure: continue
                 } else {
                     if (DeleteRecursiveA(sp)) {
                         doneThis = TRUE;
                     } else {
-                        // optional: consider removing dstTop if source delete failed
+                        // Optional: consider removing dstTop if source delete failed
                     }
                 }
             }
@@ -270,7 +304,7 @@ void Execute(Action act, FileBrowserApp& app)
 
         if (ctx.canceled){
             app.SetStatus("Move canceled");
-            // Do NOT delete originals when canceled
+            // On cancel we keep originals; clear marks and refresh UI
             for (size_t i=0;i<src.items.size();++i) src.items[i].marked=false;
             if (src.mode==1) ListDirectory(src.curPath, src.items);
             {
@@ -281,7 +315,7 @@ void Execute(Action act, FileBrowserApp& app)
             break;
         }
 
-        // refresh panes & clear marks
+        // Normal completion: refresh both panes, clear marks
         for (size_t i=0;i<src.items.size();++i) src.items[i].marked=false;
         if (src.mode==1) ListDirectory(src.curPath, src.items);
         {
@@ -291,10 +325,11 @@ void Execute(Action act, FileBrowserApp& app)
         app.RefreshPane(app.m_pane[0]); app.RefreshPane(app.m_pane[1]);
 
         if (failed == 0) app.SetStatus("Moved %u item(s)", (unsigned)movedOk);
-        else             app.SetStatus("Moved %u, %u failed", (unsigned)movedOk, (unsigned)failed);
+        else             app.SetStatus("Moved %u, %u failed", (unsigned)failed);
         break;
     }
 
+    // ---- Delete ---------------------------------------------------------------
     case ACT_DELETE:
     {
         if (src.mode != 1) { app.SetStatus("Open a folder"); break; }
@@ -306,6 +341,7 @@ void Execute(Action act, FileBrowserApp& app)
         int ok=0;
         for (size_t i=0;i<srcs.size();++i) if (DeleteRecursiveA(srcs[i].c_str())) ++ok;
 
+        // Clear marks, refresh, and toast result
         for (size_t i=0;i<src.items.size();++i) src.items[i].marked=false;
         if (src.mode==1) ListDirectory(src.curPath, src.items);
         app.RefreshPane(app.m_pane[0]); app.RefreshPane(app.m_pane[1]);
@@ -313,6 +349,7 @@ void Execute(Action act, FileBrowserApp& app)
         break;
     }
 
+    // ---- Rename (opens modal OSK) --------------------------------------------
     case ACT_RENAME:
         if (sel && src.mode==1 && !sel->isUpEntry){
             app.BeginRename(src.curPath, sel->name);
@@ -321,6 +358,7 @@ void Execute(Action act, FileBrowserApp& app)
         }
         break;
 
+    // ---- Make new folder ------------------------------------------------------
     case ACT_MKDIR:
     {
         char baseDir[512] = {0};
@@ -330,7 +368,7 @@ void Execute(Action act, FileBrowserApp& app)
         } else if (!src.items.empty()) {
             const Item& di = src.items[src.sel];
             if (di.isDir && !di.isUpEntry) {
-                _snprintf(baseDir, sizeof(baseDir), "%s", di.name); // e.g. "E:\\"
+                _snprintf(baseDir, sizeof(baseDir), "%s", di.name); // drive root, e.g. "E:\"
             }
         }
         baseDir[sizeof(baseDir)-1] = 0;
@@ -343,6 +381,7 @@ void Execute(Action act, FileBrowserApp& app)
         NormalizeDirA(baseDir);
         if (!CanWriteHereA(baseDir)) { app.SetStatusLastErr("Dest not writable"); break; }
 
+        // Auto-name NewFolder[/N] without clobbering existing names
         char nameBuf[64];
         char target[512];
         int idx = 0;
@@ -366,12 +405,14 @@ void Execute(Action act, FileBrowserApp& app)
 
         app.RefreshPane(app.m_pane[0]); app.RefreshPane(app.m_pane[1]);
 
+        // If we created inside the active folder, select the new dir
         if (src.mode == 1 && _stricmp(src.curPath, baseDir) == 0) {
             app.SelectItemInPane(src, nameBuf);
         }
         break;
     }
 
+    // ---- Calculate size -------------------------------------------------------
     case ACT_CALCSIZE:
         if (sel){
             ULONGLONG bytes = DirSizeRecursiveA(srcFull);
@@ -380,6 +421,7 @@ void Execute(Action act, FileBrowserApp& app)
         }
         break;
 
+    // ---- Go to root (or back to drive list) ----------------------------------
     case ACT_GOROOT:
         if (src.mode == 1){
             if (!IsDriveRoot(src.curPath)){
@@ -389,20 +431,23 @@ void Execute(Action act, FileBrowserApp& app)
                 src.sel = 0; src.scroll = 0;
                 ListDirectory(src.curPath, src.items);
             } else {
+                // Already at root -> switch to drive list
                 src.mode = 0; src.curPath[0] = 0; src.sel = 0; src.scroll = 0;
                 BuildDriveItems(src.items);
             }
         } else {
+            // In drive list: refresh it
             BuildDriveItems(src.items);
         }
         break;
 
+    // ---- Marking operations ---------------------------------------------------
     case ACT_MARK_ALL:
     {
         Pane& p = app.m_pane[app.m_active];
         if (p.mode==1 && !p.items.empty()){
             int n=0;
-            for (size_t i=0;i<p.items.size(); ++i){
+            for (size_t i=0; i<p.items.size(); ++i){
                 if (!p.items[i].isUpEntry && !p.items[i].marked){
                     p.items[i].marked = true; ++n;
                 }
@@ -442,10 +487,35 @@ void Execute(Action act, FileBrowserApp& app)
         break;
     }
 
+    // ---- Format cache (X/Y/Z + clear E:\CACHE) --------------------------------
+    case ACT_FORMAT_CACHE:
+    {
+        app.SetStatus("Formatting cache partitions (X/Y/Z)...");
+        const bool ok = FormatCacheXYZ(0, true);  // 0 => default 16KiB; also clears E:\CACHE
+        if (!ok) { app.SetStatus("Format cache failed"); break; }
+
+        // If either pane is browsing X:, Y:, or Z:, refresh it
+        for (int p = 0; p < 2; ++p) {
+            Pane& pane = app.m_pane[p];
+            if (pane.mode == 1 && pane.curPath[0]) {
+                char dl = (char)toupper((unsigned char)pane.curPath[0]);
+                if (dl == 'X' || dl == 'Y' || dl == 'Z') {
+                    ListDirectory(pane.curPath, pane.items);
+                }
+            }
+        }
+        app.RefreshPane(app.m_pane[0]);
+        app.RefreshPane(app.m_pane[1]);
+        app.SetStatus("Formatted X/Y/Z and E:\\CACHE");
+        break;
+    }
+
+    // ---- Switch active pane ---------------------------------------------------
     case ACT_SWITCHMEDIA:
         app.m_active = 1 - app.m_active;
         break;
-    }
+
+    } // switch
 }
 
 } // namespace AppActions

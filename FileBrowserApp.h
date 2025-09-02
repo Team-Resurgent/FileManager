@@ -1,6 +1,15 @@
 #ifndef FILEBROWSERAPP_H
 #define FILEBROWSERAPP_H
 
+/*
+===============================================================================
+ FileBrowserApp
+  - Core app header for the dual-pane file browser (OG Xbox, XDK, VS2003).
+  - Owns UI state, input routing, drawing, and delegates file operations to
+    helpers in FsUtil.* and AppActions.*.
+===============================================================================
+*/
+
 #include <xtl.h>
 #include <vector>
 #include <wchar.h>
@@ -14,18 +23,22 @@
 #include "PaneRenderer.h"
 #include "AppActions.h"
 
-// Dual-pane file browser application (OG Xbox XDK / VS2003)
-
-// Forward the friend so AppActions can call our private helpers
+// Allow AppActions to call back into private helpers without exposing them.
 namespace AppActions { void Execute(Action, class FileBrowserApp&); }
 
+/*
+------------------------------------------------------------------------------
+ ProgState
+  - Lightweight progress HUD state (used during copy/move).
+------------------------------------------------------------------------------
+*/
 struct ProgState {
-    bool        active;
-    ULONGLONG   done;
-    ULONGLONG   total;
-    char        current[256];
-    DWORD       lastPaintMs;
-    char        title[24];
+    bool        active;         // overlay visible when true
+    ULONGLONG   done;           // bytes completed so far
+    ULONGLONG   total;          // total bytes (0 if unknown)
+    char        current[256];   // current path/file shown in overlay
+    DWORD       lastPaintMs;    // throttle overlay redraw rate
+    char        title[24];      // short title ("Copying...", etc.)
 
     ProgState()
         : active(false), done(0), total(0), lastPaintMs(0)
@@ -36,117 +49,121 @@ struct ProgState {
 };
 
 class FileBrowserApp : public CXBApplication {
-	    ProgState m_prog;
+        // Keep first for tighter packing; overlay is accessed frequently.
+        ProgState m_prog;
+
 public:
-	// Allow the centralized action runner to call our private helpers/members
+    // Allow centralized action runner to call private helpers/members.
     friend void AppActions::Execute(Action, FileBrowserApp&);
 
     FileBrowserApp();
 
-    // CXBApplication overrides
-    virtual HRESULT Initialize();
-    virtual HRESULT FrameMove();
-    virtual HRESULT Render();
+    // --- CXBApplication lifecycle ------------------------------------------
+    virtual HRESULT Initialize(); // create font, map drives, compute layout
+    virtual HRESULT FrameMove();  // input + periodic drive rescan
+    virtual HRESULT Render();     // draw panes, footer, overlays
 
-    // Static layout (computed in Initialize, defaults in .cpp)
+    // --- Static layout (set in Initialize; defaults in .cpp) ----------------
     static FLOAT kListX_L, kListY, kListW, kLineH;
     static FLOAT kHdrX_L,  kHdrY,  kHdrW,  kHdrH;
     static FLOAT kGutterW, kPaddingX, kScrollBarW;
     static FLOAT kPaneGap;
 
-	// progress bar
-	void BeginProgress(ULONGLONG total, const char* firstLabel, const char* title = "Working...");
+    // --- Progress HUD API ---------------------------------------------------
+    // Show the progress overlay and initialize counters/labels.
+    void BeginProgress(ULONGLONG total, const char* firstLabel, const char* title = "Working...");
+    // Update progress (bytes + optional label). Throttles Render() internally.
     void UpdateProgress(ULONGLONG done, ULONGLONG total, const char* label);
+    // Hide progress overlay.
     void EndProgress();
-    void DrawProgressOverlay(); // call from Render()
+    // Draw the overlay; called from Render() when m_prog.active.
+    void DrawProgressOverlay();
 
-	// ----- Status line -----
-    void  SetStatus(const char* fmt, ...);
-    void  SetStatusLastErr(const char* prefix);
-	DWORD StatusUntilMs() const;
+    // --- Status line (footer toast) ----------------------------------------
+    void  SetStatus(const char* fmt, ...);      // printf-style
+    void  SetStatusLastErr(const char* prefix); // append GetLastError()
+    DWORD StatusUntilMs() const;                // used by Render() to time out
 
 private:
-    // ----- UI helpers -----
-    static FLOAT HdrX(FLOAT baseX){ return baseX - 15.0f; }
+    // --- UI helpers ---------------------------------------------------------
+    static FLOAT HdrX(FLOAT baseX){ return baseX - 15.0f; } // header left offset
     void  DrawRect(float x,float y,float w,float h,D3DCOLOR c);
     void  DrawHLine(float x,float y,float w,D3DCOLOR c){ DrawRect(x,y,w,1.0f,c); }
     void  DrawVLine(float x,float y,float h,D3DCOLOR c){ DrawRect(x,y,1.0f,h,c); }
 
-    // ----- Data refresh / navigation -----
-    void  EnsureListing(Pane& p);
-    void  EnterSelection(Pane& p);
-    void  UpOne(Pane& p);
-    void  RefreshPane(Pane& p);
-    bool  ResolveDestDir(char* outDst, size_t cap);
+    // --- Data refresh / navigation -----------------------------------------
+    void  EnsureListing(Pane& p);                  // clamp indices and items
+    void  EnterSelection(Pane& p);                 // drive->dir, ".."->up, dir->descend, .xbe->launch
+    void  UpOne(Pane& p);                          // go up one or back to drive list
+    void  RefreshPane(Pane& p);                    // rebuild items, preserve selection/scroll
+    bool  ResolveDestDir(char* outDst, size_t cap);// determine destination dir from other pane
     void  SelectItemInPane(Pane& p, const char* name);
 
-    // ----- Context menu (delegated) -----
+    // --- Context menu -------------------------------------------------------
     void  AddMenuItem(const char* label, Action act, bool enabled);
-    void  BuildContextMenu();
-    void  OpenMenu();
-    void  CloseMenu();
+    void  BuildContextMenu(); // build items based on mode/selection
+    void  OpenMenu();         // position and open popup
+    void  CloseMenu();        // close and return to browse mode
 
-    // ----- Rename OSD / keyboard -----
+    // --- Rename OSD / keyboard ---------------------------------------------
     void  BeginRename(const char* parentDir, const char* oldName);
     void  CancelRename();
-    void  AcceptRename();
+    void  AcceptRename();     // validate, sanitize, perform MoveFileA
     void  DrawRename();
 
-    // ----- Input routing -----
-    void  OnPad(const XBGAMEPAD& pad);
+    // --- Input routing ------------------------------------------------------
+    void  OnPad(const XBGAMEPAD& pad);      // router
     void  OnPad_Browse(const XBGAMEPAD& pad);
     void  OnPad_Menu(const XBGAMEPAD& pad);
     void  OnPad_Rename(const XBGAMEPAD& pad);
 
-    // ----- Members -----
-    CXBFont m_font;
-    int     m_visible;              // rows visible
+    // --- Members ------------------------------------------------------------
+    CXBFont m_font;           // UI font (XPR asset)
+    int     m_visible;        // number of visible rows per pane
 
-    // edge-detect state
+    // Edge-detect state for buttons/analog (prevent double triggers).
     unsigned char m_prevA, m_prevB, m_prevX, m_prevY;
     unsigned char m_prevWhite, m_prevBlack;
     DWORD         m_prevButtons;
 
-    Pane    m_pane[2];
-    int     m_active;               // 0=left, 1=right
+    Pane    m_pane[2];        // left (0) and right (1) pane data
+    int     m_active;         // active pane: 0=left, 1=right
 
-    // up/down auto-repeat
-    bool  m_navUDHeld;
-    int   m_navUDDir;       // -1 up, +1 down
-    DWORD m_navUDNext;      // next repeat time (ms)
+    // Up/down auto-repeat (list navigation).
+    bool  m_navUDHeld;        // currently repeating
+    int   m_navUDDir;         // -1 up, +1 down
+    DWORD m_navUDNext;        // next repeat time (GetTickCount ms)
 
-    // mode & UI components
+    // Mode and UI components
     enum { MODE_BROWSE, MODE_MENU, MODE_RENAME } m_mode;
-    ContextMenu      m_ctx;
-    OnScreenKeyboard m_kb;
-    PaneRenderer     m_renderer;
-	
-	// draws the already-open context menu
-	void DrawMenu();
+    ContextMenu      m_ctx;       // popup menu
+    OnScreenKeyboard m_kb;        // rename overlay
+    PaneRenderer     m_renderer;  // draws a pane (headers, rows, scrollbar)
 
-    // status
+    // Draw the already-open context menu (used by Render()).
+    void DrawMenu();
+
+    // Status text buffer and expiry tick for footer toast.
     char  m_status[256];
     DWORD m_statusUntilMs;
 
-    // actions (still here for now)
+    // Legacy action entry point (kept for compatibility).
     void ExecuteAction(Action act);
 
+    // Per-action helpers (legacy; main impl lives in AppActions.cpp).
+    void Act_Open();
+    void Act_Copy();
+    void Act_Move();
+    void Act_Delete();
+    void Act_Rename();
+    void Act_Mkdir();
+    void Act_CalcSize();
+    void Act_GoRoot();
+    void Act_SwitchMedia();
+    void Act_FormatCache(); // destructive: formats X/Y/Z cache
 
-	// per-action helpers (implementation in .cpp; easy to move to AppActions.cpp later)
-	void Act_Open();
-	void Act_Copy();
-	void Act_Move();
-	void Act_Delete();
-	void Act_Rename();
-	void Act_Mkdir();
-	void Act_CalcSize();
-	void Act_GoRoot();
-	void Act_SwitchMedia();
-
-	// absorb pad helper
-	void AbsorbPadState(const XBGAMEPAD& pad);
-
-
+    // Copy current pad state so inputs do not leak between modes.
+    void AbsorbPadState(const XBGAMEPAD& pad);
 };
 
 #endif // FILEBROWSERAPP_H

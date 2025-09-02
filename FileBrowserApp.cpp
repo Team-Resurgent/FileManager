@@ -7,20 +7,35 @@
 #include <algorithm>
 #include <stdio.h> // _snprintf
 
+/*
+===============================================================================
+ FileBrowserApp
+  - Main application controller for the dual-pane file browser.
+  - Owns input routing, pane state, context menu, OSD keyboard, progress HUD,
+    and the high-level render loop.
+  - Keeps allocations minimal and uses ACP->UTF-16 conversions for fonts.
+===============================================================================
+*/
+
+// Simple getter used by overlay/status timers.
 DWORD FileBrowserApp::StatusUntilMs() const { return m_statusUntilMs; }
-// ---- local helpers (no header pollution) ----
+
+// ---- local helpers (no header pollution) -----------------------------------
+// These helpers are file-local to avoid leaking symbols into headers/other TUs.
 namespace {
+    // Small math/layout helpers
     inline FLOAT MaxF(FLOAT a, FLOAT b){ return (a>b)?a:b; }
     inline int   MaxI (int a,   int b){ return (a>b)?a:b; }
-    inline FLOAT Snap (FLOAT v){ return (FLOAT)((int)(v + 0.5f)); }
+    inline FLOAT Snap (FLOAT v){ return (FLOAT)((int)(v + 0.5f)); } // pixel-align
 
+    // Draw ANSI string via CXBFont (expects UTF-16); convert on the fly.
     inline void DrawAnsi(CXBFont& font, FLOAT x, FLOAT y, DWORD color, const char* text){
         WCHAR wbuf[512];
         MultiByteToWideChar(CP_ACP,0,text,-1,wbuf,512);
         font.DrawText(x,y,color,wbuf,0,0.0f);
     }
 
-    // NEW: center a single-line ANSI string within [left, left+width]
+    // Center a one-line ANSI string horizontally in a span.
     inline void DrawAnsiCenteredX(CXBFont& font, FLOAT left, FLOAT width, FLOAT y, DWORD color, const char* text){
         WCHAR wbuf[512];
         MultiByteToWideChar(CP_ACP,0,text,-1,wbuf,512);
@@ -29,62 +44,62 @@ namespace {
         font.DrawText(x, y, color, wbuf, 0, 0.0f);
     }
 
-	// measure ANSI text
-	inline void MeasureTextWH(CXBFont& font, const char* s, FLOAT& outW, FLOAT& outH){
-		WCHAR wbuf[512];
-		MultiByteToWideChar(CP_ACP, 0, s ? s : "", -1, wbuf, 512);
-		font.GetTextExtent(wbuf, &outW, &outH);
-	}
+    // Measure ANSI string (after ACP->UTF16 conversion).
+    inline void MeasureTextWH(CXBFont& font, const char* s, FLOAT& outW, FLOAT& outH){
+        WCHAR wbuf[512];
+        MultiByteToWideChar(CP_ACP, 0, s ? s : "", -1, wbuf, 512);
+        font.GetTextExtent(wbuf, &outW, &outH);
+    }
 
-	// left-ellipsize: keep the tail, prefix "..."
-	inline void LeftEllipsizeToFit(CXBFont& font, const char* src, FLOAT maxW,
-								char* out, size_t cap){
-		if (!src) { out[0]=0; return; }
-		FLOAT w=0,h=0; MeasureTextWH(font, src, w, h);
-		if (w <= maxW){ _snprintf(out, (int)cap, "%s", src); out[cap-1]=0; return; }
+    // Ellipsize the left side to fit maxW, keeping the tail (useful for paths).
+    inline void LeftEllipsizeToFit(CXBFont& font, const char* src, FLOAT maxW,
+                                   char* out, size_t cap){
+        if (!src) { out[0]=0; return; }
+        FLOAT w=0,h=0; MeasureTextWH(font, src, w, h);
+        if (w <= maxW){ _snprintf(out, (int)cap, "%s", src); out[cap-1]=0; return; }
 
-		const char* tail = src + strlen(src);
-		const char* p    = tail;
-		char buf[1024];  // temp
-		// grow suffix until it would overflow
-		for (;;){
-			if (p == src) break;
-			--p;
-			_snprintf(buf, sizeof(buf), "...%s", p);
-			MeasureTextWH(font, buf, w, h);
-			if (w > maxW){
-				++p; // step back one char, previous was the last that fit
-				break;
-			}
-		}
-		_snprintf(out, (int)cap, "...%s", p);
-		out[cap-1]=0;
-	}
+        const char* tail = src + strlen(src);
+        const char* p    = tail;
+        char buf[1024];  // temp
+        // Walk leftward until "...<suffix>" fits.
+        for (;;){
+            if (p == src) break;
+            --p;
+            _snprintf(buf, sizeof(buf), "...%s", p);
+            MeasureTextWH(font, buf, w, h);
+            if (w > maxW){
+                ++p; // last good char is one ahead
+                break;
+            }
+        }
+        _snprintf(out, (int)cap, "...%s", p);
+        out[cap-1]=0;
+    }
 
-	// --- marquee helpers for progress overlay ---
-	inline void MbToW(const char* s, WCHAR* w, int capW){
-		MultiByteToWideChar(CP_ACP, 0, s ? s : "", -1, w, capW);
-	}
+    // Marquee helpers for progress overlay
+    inline void MbToW(const char* s, WCHAR* w, int capW){
+        MultiByteToWideChar(CP_ACP, 0, s ? s : "", -1, w, capW);
+    }
 
-	// Return pointer to the first byte that starts at (or just before) pixel offset px.
-	static const char* SkipToPixelOffset(CXBFont& font, const char* s, FLOAT px, FLOAT& skippedW){
-		skippedW = 0.0f;
-		if (!s || px <= 0.0f) return s ? s : "";
-		const char* p = s;
-		WCHAR wtmp[256]; FLOAT tw=0, th=0;
-		while (*p){
-			int len = (int)(p - s + 1); if (len > 255) len = 255;
-			char tmp[256]; _snprintf(tmp, sizeof(tmp), "%.*s", len, s);
-			MbToW(tmp, wtmp, 256); font.GetTextExtent(wtmp, &tw, &th);
-			if (tw >= px) break;
-			++p;
-		}
-		skippedW = tw;
-		return p;
-	}
+    // Return first byte index whose rendered width reaches px (for marquee).
+    static const char* SkipToPixelOffset(CXBFont& font, const char* s, FLOAT px, FLOAT& skippedW){
+        skippedW = 0.0f;
+        if (!s || px <= 0.0f) return s ? s : "";
+        const char* p = s;
+        WCHAR wtmp[256]; FLOAT tw=0, th=0;
+        while (*p){
+            int len = (int)(p - s + 1); if (len > 255) len = 255;
+            char tmp[256]; _snprintf(tmp, sizeof(tmp), "%.*s", len, s);
+            MbToW(tmp, wtmp, 256); font.GetTextExtent(wtmp, &tw, &th);
+            if (tw >= px) break;
+            ++p;
+        }
+        skippedW = tw;
+        return p;
+    }
 
-	
-	inline unsigned int BuildDriveMask(){
+    // Build a 26-bit mask of existing drive roots (A:\..Z:\).
+    inline unsigned int BuildDriveMask(){
         unsigned int mask = 0;
         for (char d='A'; d<='Z'; ++d){
             char root[4] = { d, ':', '\\', 0 };
@@ -94,13 +109,16 @@ namespace {
         return mask;
     }
 
-}
+} // anonymous namespace
 
+// ----------------------------------------------------------------------------
+// ctor: set defaults for input, layout, D3D, and app state
 FileBrowserApp::FileBrowserApp(){
     m_visible=13; m_prevA=0; m_prevB=0; m_prevX=0; m_prevY=0; m_active=0;
     m_prevButtons = 0; m_prevWhite = m_prevBlack = 0;
     m_navUDHeld=false; m_navUDDir=0; m_navUDNext=0;
 
+    // Pre-populate D3D params (XDK CXBApplication uses m_d3dpp)
     ZeroMemory(&m_d3dpp,sizeof(m_d3dpp));
     m_d3dpp.BackBufferWidth=1280; m_d3dpp.BackBufferHeight=720;
     m_d3dpp.BackBufferFormat=D3DFMT_X8R8G8B8; m_d3dpp.SwapEffect=D3DSWAPEFFECT_DISCARD;
@@ -112,19 +130,23 @@ FileBrowserApp::FileBrowserApp(){
     m_status[0]=0; m_statusUntilMs=0;
 }
 
-// ----- draw prims -----
+// ----- draw prims ------------------------------------------------------------
+// Small wrapper to match project primitive helpers.
 void FileBrowserApp::DrawRect(float x,float y,float w,float h,D3DCOLOR c){
     DrawSolidRect(m_pd3dDevice, x, y, w, h, c);
 }
 
-// ----- status -----
+// ----- status ---------------------------------------------------------------
+// Set a 3s status toast at the footer (printf-style).
 void FileBrowserApp::SetStatus(const char* fmt, ...){
     va_list ap; va_start(ap, fmt);
     _vsnprintf(m_status, sizeof(m_status), fmt, ap);
     va_end(ap);
     m_status[sizeof(m_status)-1]=0;
-    m_statusUntilMs = GetTickCount() + 3000; // 3s
+    m_statusUntilMs = GetTickCount() + 3000; // show for about 3s
 }
+
+// Append the last Win32 error to a prefix and show as status.
 void FileBrowserApp::SetStatusLastErr(const char* prefix){
     DWORD e = GetLastError();
     char msg[64]; _snprintf(msg, sizeof(msg), "%s (err=%lu)", prefix, (unsigned long)e);
@@ -132,7 +154,8 @@ void FileBrowserApp::SetStatusLastErr(const char* prefix){
     SetStatus("%s", msg);
 }
 
-// ----- listing helpers -----
+// ----- listing helpers ------------------------------------------------------
+// Refresh a pane while trying to preserve selection and scroll.
 void FileBrowserApp::RefreshPane(Pane& p){
     if (p.mode==1){
         int prevSel   = p.sel;
@@ -149,6 +172,7 @@ void FileBrowserApp::RefreshPane(Pane& p){
         if (prevScroll < 0) prevScroll = 0;
         p.scroll = prevScroll;
     } else {
+        // Drive list mode: re-enumerate mounted roots
         BuildDriveItems(p.items);
         if (p.sel >= (int)p.items.size()) p.sel = (int)p.items.size()-1;
         if (p.sel < 0) p.sel = 0;
@@ -156,6 +180,8 @@ void FileBrowserApp::RefreshPane(Pane& p){
     }
 }
 
+// Resolve the destination directory for copy/move based on the other pane.
+// Returns normalized path with trailing slash in outDst on success.
 bool FileBrowserApp::ResolveDestDir(char* outDst, size_t cap){
     Pane& dst = m_pane[1 - m_active];
     outDst[0] = 0;
@@ -166,6 +192,7 @@ bool FileBrowserApp::ResolveDestDir(char* outDst, size_t cap){
         NormalizeDirA(outDst);
         return true;
     }
+    // If the other pane is the drive list, allow selecting a drive as destination.
     if (!dst.items.empty()){
         const Item& di = dst.items[dst.sel];
         if (di.isDir && !di.isUpEntry){
@@ -178,6 +205,7 @@ bool FileBrowserApp::ResolveDestDir(char* outDst, size_t cap){
     return false;
 }
 
+// Select an item in a pane by name and adjust scroll to reveal it.
 void FileBrowserApp::SelectItemInPane(Pane& p, const char* name){
     if (!name || p.items.empty()) return;
     for (int i=0;i<(int)p.items.size();++i){
@@ -190,73 +218,70 @@ void FileBrowserApp::SelectItemInPane(Pane& p, const char* name){
     }
 }
 
-// ----- context menu (delegated) -----
+// ----- context menu (delegated) ---------------------------------------------
+// Pass-through to the ContextMenu component.
 void FileBrowserApp::AddMenuItem(const char* label, Action act, bool enabled){
     m_ctx.AddItem(label, act, enabled);
 }
+
+// Build the context menu based on current mode and selection.
 void FileBrowserApp::BuildContextMenu(){
     Pane& p   = m_pane[m_active];
     bool inDir  = (p.mode == 1);
     bool hasSel = !p.items.empty();
-    int  marked = 0; for (size_t i=0;i<p.items.size();++i) if (p.items[i].marked) ++marked;
+    int  marked = 0; for (size_t i=0; i<p.items.size(); ++i) if (p.items[i].marked) ++marked;
 
     m_ctx.Clear();
 
-    // Decide whether to show "Open" or "Launch" (or nothing)
+    // Primary action label depends on context (Open vs Launch for .xbe).
     if (hasSel) {
         const Item& cur = p.items[p.sel];
-
         bool showPrimary = false;
         const char* primaryLabel = "Open";
-
-        if (p.mode == 0) {
-            // Drive list: always allow Open (items are drives)
-            showPrimary = true;
-            primaryLabel = "Open";
-        } else if (!cur.isUpEntry) {
-            if (cur.isDir) {
-                showPrimary = true;
-                primaryLabel = "Open";
-            } else if (HasXbeExt(cur.name)) {
-                showPrimary = true;
-                primaryLabel = "Launch";
-            }
+        if (p.mode == 0) { showPrimary = true; primaryLabel = "Open"; }
+        else if (!cur.isUpEntry) {
+            if (cur.isDir) { showPrimary = true; primaryLabel = "Open"; }
+            else if (HasXbeExt(cur.name)) { showPrimary = true; primaryLabel = "Launch"; }
         }
-
-        if (showPrimary)
-            AddMenuItem(primaryLabel, ACT_OPEN, true);
+        if (showPrimary) AddMenuItem(primaryLabel, ACT_OPEN, true);
     }
 
-    // The rest of your menu (unchanged)
-    AddMenuItem("Copy",            ACT_COPY,       hasSel);
-    AddMenuItem("Move",            ACT_MOVE,       hasSel);
-    AddMenuItem("Delete",          ACT_DELETE,     hasSel);
-    AddMenuItem("Rename",          ACT_RENAME,     hasSel);
-    AddMenuItem("Make new folder", ACT_MKDIR,      inDir);
-    AddMenuItem("Calculate size",  ACT_CALCSIZE,   hasSel);
-    AddMenuItem("Go to root",      ACT_GOROOT,     inDir);
-    AddMenuItem("Switch pane",     ACT_SWITCHMEDIA,true);
+    // Common operations
+    AddMenuItem("Copy",            ACT_COPY,        hasSel);
+    AddMenuItem("Move",            ACT_MOVE,        hasSel);
+    AddMenuItem("Delete",          ACT_DELETE,      hasSel);
+    AddMenuItem("Rename",          ACT_RENAME,      hasSel);
+    AddMenuItem("Make new folder", ACT_MKDIR,       inDir);
+    AddMenuItem("Calculate size",  ACT_CALCSIZE,    hasSel);
+    AddMenuItem("Go to root",      ACT_GOROOT,      inDir);
+    AddMenuItem("Switch pane",     ACT_SWITCHMEDIA, true);
 
+    // Marking tools (directory mode only; skip the ".." row)
     if (inDir) {
-        // count selectable (exclude "..")
         int selectable = 0;
         for (size_t i=0;i<p.items.size(); ++i) if (!p.items[i].isUpEntry) ++selectable;
         if (selectable > 0) {
-            AddMenuItem("Mark all",     ACT_MARK_ALL,      true);
-            AddMenuItem("Invert marks", ACT_INVERT_MARKS,  true);
+            AddMenuItem("Mark all",     ACT_MARK_ALL,     true);
+            AddMenuItem("Invert marks", ACT_INVERT_MARKS, true);
         }
     }
-
     if (marked) AddMenuItem("Clear marks", ACT_CLEAR_MARKS, true);
+
+    // Bottom-only item on drive list: destructive cache format.
+    if (p.mode == 0) {
+        m_ctx.AddSeparator();                               // visual separator (non-selectable)
+        AddMenuItem("Format cache (X/Y/Z)", ACT_FORMAT_CACHE, true);
+    }
 }
 
-
+// Open and close the menu; switch mode so browse input pauses.
 void FileBrowserApp::OpenMenu(){
     BuildContextMenu();
 
     const FLOAT menuW = 340.0f;
     const FLOAT rowH  = kLineH + 6.0f;
 
+    // Center the popup over the active pane.
     const FLOAT paneX = (m_active==0) ? kListX_L : (kListX_L + kListW + kPaneGap);
     const FLOAT x = paneX + (kListW - menuW)*0.5f;
     const FLOAT y = kListY + 20.0f;
@@ -269,7 +294,9 @@ void FileBrowserApp::CloseMenu(){
     if (m_mode==MODE_MENU) m_mode=MODE_BROWSE;
 }
 
-// ----- rename lifecycle (delegated to OnScreenKeyboard) -----
+// ----- rename lifecycle (OnScreenKeyboard) ----------------------------------
+// Start rename using the OSD keyboard. Close menu first so the A press
+// that opened the keyboard does not trigger other UI.
 void FileBrowserApp::BeginRename(const char* parentDir, const char* oldName){
     m_ctx.Close();             // ensure menu closes
     m_kb.Open(parentDir ? parentDir : "", oldName ? oldName : "");
@@ -289,6 +316,7 @@ void FileBrowserApp::AcceptRename(){
     const Item& sel = ap.items[ap.sel];
     if (sel.isUpEntry) { SetStatus("Rename failed: invalid selection"); CancelRename(); return; }
 
+    // Sanitize to FATX-friendly, then MoveFile within current dir.
     char clean[256]; _snprintf(clean, sizeof(clean), "%s", newName); clean[sizeof(clean)-1]=0;
     SanitizeFatxNameInPlace(clean);
     if (_stricmp(clean, sel.name)==0){ SetStatus("No change"); CancelRename(); return; }
@@ -307,7 +335,8 @@ void FileBrowserApp::AcceptRename(){
     CancelRename();
 }
 
-// Absorb current pad state so the press that closes the keyboard (A/B/Start) doesn’t fall through into browse mode.
+// Absorb the current pad state so the button used to accept/cancel the keyboard
+// does not fall through and act in browse/menu mode.
 void FileBrowserApp::AbsorbPadState(const XBGAMEPAD& pad){
     m_prevButtons = pad.wButtons;
     m_prevA       = pad.bAnalogButtons[XINPUT_GAMEPAD_A];
@@ -318,7 +347,8 @@ void FileBrowserApp::AbsorbPadState(const XBGAMEPAD& pad){
     m_prevBlack   = pad.bAnalogButtons[XINPUT_GAMEPAD_BLACK];
 }
 
-// ----- input: rename modal -----
+// ----- input: rename modal --------------------------------------------------
+// While the keyboard is active, route inputs to it only.
 void FileBrowserApp::OnPad_Rename(const XBGAMEPAD& pad){
     OnScreenKeyboard::Result r = m_kb.OnPad(pad);
 
@@ -338,18 +368,20 @@ void FileBrowserApp::OnPad_Rename(const XBGAMEPAD& pad){
 }
 
 
-// ----- input: context menu (delegated) -----
+// ----- input: context menu (delegated) -------------------------------------
+// Feed pad to the menu; on selection, execute via central AppActions.
 void FileBrowserApp::OnPad_Menu(const XBGAMEPAD& pad){
     Action act;
     ContextMenu::Result r = m_ctx.OnPad(pad, act);
     if (r == ContextMenu::CHOSEN){
-        AppActions::Execute(act, *this);   // <-- call external actions
+        SetStatus("Chosen action=%d", (int)act);   // debug toast
+        AppActions::Execute(act, *this);          // perform action
         CloseMenu();
     } else if (r == ContextMenu::CLOSED){
         CloseMenu();
     }
 
-    // sync browse edge state to avoid carry-over triggers
+    // Sync edge state so the next browse frame does not double-fire.
     m_prevButtons = pad.wButtons;
     m_prevA = pad.bAnalogButtons[XINPUT_GAMEPAD_A];
     m_prevB = pad.bAnalogButtons[XINPUT_GAMEPAD_B];
@@ -358,25 +390,30 @@ void FileBrowserApp::OnPad_Menu(const XBGAMEPAD& pad){
     m_prevBlack = pad.bAnalogButtons[XINPUT_GAMEPAD_BLACK];
 }
 
-// ----- input: browse mode (with auto-repeat) -----
+// ----- input: browse mode (with auto-repeat) -------------------------------
+// Main file-list navigation. Handles dpad/analog, paging, selection,
+// pane switching, and quick mark/unmark on Y.
 void FileBrowserApp::OnPad_Browse(const XBGAMEPAD& pad){
     const DWORD btn = pad.wButtons;
     Pane& p = m_pane[m_active];
 
     // up/down auto-repeat with initial delay
     const DWORD now   = GetTickCount();
-    const int   kDead = 16000;
-    const DWORD kInit = 230;
-    const DWORD kRep  = 120;
+    const int   kDead = 16000; // analog deadzone for vertical stick
+    const DWORD kInit = 230;   // initial delay (ms)
+    const DWORD kRep  = 120;   // repeat rate (ms)
 
+    // Compute desired move: -1 up, +1 down, 0 none.
     int ud = 0;
     if ((btn & XINPUT_GAMEPAD_DPAD_UP)   || pad.sThumbLY >  kDead) ud = -1;
     if ((btn & XINPUT_GAMEPAD_DPAD_DOWN) || pad.sThumbLY < -kDead) ud = +1;
 
+    // Repeat-state machine for smooth scrolling.
     if (ud == 0){
         m_navUDHeld = false; m_navUDDir = 0;
     }else{
         if (!m_navUDHeld || m_navUDDir != ud){
+            // first step
             if (ud < 0){
                 if (p.sel > 0){ --p.sel; if (p.sel < p.scroll) p.scroll = p.sel; }
             }else{
@@ -385,6 +422,7 @@ void FileBrowserApp::OnPad_Browse(const XBGAMEPAD& pad){
             }
             m_navUDHeld = true; m_navUDDir = ud; m_navUDNext = now + kInit;
         }else if (now >= m_navUDNext){
+            // repeats
             if (ud < 0){
                 if (p.sel > 0){ --p.sel; if (p.sel < p.scroll) p.scroll = p.sel; }
             }else{
@@ -395,38 +433,42 @@ void FileBrowserApp::OnPad_Browse(const XBGAMEPAD& pad){
         }
     }
 
-    // pane switch (edge)
+    // pane switch via dpad left/right (edge-detected)
     bool leftTrig  = (btn & XINPUT_GAMEPAD_DPAD_LEFT)  && !(m_prevButtons & XINPUT_GAMEPAD_DPAD_LEFT);
     bool rightTrig = (btn & XINPUT_GAMEPAD_DPAD_RIGHT) && !(m_prevButtons & XINPUT_GAMEPAD_DPAD_RIGHT);
     if (leftTrig)  m_active = 0;
     if (rightTrig) m_active = 1;
 
-    // other buttons (edge)
+    // Other buttons (edge-detected)
     unsigned char a = pad.bAnalogButtons[XINPUT_GAMEPAD_A];
     unsigned char b = pad.bAnalogButtons[XINPUT_GAMEPAD_B];
     unsigned char x = pad.bAnalogButtons[XINPUT_GAMEPAD_X];
-	unsigned char y = pad.bAnalogButtons[XINPUT_GAMEPAD_Y];
+    unsigned char y = pad.bAnalogButtons[XINPUT_GAMEPAD_Y];
     unsigned char w = pad.bAnalogButtons[XINPUT_GAMEPAD_WHITE]; // page down
     unsigned char k = pad.bAnalogButtons[XINPUT_GAMEPAD_BLACK]; // page up
 
     bool aTrig = (a > 30 && m_prevA <= 30);
     bool bTrig = (b > 30 && m_prevB <= 30);
     bool xTrig = (x > 30 && m_prevX <= 30);
-	bool yTrig = (y > 30 && m_prevY <= 30);
+    bool yTrig = (y > 30 && m_prevY <= 30);
     bool wTrig = (w > 30 && m_prevWhite <= 30);
     bool kTrig = (k > 30 && m_prevBlack <= 30);
 
+    // Open context menu on X
     if (xTrig) {
-    OpenMenu();
-    m_prevButtons = btn;
-    m_prevA = a; m_prevB = b; m_prevX = x;
-    m_prevWhite = w; m_prevBlack = k;
-    return;
-}
+        OpenMenu();
+        // absorb state so the X press does not leak into menu
+        m_prevButtons = btn;
+        m_prevA = a; m_prevB = b; m_prevX = x;
+        m_prevWhite = w; m_prevBlack = k;
+        return;
+    }
 
+    // A = enter, B = up one
     if (aTrig) EnterSelection(p);
     if (bTrig) UpOne(p);
 
+    // Black/White = page up/down
     if (kTrig){ // BLACK: page up
         p.sel -= m_visible; if (p.sel < 0) p.sel = 0;
         if (p.sel < p.scroll) p.scroll = p.sel;
@@ -437,83 +479,85 @@ void FileBrowserApp::OnPad_Browse(const XBGAMEPAD& pad){
         if (p.sel >= p.scroll + m_visible) p.scroll = p.sel - (m_visible - 1);
     }
 
-	if (yTrig) {
-    if (p.mode==1 && !p.items.empty()) {
-        Item& it = p.items[p.sel];
-        if (!it.isUpEntry) {
-            it.marked = !it.marked;
-            SetStatus(it.marked ? "Marked" : "Unmarked");
+    // Y = quick toggle mark (skips the ".." entry)
+    if (yTrig) {
+        if (p.mode==1 && !p.items.empty()) {
+            Item& it = p.items[p.sel];
+            if (!it.isUpEntry) {
+                it.marked = !it.marked;
+                SetStatus(it.marked ? "Marked" : "Unmarked");
 
-            // (optional) auto-advance for quick marking
-            int maxSel = (int)p.items.size()-1;
-            if (p.sel < maxSel) {
-                ++p.sel;
-                if (p.sel >= p.scroll + m_visible) p.scroll = p.sel - (m_visible - 1);
+                // Optional auto-advance to speed through marking multiple items.
+                int maxSel = (int)p.items.size()-1;
+                if (p.sel < maxSel) {
+                    ++p.sel;
+                    if (p.sel >= p.scroll + m_visible) p.scroll = p.sel - (m_visible - 1);
+                }
             }
         }
     }
-}
 
+    // Save edge baselines for next frame.
     m_prevButtons = btn;
     m_prevA = a; m_prevB = b; m_prevX = x; m_prevY = y;
     m_prevWhite = w; m_prevBlack = k;
 }
 
-
-
-// ----- input router -----
+// ----- input router ---------------------------------------------------------
+// Route pad to sub-handlers based on current modal state.
 void FileBrowserApp::OnPad(const XBGAMEPAD& pad){
     if (m_mode == MODE_RENAME){ OnPad_Rename(pad); return; }
     if (m_mode == MODE_MENU)  { OnPad_Menu(pad);   return; }
     OnPad_Browse(pad);
 }
 
+// Per-frame app logic. Also poll for drive-set changes and refresh panes.
 HRESULT FileBrowserApp::FrameMove(){
     XBInput_GetInput();
 
-    // --- Auto Map+Rescan if drive set changes ---
+    // Auto map and rescan if drive set changes
     {
         static DWORD        s_nextPollMs = 0;
         static unsigned int s_lastMask   = 0;
 
         DWORD now = GetTickCount();
         if (now >= s_nextPollMs) {
-            s_nextPollMs = now + 1200;              // poll ~1.2s we can weak this if needed.
+            s_nextPollMs = now + 1200;              // poll about 1.2s
 
-            MapStandardDrives_Io();                 // ensure standard links are present
-            unsigned int mask = BuildDriveMask();   // cheap presence mask A:..Z:
+            MapStandardDrives_Io();                 // ensure standard links exist
+            unsigned int mask = BuildDriveMask();   // presence mask A:..Z:
 
             if (s_lastMask == 0) {
-				s_lastMask = mask;					// prime on first run to avoid immediate toast
-			} else if (mask != s_lastMask) {
-				s_lastMask = mask;
+                s_lastMask = mask;                  // prime on first run (no toast)
+            } else if (mask != s_lastMask) {
+                s_lastMask = mask;
                 RescanDrives();                     // re-enumerate volumes
                 EnsureListing(m_pane[0]);           // refresh both panes
                 EnsureListing(m_pane[1]);
-                SetStatus("Drives refreshed");      // brief toast (optional)
+                SetStatus("Drives refreshed");      // brief toast
             }
         }
     }
-    // --------------------------------------------
 
     OnPad(g_Gamepads[0]);
     return S_OK;
 }
 
-// ----- draw: menu / rename / panes -----
+// ----- draw: menu / rename / panes -----------------------------------------
+// Draw the context menu if open (coordinates set in OpenMenu).
 void FileBrowserApp::DrawMenu(){
     if (!m_ctx.IsOpen()) return;
-
-    // (coordinates already set when opening)
     m_ctx.Draw(m_font, m_pd3dDevice);
 }
 
+// Draw OSD keyboard if active.
 void FileBrowserApp::DrawRename(){
     if (!m_kb.Active()) return;
     m_kb.Draw(m_font, m_pd3dDevice, kLineH);
 }
 
-// ----- listing / navigation -----
+// ----- listing / navigation -------------------------------------------------
+// Ensure a pane has items and indices are in range (after mode/path changes).
 void FileBrowserApp::EnsureListing(Pane& p){
     if (p.mode==0) BuildDriveItems(p.items);
     else           ListDirectory(p.curPath, p.items);
@@ -526,50 +570,62 @@ void FileBrowserApp::EnsureListing(Pane& p){
     if (p.scroll > maxScroll) p.scroll = maxScroll;
 }
 
+// Enter current selection (drive -> directory, ".." -> up, dir -> descend,
+// .xbe -> launch). Other files are no-op here.
 void FileBrowserApp::EnterSelection(Pane& p){
     if (p.items.empty()) return;
     const Item& it = p.items[p.sel];
-    if (p.mode==0){ // into drive
+
+    // Drive list -> go into the chosen drive.
+    if (p.mode==0){
         strncpy(p.curPath,it.name,sizeof(p.curPath)-1); p.curPath[sizeof(p.curPath)-1]=0;
         p.mode=1; p.sel=0; p.scroll=0; ListDirectory(p.curPath,p.items); return;
     }
+
+    // Directory listing
     if (it.isUpEntry){
-        if (strlen(p.curPath)<=3){ p.mode=0; p.sel=0; p.scroll=0; BuildDriveItems(p.items); p.curPath[0]=0; }
-        else { ParentPath(p.curPath); p.sel=0; p.scroll=0; ListDirectory(p.curPath,p.items); }
+        // If at root (E:\), switch back to drive list; otherwise go to parent.
+        if (strlen(p.curPath)<=3){
+            p.mode=0; p.sel=0; p.scroll=0; BuildDriveItems(p.items); p.curPath[0]=0;
+        } else {
+            ParentPath(p.curPath); p.sel=0; p.scroll=0; ListDirectory(p.curPath,p.items);
+        }
         return;
     }
     if (it.isDir){
+        // Descend into subdirectory.
         char next[512]; JoinPath(next,sizeof(next),p.curPath,it.name);
         strncpy(p.curPath,next,sizeof(p.curPath)-1); p.curPath[sizeof(p.curPath)-1]=0;
         p.sel=0; p.scroll=0; ListDirectory(p.curPath,p.items); return;
     }
 
+    // Files: launch .xbe if selected (other file types are no-op here).
+    if (!it.isDir && !it.isUpEntry) {
+        if (HasXbeExt(it.name)) {
+            char full[512];
+            JoinPath(full, sizeof(full), p.curPath, it.name);
 
-   // files:
-	if (!it.isDir && !it.isUpEntry) {
-		if (HasXbeExt(it.name)) {
-			char full[512]; 
-			JoinPath(full, sizeof(full), p.curPath, it.name);
+            // Small Present for a snappy visual handoff before XLaunchNewImageA.
+            m_pd3dDevice->Present(NULL, NULL, NULL, NULL);
+            Sleep(10);
 
-			// Optional cosmetic flush so the screen updates before the jump
-			m_pd3dDevice->Present(NULL, NULL, NULL, NULL);
-			Sleep(10);
-
-			if (!LaunchXbeA(full)) {
-				SetStatusLastErr("Launch failed");
-			}
-		}
-		return;
-	}
+            if (!LaunchXbeA(full)) {
+                SetStatusLastErr("Launch failed");
+            }
+        }
+        return;
+    }
 }
 
+// Move up one level; from root goes back to drive list.
 void FileBrowserApp::UpOne(Pane& p){
     if (p.mode==0) return;
     if (strlen(p.curPath)<=3){ p.mode=0; p.sel=0; p.scroll=0; BuildDriveItems(p.items); p.curPath[0]=0; return; }
     ParentPath(p.curPath); p.sel=0; p.scroll=0; ListDirectory(p.curPath,p.items);
 }
 
-// ----- Initialize / Render -----
+// ----- Initialize / Render --------------------------------------------------
+// Create font, input, initial drive mapping, and compute responsive layout.
 HRESULT FileBrowserApp::Initialize(){
     if (FAILED(m_font.Create("D:\\Media\\Font.xpr", 0))) {
         m_font.Create("D:\\Media\\CourierNew.xpr", 0);
@@ -579,6 +635,7 @@ HRESULT FileBrowserApp::Initialize(){
 
     D3DVIEWPORT8 vp; m_pd3dDevice->GetViewport(&vp);
 
+    // Layout derived from viewport size.
     const FLOAT sideMargin = MaxF(24.0f,  vp.Width  * 0.04f);
     const FLOAT gap        = MaxF(24.0f,  vp.Width  * 0.035f);
 
@@ -595,6 +652,7 @@ HRESULT FileBrowserApp::Initialize(){
 
     kLineH  = MaxF(22.0f, vp.Height * 0.036f);
 
+    // Compute visible rows based on remaining height up to a footer band.
     FLOAT bottomY = (FLOAT)vp.Height - MaxF(48.0f, vp.Height * 0.09f);
     FLOAT usableH = bottomY - kListY; if (usableH < 0) usableH = 0;
     m_visible = (int)(usableH / kLineH); if (m_visible < 6) m_visible=6; if (m_visible>30) m_visible=30;
@@ -602,6 +660,8 @@ HRESULT FileBrowserApp::Initialize(){
     return S_OK;
 }
 
+// ----- progress overlay API -------------------------------------------------
+// Begin a copy/move progress session (title and first label for marquee).
 void FileBrowserApp::BeginProgress(ULONGLONG total, const char* firstLabel, const char* title) {
     m_prog.active = true;
     m_prog.done   = 0;
@@ -616,6 +676,7 @@ void FileBrowserApp::BeginProgress(ULONGLONG total, const char* firstLabel, cons
     m_prog.lastPaintMs = 0;
 }
 
+// Update the overlay counters and optional label; throttles repaint to ~25 fps.
 void FileBrowserApp::UpdateProgress(ULONGLONG done, ULONGLONG total, const char* label){
     m_prog.done  = done;
     m_prog.total = (total ? total : m_prog.total);
@@ -624,28 +685,28 @@ void FileBrowserApp::UpdateProgress(ULONGLONG done, ULONGLONG total, const char*
         m_prog.current[sizeof(m_prog.current)-1] = 0;
     }
 
-    // Throttle paints to ~25fps so copying isn't slowed too much
     DWORD now = GetTickCount();
     if (now - m_prog.lastPaintMs >= 40){
         m_prog.lastPaintMs = now;
 
-        // redraw one frame (keep your normal Render path)
+        // redraw one frame (use the normal Render path)
         Render();
-        // tiny yield
         Sleep(0);
     }
 }
 
+// End and clear the progress overlay state.
 void FileBrowserApp::EndProgress(){
     m_prog.active = false;
 }
 
+// Draw the modal progress HUD (centered panel with marquee and bar).
 void FileBrowserApp::DrawProgressOverlay(){
     if (!m_prog.active) return;
 
     D3DVIEWPORT8 vp; m_pd3dDevice->GetViewport(&vp);
 
-    // ensure room for ~42 chars (worst-case with wide glyphs)
+    // Ensure the filename line has room for about 42 glyphs at current font size.
     char fortyTwo[64]; for (int i=0;i<42;++i) fortyTwo[i]='W'; fortyTwo[42]=0;
     FLOAT fileW=0, fileH=0; MeasureTextWH(m_font, fortyTwo, fileW, fileH);
 
@@ -653,32 +714,33 @@ void FileBrowserApp::DrawProgressOverlay(){
     FLOAT w = MaxF(MaxF(420.0f, vp.Width * 0.50f), fileW + margin*2.0f);
     if (w > vp.Width - margin*2.0f) w = vp.Width - margin*2.0f;
 
-    const FLOAT h = 116.0f; // a bit taller so bar + % sit well below text
+    const FLOAT h = 116.0f; // give bar and percent some room under text
     const FLOAT x = Snap((vp.Width  - w)*0.5f);
     const FLOAT y = Snap((vp.Height - h)*0.5f);
 
     DrawRect(x-6, y-6, w+12, h+12, 0xA0101010);
     DrawRect(x,   y,   w,    h,    0xE0222222);
 
-    // lines layout
+    // layout lines within the panel
     const FLOAT titleY  = y + 10.0f;
     const FLOAT folderY = titleY + 24.0f;
     const FLOAT fileY   = folderY + 22.0f;
-    const FLOAT barY    = fileY   + 26.0f;   // << moved down
+    const FLOAT barY    = fileY   + 26.0f;
     const FLOAT barH    = 20.0f;
     const FLOAT barX    = x + margin;
     const FLOAT barW    = w - margin*2.0f;
 
-    // title
+    // title text
     DrawAnsi(m_font, x + margin, titleY, 0xFFFFFFFF, m_prog.title[0] ? m_prog.title : "Working...");
 
-	{
-    const char* hint = "B: Cancel";
-    FLOAT hw=0, hh=0; MeasureTextWH(m_font, hint, hw, hh);
-    DrawAnsi(m_font, x + w - margin - hw, titleY, 0xFFCCCCCC, hint);
-	}
+    // hotkey hint on the right
+    {
+        const char* hint = "B: Cancel";
+        FLOAT hw=0, hh=0; MeasureTextWH(m_font, hint, hw, hh);
+        DrawAnsi(m_font, x + w - margin - hw, titleY, 0xFFCCCCCC, hint);
+    }
 
-    // split folder/file from current label
+    // Split current label into folder and file components.
     const char* label = m_prog.current;
     const char* slash = label ? strrchr(label, '\\') : NULL;
 
@@ -696,80 +758,78 @@ void FileBrowserApp::DrawProgressOverlay(){
         file[sizeof(file)-1]=0;
     }
 
-    // left-truncate folder if too long for the content width
-    // Marquee the folder path if too wide
-{
-    static char  s_lastFolder[512] = {0};
-    static DWORD s_nextTick = 0;
-    static FLOAT s_px = 0.0f;
-    static int   s_dir = +1; // +1 forward, -1 backward
+    // Folder path marquee: scrolls long paths horizontally instead of cutting.
+    {
+        static char  s_lastFolder[512] = {0};
+        static DWORD s_nextTick = 0;
+        static FLOAT s_px = 0.0f;
+        static int   s_dir = +1; // +1 forward, -1 backward
 
-    // measure full width
-    WCHAR wfull[512]; MbToW(folder, wfull, 512);
-    FLOAT fullW=0, fullH=0; m_font.GetTextExtent(wfull, &fullW, &fullH);
+        // Measure the full folder width.
+        WCHAR wfull[512]; MbToW(folder, wfull, 512);
+        FLOAT fullW=0, fullH=0; m_font.GetTextExtent(wfull, &fullW, &fullH);
 
-    const FLOAT drawX = x + margin;
-    const DWORD now   = GetTickCount();
+        const FLOAT drawX = x + margin;
+        const DWORD now   = GetTickCount();
 
-    // Reset scroll when a new operation starts or the folder path changes
-    if (m_prog.done == 0 || _stricmp(s_lastFolder, folder) != 0){
-        _snprintf(s_lastFolder, sizeof(s_lastFolder), "%s", folder);
-        s_px      = 0.0f;
-        s_dir     = +1;
-        s_nextTick= now + 600; // initial pause
-    }
-
-    if (fullW <= barW){
-        // Fits: draw as-is
-        DrawAnsi(m_font, drawX, folderY, 0xFF5EA4FF, folder);
-    }else{
-        // Advance the marquee
-        const DWORD kStepMs     = 25;
-        const FLOAT kStepPx     = 2.0f;
-        const DWORD kInitPause  = 600;
-        const DWORD kEndPause   = 800;
-        const FLOAT maxScroll   = fullW - barW;
-
-        if (now >= s_nextTick){
-            s_px += (s_dir > 0 ? kStepPx : -kStepPx);
-            if (s_px <= 0.0f){ s_px = 0.0f; s_dir = +1; s_nextTick = now + kInitPause; }
-            else if (s_px >= maxScroll){ s_px = maxScroll; s_dir = -1; s_nextTick = now + kEndPause; }
-            else { s_nextTick = now + kStepMs; }
+        // Reset scroll when operation restarts or path changes.
+        if (m_prog.done == 0 || _stricmp(s_lastFolder, folder) != 0){
+            _snprintf(s_lastFolder, sizeof(s_lastFolder), "%s", folder);
+            s_px      = 0.0f;
+            s_dir     = +1;
+            s_nextTick= now + 600; // initial pause
         }
 
-        // Build visible slice starting at pixel offset s_px
-        FLOAT skipped=0.0f;
-        const char* start = SkipToPixelOffset(m_font, folder, s_px, skipped);
+        if (fullW <= barW){
+            // Fits: draw as-is
+            DrawAnsi(m_font, drawX, folderY, 0xFF5EA4FF, folder);
+        }else{
+            // Scroll back and forth with pauses at both ends.
+            const DWORD kStepMs     = 25;
+            const FLOAT kStepPx     = 2.0f;
+            const DWORD kInitPause  = 600;
+            const DWORD kEndPause   = 800;
+            const FLOAT maxScroll   = fullW - barW;
 
-        char vis[512]; vis[0]=0; int n=0;
-        WCHAR wtmp[512]; FLOAT tw=0, th=0;
-        const char* p = start;
-        while (*p && n < (int)sizeof(vis)-2){
-            vis[n++] = *p; vis[n] = 0;
-            MbToW(vis, wtmp, 512); m_font.GetTextExtent(wtmp, &tw, &th);
-            if (tw > barW){ vis[--n] = 0; break; }
-            ++p;
+            if (now >= s_nextTick){
+                s_px += (s_dir > 0 ? kStepPx : -kStepPx);
+                if (s_px <= 0.0f){ s_px = 0.0f; s_dir = +1; s_nextTick = now + kInitPause; }
+                else if (s_px >= maxScroll){ s_px = maxScroll; s_dir = -1; s_nextTick = now + kEndPause; }
+                else { s_nextTick = now + kStepMs; }
+            }
+
+            // Build visible substring at the current scroll offset.
+            FLOAT skipped=0.0f;
+            const char* start = SkipToPixelOffset(m_font, folder, s_px, skipped);
+
+            char vis[512]; vis[0]=0; int n=0;
+            WCHAR wtmp[512]; FLOAT tw=0, th=0;
+            const char* p = start;
+            while (*p && n < (int)sizeof(vis)-2){
+                vis[n++] = *p; vis[n] = 0;
+                MbToW(vis, wtmp, 512); m_font.GetTextExtent(wtmp, &tw, &th);
+                if (tw > barW){ vis[--n] = 0; break; }
+                ++p;
+            }
+
+            DrawAnsi(m_font, drawX, folderY, 0xFF5EA4FF, vis);
         }
-
-        DrawAnsi(m_font, drawX, folderY, 0xFF5EA4FF, vis);
     }
-}
 
-    // filename (shown as-is; 42-char names fit due to width above)
+    // Filename (kept as-is; width budget handled by panel size above).
     DrawAnsi(m_font, x + margin, fileY, 0xFF89D07E, file);
 
-    // progress value
+    // Progress percentage (0..100) and fill bar.
     FLOAT pct = 0.0f;
     if (m_prog.total > 0){
         pct = (FLOAT)((double)m_prog.done / (double)m_prog.total);
         if (pct < 0) pct = 0; if (pct > 1) pct = 1;
     }
 
-    // bar
     DrawRect(barX, barY, barW,       barH, 0xFF0E0E0E);
     DrawRect(barX, barY, barW * pct, barH, 0x90FFFF00);
 
-    // % label aligned with the bar, right side and vertically centered to it
+    // Right-aligned % label centered on the bar vertically.
     char t[32]; _snprintf(t, sizeof(t), "%u%%", (unsigned int)(pct*100.0f + 0.5f)); t[sizeof(t)-1]=0;
     FLOAT tw=0, th=0; MeasureTextWH(m_font, t, tw, th);
     const FLOAT tx = Snap(barX + barW - tw);
@@ -777,9 +837,8 @@ void FileBrowserApp::DrawProgressOverlay(){
     DrawAnsi(m_font, tx, ty, 0xFFEEEEEE, t);
 }
 
-
-
-
+// ----- main render ----------------------------------------------------------
+// Draw both panes, footer and hints, transient status, and any overlays.
 HRESULT FileBrowserApp::Render(){
     m_pd3dDevice->Clear(0,NULL,D3DCLEAR_TARGET,0x20202020,1.0f,0);
     m_pd3dDevice->BeginScene();
@@ -787,7 +846,7 @@ HRESULT FileBrowserApp::Render(){
     m_pd3dDevice->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
     m_pd3dDevice->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
 
-    // left + right panes (now via PaneRenderer)
+    // Render left and right panes via the renderer helper.
     PaneStyle st;
     st.listW       = kListW;
     st.listY       = kListY;
@@ -801,41 +860,43 @@ HRESULT FileBrowserApp::Render(){
     st.visibleRows = m_visible;
 
     m_renderer.DrawPane(m_font, m_pd3dDevice, kListX_L,                     m_pane[0], m_active==0, st, 0);
-	m_renderer.DrawPane(m_font, m_pd3dDevice, kListX_L + kListW + kPaneGap, m_pane[1], m_active==1, st, 1);
+    m_renderer.DrawPane(m_font, m_pd3dDevice, kListX_L + kListW + kPaneGap, m_pane[1], m_active==1, st, 1);
 
-    // footer
+    // footer band with control hints and disk space
     D3DVIEWPORT8 vp2; m_pd3dDevice->GetViewport(&vp2);
-	const FLOAT footerY = (FLOAT)vp2.Height - MaxF(48.0f, vp2.Height * 0.09f);
-	const FLOAT footerX = HdrX(kListX_L);
-	const FLOAT footerW = kHdrW*2 + kPaneGap + 30.0f;
+    const FLOAT footerY = (FLOAT)vp2.Height - MaxF(48.0f, vp2.Height * 0.09f);
+    const FLOAT footerX = HdrX(kListX_L);
+    const FLOAT footerW = kHdrW*2 + kPaneGap + 30.0f;
 
-	const Pane& ap = m_pane[m_active];
-	const Item* cur = (ap.items.empty()? NULL : &ap.items[ap.sel]);
-	const char* yLabel = (cur && !cur->isUpEntry && cur->marked) ? "Unmark" : "Mark";
+    const Pane& ap = m_pane[m_active];
+    const Item* cur = (ap.items.empty()? NULL : &ap.items[ap.sel]);
+    const char* yLabel = (cur && !cur->isUpEntry && cur->marked) ? "Unmark" : "Mark";
 
-	DrawRect(footerX, footerY, footerW, 28.0f, 0x802A2A2A);
+    DrawRect(footerX, footerY, footerW, 28.0f, 0x802A2A2A);
 
-	if (m_pane[m_active].mode==0){
-		const char* hints = "D-Pad: Move  |  Left/Right: Switch pane  |  A: Enter  |  X: Menu  |  Black/White: Page";
-		DrawAnsiCenteredX(m_font, footerX, footerW, footerY+4.0f, 0xFFCCCCCC, hints);
-	} else {
-		ULONGLONG fb=0, tb=0; GetDriveFreeTotal(m_pane[m_active].curPath, fb, tb);
-		char fstr[64], tstr[64], bar[420];
-		FormatSize(fb, fstr, sizeof(fstr)); FormatSize(tb, tstr, sizeof(tstr));
-		_snprintf(bar,sizeof(bar),
-				"Active: %s   |   B: Up   |   Free: %s / Total: %s   |   X: Menu   |   Y: %s   |   Black/White: Page",
-    (			m_active==0?"Left":"Right"), fstr, tstr, yLabel);
-		bar[sizeof(bar)-1]=0;
-		DrawAnsiCenteredX(m_font, footerX, footerW, footerY+4.0f, 0xFFCCCCCC, bar);
-	}
+    // Hints differ between drive list and directory mode.
+    if (m_pane[m_active].mode==0){
+        const char* hints = "D-Pad: Move  |  Left/Right: Switch pane  |  A: Enter  |  X: Menu  |  Black/White: Page";
+        DrawAnsiCenteredX(m_font, footerX, footerW, footerY+4.0f, 0xFFCCCCCC, hints);
+    } else {
+        ULONGLONG fb=0, tb=0; GetDriveFreeTotal(m_pane[m_active].curPath, fb, tb);
+        // Build Free/Total string for the active drive.
+        char fstr[64], tstr[64], bar[420];
+        FormatSize(fb, fstr, sizeof(fstr)); FormatSize(tb, tstr, sizeof(tstr));
+        _snprintf(bar,sizeof(bar),
+                "Active: %s   |   B: Up   |   Free: %s / Total: %s   |   X: Menu   |   Y: %s   |   Black/White: Page",
+                (m_active==0?"Left":"Right"), fstr, tstr, yLabel);
+        bar[sizeof(bar)-1]=0;
+        DrawAnsiCenteredX(m_font, footerX, footerW, footerY+4.0f, 0xFFCCCCCC, bar);
+    }
 
-    // transient status
+    // transient status toast (centered above the footer)
     DWORD now = GetTickCount();
     if (now < m_statusUntilMs && m_status[0]){
         DrawAnsiCenteredX(m_font, footerX, footerW, footerY +25.0f, 0xFFBBDDEE, m_status);
-
     }
 
+    // Modal overlays (menu/keyboard/progress) render last.
     DrawMenu();
     DrawRename();
     DrawProgressOverlay();
@@ -844,7 +905,7 @@ HRESULT FileBrowserApp::Render(){
     return S_OK;
 }
 
-// ---- static layout defaults (overwritten in Initialize) ----
+// ---- static layout defaults (overwritten in Initialize) --------------------
 FLOAT FileBrowserApp::kListX_L    = 50.0f;
 FLOAT FileBrowserApp::kListY      = 100.0f;
 FLOAT FileBrowserApp::kListW      = 540.0f;

@@ -4,13 +4,29 @@
 #include <ctype.h>
 #include <stdio.h>  // _snprintf
 
-// --- xboxkrnl drive link APIs ---
+/*
+============================================================================
+ FsUtil
+  - OG Xbox / XDK utility functions used by the file browser.
+  - Drive letter mapping (IoCreateSymbolicLink)
+  - Directory listing and basic FS ops
+  - Copy/move helpers with progress callbacks
+  - .xbe launcher (remaps D: and calls XLaunchNewImageA)
+  - FATX cache format helpers (X/Y/Z) via XapiFormatFATVolumeEx
+============================================================================
+*/
+
+
+// --- xboxkrnl drive link APIs ------------------------------------------------
+// We create DOS-style links like "\??\E:" that point to kernel device paths such
+// as "\Device\Harddisk0\Partition1". STATUS_SUCCESS == 0 on Xbox.
 extern "C" {
     typedef struct _STRING { USHORT Length; USHORT MaximumLength; PCHAR Buffer; } STRING, *PSTRING;
     LONG __stdcall IoCreateSymbolicLink(PSTRING SymbolicLinkName, PSTRING DeviceName);
     LONG __stdcall IoDeleteSymbolicLink(PSTRING SymbolicLinkName);
 }
 
+// Small helpers to build XDK STRINGs and "\??\X:" strings.
 static inline void BuildString(STRING& s,const char* z){
     USHORT L=(USHORT)strlen(z); s.Length=L; s.MaximumLength=L+1; s.Buffer=(PCHAR)z;
 }
@@ -19,10 +35,12 @@ static inline void MakeDosString(char* out,size_t cap,const char* letter){
 }
 
 #ifndef FILE_READ_ONLY_VOLUME
-#define FILE_READ_ONLY_VOLUME 0x00080000u  // Win32 FILE_READ_ONLY_VOLUME
+#define FILE_READ_ONLY_VOLUME 0x00080000u  // Win32 FILE_READ_ONLY_VOLUME (for GetVolumeInformationA)
 #endif
 
-// ---- progress callback state ----
+// ============================================================================
+// Copy progress callback plumbing
+// ============================================================================
 static CopyProgressFn g_copyProgFn = 0;
 static void*          g_copyProgUser = 0;
 
@@ -31,7 +49,11 @@ void SetCopyProgressCallback(CopyProgressFn fn, void* user){
     g_copyProgUser = user;
 }
 
-// --- helpers ---
+// ============================================================================
+// Attribute & volume helpers
+// ============================================================================
+
+// Remove READONLY/SYSTEM/HIDDEN so we can delete/overwrite.
 static inline void StripROSysHiddenA(const char* path){
     DWORD a = GetFileAttributesA(path);
     if (a == INVALID_FILE_ATTRIBUTES) return;
@@ -39,21 +61,31 @@ static inline void StripROSysHiddenA(const char* path){
     if (na != a) SetFileAttributesA(path, na);
 }
 
+// Detect read-only volumes. If GetVolumeInformationA fails, treat D:\ (DVD)
+// as read-only to be safe on OG Xbox.
 static bool IsReadOnlyVolumeA(const char* path){
     if (!path || !path[0]) return false;
     char root[4]; _snprintf(root, sizeof(root), "%c:\\", (char)toupper((unsigned char)path[0])); root[sizeof(root)-1]=0;
     DWORD fsFlags = 0;
-    // If GetVolumeInformationA isn't available in your SDK, fall back to simple D:\ check.
     if (GetVolumeInformationA(root, NULL, 0, NULL, NULL, &fsFlags, NULL, 0))
         return (fsFlags & FILE_READ_ONLY_VOLUME) != 0;
     return (root[0] == 'D'); // OG Xbox DVD
 }
 
+// ============================================================================
+// Drive letter mapping (DOS -> device) via IoCreateSymbolicLink
+// ============================================================================
+
 static BOOL MapLetterToDevice(const char* letter,const char* devicePath){
+    // Remove any stale mapping first
     char dosBuf[16]={0}; MakeDosString(dosBuf,sizeof(dosBuf),letter);
     STRING sDos; BuildString(sDos,dosBuf); IoDeleteSymbolicLink(&sDos);
+
+    // Create new mapping
     STRING sDev; BuildString(sDev,devicePath);
     if (IoCreateSymbolicLink(&sDos,&sDev)!=0) return FALSE; // STATUS_SUCCESS==0
+
+    // Light probe to confirm the new link resolves
     char root[8]={0}; _snprintf(root,sizeof(root),"%s\\",letter);
     if (GetFileAttributesA(root)==INVALID_FILE_ATTRIBUTES){
         IoDeleteSymbolicLink(&sDos); return FALSE;
@@ -61,6 +93,7 @@ static BOOL MapLetterToDevice(const char* letter,const char* devicePath){
     return TRUE;
 }
 
+// Standard OG Xbox letters: C/E/X/Y/Z/F/G plus D (DVD).
 void MapStandardDrives_Io(){
     MapLetterToDevice("D:","\\Device\\Cdrom0");
     MapLetterToDevice("C:","\\Device\\Harddisk0\\Partition2");
@@ -72,7 +105,87 @@ void MapStandardDrives_Io(){
     MapLetterToDevice("G:","\\Device\\Harddisk0\\Partition7");
 }
 
-// ---- present drive detection (private state) ----
+// ============================================================================
+// FATX cache format helpers (X/Y/Z) using XDK's XapiFormatFATVolumeEx
+//  - We pass a *device path* (not a drive letter) to guarantee a real format.
+//  - bytesPerCluster = 0 -> 16 KiB (typical for cache partitions)
+// ============================================================================
+
+extern "C" {
+typedef struct _ANSI_STRING_ { USHORT Length; USHORT MaximumLength; PCHAR Buffer; } ANSI_STRING_, *PANSI_STRING_;
+void  __stdcall RtlInitAnsiString(PANSI_STRING_ DestinationString, const char* SourceString);
+BOOL  WINAPI    XapiFormatFATVolumeEx(PANSI_STRING_ VolumePath, ULONG BytesPerCluster);
+}
+
+// Translate X/Y/Z drive letters to their device paths.
+static const char* _CacheLetterToDevice(char dl)
+{
+    char c = (dl >= 'a' && dl <= 'z') ? (char)(dl - 32) : dl;
+    switch (c) {
+        case 'X': return "\\Device\\Harddisk0\\Partition3";
+        case 'Y': return "\\Device\\Harddisk0\\Partition4";
+        case 'Z': return "\\Device\\Harddisk0\\Partition5";
+        default:  return 0;
+    }
+}
+
+// Low-level format call: writes FATX superblock + FAT and empties root.
+static bool _FormatDeviceFatx(const char* devicePath, unsigned long bytesPerCluster)
+{
+    if (!devicePath || !devicePath[0]) { SetLastError(ERROR_INVALID_PARAMETER); return false; }
+    if (bytesPerCluster == 0) bytesPerCluster = 16 * 1024; // default for cache
+
+    ANSI_STRING_ vol;
+    RtlInitAnsiString(&vol, devicePath);
+
+    // Nonzero on success per XDK
+    BOOL ok = XapiFormatFATVolumeEx(&vol, bytesPerCluster);
+    if (!ok) {
+        // XapiFormatFATVolumeEx does not expose a concrete last error.
+        // Caller reads only success/failure.
+        return false;
+    }
+    return true;
+}
+
+// Public: format exactly one cache drive (X/Y/Z). Temporarily unmaps the DOS
+// link to avoid open-handle surprises, then restores standard mapping.
+bool FormatCacheDrive(char driveLetter, unsigned long bytesPerCluster)
+{
+    const char* dev = _CacheLetterToDevice(driveLetter);
+    if (!dev) { SetLastError(ERROR_INVALID_PARAMETER); return false; }
+
+    // Best-effort unmap DOS link first
+    char dosBuf[16] = {0};
+    _snprintf(dosBuf, sizeof(dosBuf), "\\??\\%c:", (driveLetter >= 'a' && driveLetter <= 'z') ? (driveLetter - 32) : driveLetter);
+    STRING sDos; BuildString(sDos, dosBuf);
+    IoDeleteSymbolicLink(&sDos);
+
+    bool ok = _FormatDeviceFatx(dev, bytesPerCluster);
+
+    // Always restore standard letters so the app keeps working
+    MapStandardDrives_Io();
+    return ok;
+}
+
+// Format X, Y, Z; optionally blow away and recreate E:\CACHE for good measure.
+bool FormatCacheXYZ(unsigned long bytesPerCluster, bool alsoClearECACHE)
+{
+    bool okX = FormatCacheDrive('X', bytesPerCluster);
+    bool okY = FormatCacheDrive('Y', bytesPerCluster);
+    bool okZ = FormatCacheDrive('Z', bytesPerCluster);
+
+    if (alsoClearECACHE) {
+        DeleteRecursiveA("E:\\CACHE");
+        EnsureDirA("E:\\CACHE");
+    }
+    return okX && okY && okZ;
+}
+
+// ============================================================================
+// Drive discovery for the drive list
+// ============================================================================
+
 namespace {
     const char* kRoots[] = { "C:\\", "D:\\", "E:\\", "F:\\", "G:\\", "X:\\", "Y:\\", "Z:\\" };
     const int   kNumRoots = sizeof(kRoots)/sizeof(kRoots[0]);
@@ -82,6 +195,7 @@ namespace {
     inline int ci_cmp(const char* a,const char* b){ return _stricmp(a,b); }
 }
 
+// Probe which standard roots exist and record indices into kRoots[]
 void RescanDrives(){
     g_presentCount = 0;
     for (int i=0;i<kNumRoots && g_presentCount<(int)(sizeof(g_presentIdx)/sizeof(g_presentIdx[0])); ++i){
@@ -90,6 +204,7 @@ void RescanDrives(){
     }
 }
 
+// Build drive items (e.g., "E:\") into 'out'.
 void BuildDriveItems(std::vector<Item>& out){
     out.clear();
     for (int j=0;j<g_presentCount;++j){
@@ -100,6 +215,10 @@ void BuildDriveItems(std::vector<Item>& out){
         out.push_back(it);
     }
 }
+
+// ============================================================================
+// Path helpers
+// ============================================================================
 
 void EnsureTrailingSlash(char* s,size_t cap){
     size_t n=strlen(s);
@@ -127,22 +246,32 @@ bool IsDriveRoot(const char* p){
 }
 
 void NormalizeDirA(char* s){
+    // "E:" -> "E:\" ; always ensure trailing slash
     size_t n = strlen(s);
     if (n==2 && s[1]==':'){ s[2]='\\'; s[3]=0; return; }
     EnsureTrailingSlash(s, 512);
 }
 
+// Sort: directories first, then case-insensitive by name.
 static bool ItemLess(const Item& a,const Item& b){
     if(a.isDir!=b.isDir) return a.isDir>b.isDir;
     return ci_cmp(a.name,b.name)<0;
 }
 
+// ============================================================================
+// Directory listing
+//  - Prepends a synthetic ".." entry for non-root folders.
+//  - Sorts (dirs first, then by name) while keeping the ".." at index 0.
+// ============================================================================
 bool ListDirectory(const char* path,std::vector<Item>& out){
     out.clear();
+
+    // For non-root, push ".." to allow going up.
     if(strlen(path)>3){
         Item up; ZeroMemory(&up,sizeof(up));
         strncpy(up.name,"..",3); up.isDir=true; up.size=0; up.isUpEntry=true; up.marked=false; out.push_back(up);
     }
+
     char base[512]; _snprintf(base,sizeof(base),"%s",path); base[sizeof(base)-1]=0; EnsureTrailingSlash(base,sizeof(base));
     char mask[512]; _snprintf(mask,sizeof(mask),"%s*",base); mask[sizeof(mask)-1]=0;
 
@@ -158,12 +287,15 @@ bool ListDirectory(const char* path,std::vector<Item>& out){
     }while(FindNextFileA(h,&fd));
     FindClose(h);
 
-    size_t start=(strlen(path)>3)?1:0;
+    size_t start=(strlen(path)>3)?1:0; // keep ".." in place
     if(out.size()>start+1) std::sort(out.begin()+(int)start,out.end(),ItemLess);
     return true;
 }
 
-// ---- misc helpers ----
+// ============================================================================
+// Misc info helpers
+// ============================================================================
+
 void FormatSize(ULONGLONG sz, char* out, size_t cap){
     const char* unit="B"; double v=(double)sz;
     if(sz>=(1ULL<<30)){ v/=(double)(1ULL<<30); unit="GB"; }
@@ -179,7 +311,10 @@ void GetDriveFreeTotal(const char* anyPathInDrive, ULONGLONG& freeBytes, ULONGLO
     if(GetDiskFreeSpaceExA(root,&a,&t,&f)){ freeBytes=f.QuadPart; totalBytes=t.QuadPart; }
 }
 
-// ---- fs ops ----
+// ============================================================================
+// Basic FS ops
+// ============================================================================
+
 bool DirExistsA(const char* path){
     DWORD a = GetFileAttributesA(path);
     return (a != INVALID_FILE_ATTRIBUTES) && (a & FILE_ATTRIBUTE_DIRECTORY);
@@ -191,6 +326,9 @@ bool EnsureDirA(const char* path){
     return CreateDirectoryA(path, NULL) ? true : false;
 }
 
+// Recursively delete files/directories with attribute clearing and safety rails:
+//  - Rejects drive roots
+//  - Rejects read-only volumes
 bool DeleteRecursiveA(const char* path){
     if (!path || !path[0]) { SetLastError(ERROR_INVALID_PARAMETER); return false; }
     if (IsDriveRoot(path)) { SetLastError(ERROR_ACCESS_DENIED);     return false; }
@@ -215,26 +353,24 @@ bool DeleteRecursiveA(const char* path){
                 // Clear attributes on each child before deleting
                 StripROSysHiddenA(sub);
 
-                // Best-effort delete; if any fail, we still keep trying others
+                // Best-effort delete; continue on failure
                 if (!DeleteRecursiveA(sub)){
-                    // optional: record the first error somewhere if you want detailed reporting
+                    // optional: collect first error somewhere if desired
                 }
             } while (FindNextFileA(h, &fd));
             FindClose(h);
         }
 
-        // Try removing the (now hopefully empty) directory
-        // Some filesystems lag; 1 quick retry helps.
+        // Try removing the (now empty) directory (with a tiny retry)
         if (!RemoveDirectoryA(path)){
             Sleep(1);
-            StripROSysHiddenA(path); // in case attributes flipped back
+            StripROSysHiddenA(path);
             return RemoveDirectoryA(path) ? true : false;
         }
         return true;
     }else{
-        // File: clear attributes then delete
+        // File: clear attributes then delete (retry once)
         if (!DeleteFileA(path)){
-            // one retry after ensuring attributes
             StripROSysHiddenA(path);
             return DeleteFileA(path) ? true : false;
         }
@@ -242,27 +378,36 @@ bool DeleteRecursiveA(const char* path){
     }
 }
 
-// Xbe launching
+// ============================================================================
+// File type helpers
+// ============================================================================
+
 bool HasXbeExt(const char* name){
     if (!name) return false;
     const char* dot = strrchr(name, '.');
     return (dot && _stricmp(dot, ".xbe") == 0);
 }
-// ====== Progress copy implementation ======
+
+// ============================================================================
+// Copy (chunked) + recursive copy with progress/cancel
+//  - CopyFileChunkedA: fixed 64 KiB buffer, attribute normalization
+//  - CopyRecursiveCoreA: mkdirs and recurse
+//  - CopyRecursiveWithProgressA: guards against copying into a subfolder of self
+// ============================================================================
 
 static bool CopyFileChunkedA(const char* s, const char* d,
                              ULONGLONG& inoutBytesDone, ULONGLONG totalBytes)
 {
-    // open source
+    // Open source (read-only, allow sharing with readers)
     HANDLE hs = CreateFileA(s, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING,
                             FILE_ATTRIBUTE_NORMAL, NULL);
     if (hs == INVALID_HANDLE_VALUE) return false;
 
-    // ---- preflight destination: allow overwrite even if dest is read-only/hidden/system
+    // Preflight destination: normalize attributes if overwriting a file
     DWORD da = GetFileAttributesA(d);
     if (da != INVALID_FILE_ATTRIBUTES) {
         if (da & FILE_ATTRIBUTE_DIRECTORY) {
-            // name collision with a directory
+            // Name collision with existing directory
             CloseHandle(hs);
             SetLastError(ERROR_ALREADY_EXISTS);
             return false;
@@ -271,7 +416,7 @@ static bool CopyFileChunkedA(const char* s, const char* d,
         if (na != da) SetFileAttributesA(d, na);
     }
 
-    // open/create dest
+    // Create/overwrite dest (no sharing)
     HANDLE hd = CreateFileA(d, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
                             FILE_ATTRIBUTE_NORMAL, NULL);
     if (hd == INVALID_HANDLE_VALUE){ CloseHandle(hs); return false; }
@@ -291,7 +436,7 @@ static bool CopyFileChunkedA(const char* s, const char* d,
 
         inoutBytesDone += wr;
 
-        // progress/cancel callback
+        // Progress/cancel callback
         if (g_copyProgFn){
             if (!g_copyProgFn(inoutBytesDone, totalBytes, s, g_copyProgUser)){
                 ok = false; break; // canceled
@@ -303,37 +448,16 @@ static bool CopyFileChunkedA(const char* s, const char* d,
     CloseHandle(hs);
     CloseHandle(hd);
 
-	// File Attributes preserve some
-    //if (!ok) {
-    //    // best-effort cleanup of partial file (clear attrs in case they flipped)
-    //    StripROSysHiddenA(d);
-    //    DeleteFileA(d);
-    //    return false;
-    //}
-
-    //// ---- optional: normalize/preserve some source attributes on the copy
-    //// (keeps HIDDEN/ARCHIVE; never sets READONLY/SYSTEM on the dest)
-    //DWORD sa = GetFileAttributesA(s);
-    //if (sa != INVALID_FILE_ATTRIBUTES) {
-    //    DWORD keep = sa & (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_ARCHIVE);
-    //    SetFileAttributesA(d, FILE_ATTRIBUTE_NORMAL | keep);
-    //}
-
-    //return true;
-
-
-	//Remove All File Attributes when copying files to destination.
-
+    // Normalize destination attributes; on failure, remove partial.
 	if (!ok) {
-    // Best-effort: remove partial when canceled/error
-    DeleteFileA(d);
+        DeleteFileA(d);
 	} else {
-		// Do NOT preserve any attributes from source
 		SetFileAttributesA(d, FILE_ATTRIBUTE_NORMAL);
 	}
-return ok;
+    return ok;
 }
 
+// Core recursive copy: directory creation + per-file copy.
 static bool CopyRecursiveCoreA(const char* srcPath, const char* dstDir,
                                ULONGLONG& inoutBytesDone, ULONGLONG totalBytes)
 {
@@ -345,8 +469,8 @@ static bool CopyRecursiveCoreA(const char* srcPath, const char* dstDir,
 
     if (a & FILE_ATTRIBUTE_DIRECTORY){
         if (!EnsureDirA(dstPath)) return false;
-		    
-		// Do NOT preserve any attributes from source folder comment line to preserve
+
+		// Do NOT preserve source dir attributes
 		SetFileAttributesA(dstPath, FILE_ATTRIBUTE_NORMAL);
 
         char mask[512]; JoinPath(mask, sizeof(mask), srcPath, "*");
@@ -366,7 +490,7 @@ static bool CopyRecursiveCoreA(const char* srcPath, const char* dstDir,
     }
 }
 
-// --- subfolder guard helpers ---
+// Helpers to detect "copy into own subfolder" (case-insensitive).
 static void NormalizeSlashEnd(char* s, size_t cap) {
     size_t n = strlen(s);
     if (n && s[n-1] != '\\' && n+1 < cap) { s[n] = '\\'; s[n+1] = 0; }
@@ -378,20 +502,21 @@ static bool IsSubPathCI(const char* parent, const char* child) {
     return _strnicmp(p, c, strlen(p)) == 0;
 }
 
+// Public entry for recursive copy with progress and a safety check.
 bool CopyRecursiveWithProgressA(const char* srcPath, const char* dstDir,
                                 ULONGLONG totalBytes)
 {
-    // Build the top-level destination (dstDir + basename(srcPath))
+    // Compute dstTop = dstDir\basename(srcPath)
     const char* base = strrchr(srcPath, '\\'); base = base ? base+1 : srcPath;
     char dstTop[512]; JoinPath(dstTop, sizeof(dstTop), dstDir, base);
 
-    // Guard: prevent copying a folder into itself or its subfolders
+    // Guard: prevent copying into own subfolder
     if (IsSubPathCI(srcPath, dstTop)) {
         SetLastError(ERROR_INVALID_PARAMETER);
         return false;
     }
 
-    // Optional: free-space sanity check (skip if totalBytes==0 or unknown)
+    // Optional free-space preflight
     if (totalBytes > 0) {
         ULONGLONG freeB=0, totalB=0;
         GetDriveFreeTotal(dstDir, freeB, totalB);
@@ -405,7 +530,10 @@ bool CopyRecursiveWithProgressA(const char* srcPath, const char* dstDir,
     return CopyRecursiveCoreA(srcPath, dstDir, done, totalBytes);
 }
 
-// ---- size calc ----
+// ============================================================================
+// Size calculation (recursive)
+// ============================================================================
+
 ULONGLONG DirSizeRecursiveA(const char* path){
     ULONGLONG sum = 0;
     DWORD a = GetFileAttributesA(path);
@@ -435,6 +563,7 @@ ULONGLONG DirSizeRecursiveA(const char* path){
     return sum;
 }
 
+// Quick write test: create + delete a small temp file in 'dir'.
 bool CanWriteHereA(const char* dir){
     char test[512];
     JoinPath(test, sizeof(test), dir, ".__xwtest$__");
@@ -447,7 +576,10 @@ bool CanWriteHereA(const char* dir){
     return true;
 }
 
-// ---- FATX-ish name rules ----
+// ============================================================================
+// FATX-ish naming rules (very close to what dashboards/games expect)
+// ============================================================================
+
 bool IsBadFatxChar(char c){
     if ((unsigned char)c < 32) return true;
     const char* bad = "\\/:*?\"<>|+,;=[]";
@@ -462,7 +594,13 @@ void SanitizeFatxNameInPlace(char* s){
     if (n==0 || (strcmp(s,".")==0) || (strcmp(s,"..")==0)) strcpy(s, "NewName");
 }
 
-// --- private: DOS "E:\Games\Foo" -> device path "\Device\Harddisk0\Partition1\Games\Foo"
+// ============================================================================
+// .xbe launcher
+//  - Accepts either a specific .xbe or a directory (launches default.xbe).
+//  - Repoints D: to the folder's *device path* and calls XLaunchNewImageA.
+// ============================================================================
+
+// DOS "E:\Games\Foo" -> device "\Device\Harddisk0\Partition1\Games\Foo"
 static bool DosToDevicePathA(const char* dos, char* out, size_t cap){
     if (!dos || strlen(dos) < 2 || dos[1] != ':') return false;
     char drive = (char)toupper((unsigned char)dos[0]);
@@ -487,17 +625,17 @@ static bool DosToDevicePathA(const char* dos, char* out, size_t cap){
     return true;
 }
 
-// --- public: launch .xbe (path to .xbe OR folder containing default.xbe)
+// Launch a .xbe or a folder's default.xbe by remapping D: and jumping to it.
 bool LaunchXbeA(const char* pathOrDir)
 {
     if (!pathOrDir || !pathOrDir[0]){ SetLastError(ERROR_INVALID_PARAMETER); return false; }
 
-    // Decide directory to mount + file to launch
+    // Compute directory+file to mount/launch
     char dir[512]; dir[0]=0;
     char file[256]; file[0]=0;
 
     if (HasXbeExt(pathOrDir)){
-        // path is "...\<name>.xbe"
+        // path = "...\<name>.xbe"
         const char* slash = strrchr(pathOrDir, '\\');
         _snprintf(file, sizeof(file), "%s", slash ? slash+1 : pathOrDir);
         file[sizeof(file)-1]=0;
@@ -506,26 +644,27 @@ bool LaunchXbeA(const char* pathOrDir)
         ParentPath(dir);
         EnsureTrailingSlash(dir, sizeof(dir));
     } else {
-        // path is a folder: launch default.xbe from there
+        // path = folder: launch default.xbe inside it
         _snprintf(dir, sizeof(dir), "%s", pathOrDir); dir[sizeof(dir)-1]=0;
         EnsureTrailingSlash(dir, sizeof(dir));
         _snprintf(file, sizeof(file), "default.xbe");
     }
 
-    // Optional pre-check: does <dir>\<file> exist?
+    // Pre-check file exists before remapping D:
     char pre[512]; JoinPath(pre, sizeof(pre), dir, file);
     if (GetFileAttributesA(pre) == INVALID_FILE_ATTRIBUTES){
         SetLastError(ERROR_FILE_NOT_FOUND);
         return false;
     }
 
-    // Repoint D: to that folder’s device path
+    // Build device path for 'dir'
     char devPath[1024];
     if (!DosToDevicePathA(dir, devPath, sizeof(devPath))){
         SetLastError(ERROR_INVALID_PARAMETER);
         return false;
     }
 
+    // Repoint D: to device path of 'dir'
     char dosD[16]; MakeDosString(dosD, sizeof(dosD), "D:");
     STRING sDos; BuildString(sDos, dosD);
     IoDeleteSymbolicLink(&sDos); // ignore result
@@ -533,12 +672,12 @@ bool LaunchXbeA(const char* pathOrDir)
     STRING sDev; BuildString(sDev, devPath);
     LONG st = IoCreateSymbolicLink(&sDos, &sDev);
     if (st != 0){
-        // kernel returns STATUS_SUCCESS == 0
+        // STATUS_SUCCESS == 0
         SetLastError(ERROR_ACCESS_DENIED);
         return false;
     }
 
-    // Launch "D:\<file>"
+    // Launch D:\<file>
     char launchPath[512];
     _snprintf(launchPath, sizeof(launchPath), "D:\\%s", file);
     launchPath[sizeof(launchPath)-1]=0;
@@ -546,8 +685,6 @@ bool LaunchXbeA(const char* pathOrDir)
     DWORD rc = XLaunchNewImageA(launchPath, (PLAUNCH_DATA)NULL);
     if (rc == ERROR_SUCCESS) return true;
 
-    // On failure, leave LastError for the caller; your UI can show rc if desired
     SetLastError(rc);
     return false;
 }
-

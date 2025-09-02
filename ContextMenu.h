@@ -4,46 +4,84 @@
 #include "XBInput.h"
 #include "AppActions.h"
 
-// Lightweight context menu component: drawing + input + selection.
+/*
+============================================================================
+ ContextMenu
+ A lightweight context menu component.
+ Handles:
+   - A list of selectable items (text + Action ID)
+   - Optional visual separators (non-selectable rows)
+   - Drawing the menu with basic styling
+   - Navigation + selection via gamepad (A = select, B/X = close)
+============================================================================
+*/
+
 class ContextMenu {
 public:
+    // Return codes from OnPad()
     enum Result { NOOP, CHOSEN, CLOSED };
 
     ContextMenu();
 
+    // Clear all menu items and reset selection
     void Clear();
+
+    // Add a selectable menu item (label text, action ID, enabled/disabled)
     void AddItem(const char* label, Action act, bool enabled);
 
-    // Open menu at x,y with given width and row height (pixels)
+    // Add a visual separator line (non-selectable, just a divider)
+    void AddSeparator(); 
+
+    // Open menu at screen coordinates (x,y), with given width and row height
     void OpenAt(float x, float y, float width, float rowH);
+
+    // Close the menu
     void Close();
+
+    // Query: is the menu currently visible?
     bool IsOpen() const { return m_open; }
 
-    // Render menu
+    // Render the menu (caller supplies font + D3D device)
     void Draw(CXBFont& font, LPDIRECT3DDEVICE8 dev) const;
 
-    // Handle input; if CHOSEN, outAct receives the selected Action
+    // Handle pad input:
+    //   - Returns CHOSEN when a valid item is selected (outAct filled)
+    //   - Returns CLOSED when canceled (B/X pressed)
+    //   - Returns NOOP otherwise
     Result OnPad(const XBGAMEPAD& pad, Action& outAct);
 
 private:
-    struct Item { const char* label; Action act; bool enabled; };
+    // Internal representation of one row in the menu
+    struct Item {
+        const char* label;   // Display text (ANSI string)
+        Action      act;     // Action ID (from AppActions.h)
+        bool        enabled; // Disabled items are greyed out
+        bool        separator; // True if this is just a divider row
+    };
 
-    // helpers
+    // ---- helpers for drawing ----
     static void   DrawAnsi(CXBFont& font, FLOAT x, FLOAT y, DWORD color, const char* text);
     static void   DrawRect(LPDIRECT3DDEVICE8 dev, float x,float y,float w,float h,D3DCOLOR c);
     static inline FLOAT Snap(FLOAT v){ return (FLOAT)((int)(v + 0.5f)); }
 
-    Item  m_items[12];
-    int   m_count;
-    int   m_sel;
+    // ---- helpers for navigation ----
+    bool IsSelectable(int idx) const;            // is item enabled & not separator?
+    int  FindNextSelectable(int start, int dir) const; // step up/down to next valid row
 
-    bool  m_open;
-    bool  m_waitRelease; // prevents the 'X' that opened the menu from immediately selecting
+    // ---- state ----
+    Item  m_items[24];   // fixed-capacity list of menu rows
+    int   m_count;       // number of items in the list
+    int   m_sel;         // currently highlighted row index
 
-    // layout
-    float m_x, m_y, m_w, m_rowH;
+    bool  m_open;        // true if menu is open
+    bool  m_waitRelease; // absorbs the button press that opened the menu
 
-    // input edge detection (local to menu)
+    // ---- layout ----
+    float m_x, m_y;      // top-left position
+    float m_w;           // width
+    float m_rowH;        // row height (pixels)
+
+    // ---- input edge detection ----
     unsigned char m_prevA, m_prevB, m_prevX, m_prevWhite, m_prevBlack;
     DWORD         m_prevButtons;
 };
