@@ -140,21 +140,23 @@ void Execute(Action act, FileBrowserApp& app)
     Pane& src = app.m_pane[app.m_active];
 
     const Item* sel = NULL;
-if (!src.items.empty()) sel = &src.items[src.sel];
+    if (!src.items.empty()) sel = &src.items[src.sel];
 
-char srcFull[512] = "";
-	if (sel) {
-		if (src.mode == 1 && !sel->isUpEntry) {
-			// Normal directory listing: dir + name
-			JoinPath(srcFull, sizeof(srcFull), src.curPath, sel->name);
-			srcFull[sizeof(srcFull)-1] = 0;
-		} else if (src.mode == 0 && sel->isDir && !sel->isUpEntry) {
-			// Drive list: item name is already something like "E:\"
-			_snprintf(srcFull, sizeof(srcFull), "%s", sel->name);
-			srcFull[sizeof(srcFull)-1] = 0;
-			NormalizeDirA(srcFull); // ensure trailing slash
-		}
-	}
+    // Full path of selection (if any). Also supports drive-list selection.
+    char srcFull[512] = "";
+    if (sel) {
+        if (src.mode == 1 && !sel->isUpEntry) {
+            // Normal directory listing: dir + name
+            JoinPath(srcFull, sizeof(srcFull), src.curPath, sel->name);
+            srcFull[sizeof(srcFull)-1] = 0;
+        } else if (src.mode == 0 && sel->isDir && !sel->isUpEntry) {
+            // Drive list: item name is already something like "E:\"
+            _snprintf(srcFull, sizeof(srcFull), "%s", sel->name);
+            srcFull[sizeof(srcFull)-1] = 0;
+            NormalizeDirA(srcFull); // ensure trailing slash
+        }
+    }
+
     switch (act)
     {
     // ---- Open / Enter / Launch ------------------------------------------------
@@ -190,13 +192,10 @@ char srcFull[512] = "";
 		ULONGLONG total=0;
 		for (size_t i=0;i<srcs.size();++i) total += DirSizeRecursiveA(srcs[i].c_str());
 
-		// --- NEW: preflight free-space check on destination ---
+		// --- preflight free-space check on destination (kept from your version) ---
 		{
 			ULONGLONG freeB=0, totB=0;
 			GetDriveFreeTotal(dstDir, freeB, totB);
-			// Optional safety margin for cluster rounding: add a little headroom if desired.
-			// const ULONGLONG margin = 16ull * 1024ull * 1024ull; // 16 MiB
-			// if (total + margin > freeB) { ... }
 			if (total > freeB){
 				char need[64], have[64];
 				FormatSize(total, need, sizeof(need));
@@ -205,15 +204,18 @@ char srcFull[512] = "";
 				break;
 			}
 		}
-		// --- end NEW ---
+		// --- end preflight ---
 
 		// Begin progress + set callback
 		app.BeginProgress(total, srcs[0].c_str(), "Copying...");
 		CopyProgCtx ctx = { &app, 0, false, false, 0, false };
 		SetCopyProgressCallback(CopyProgThunk, &ctx);
 
-		ULONGLONG base = 0;     // cumulative bytes completed
-		char lastDstTop[512] = {0}; // for cancel cleanup
+		ULONGLONG base = 0;           // cumulative bytes completed
+		char lastDstTop[512] = {0};   // for cancel cleanup
+
+		// NEW: track results so the final toast reflects reality
+		size_t copiedOk = 0, failed = 0, skipped = 0;
 
 		for (size_t i=0;i<srcs.size();++i){
 			const char* sp = srcs[i].c_str();
@@ -225,15 +227,38 @@ char srcFull[512] = "";
 			ULONGLONG thisSize = DirSizeRecursiveA(sp);
 			ctx.base = base;
 
+			// --- prevent copying a folder into its own subfolder (or itself) ---
+			if (IsSubPathCaseI(sp, lastDstTop)) {
+				app.SetStatus("Cannot copy a folder into its own subfolder");
+				++skipped;
+				continue; // skip this item, proceed to next
+			}
+
+			// --- per-item free-space check (extra safety) ---
+			{
+				ULONGLONG freeB=0, totB=0;
+				GetDriveFreeTotal(lastDstTop, freeB, totB); // any path on dest volume is fine
+				if (thisSize > freeB) {
+					char need[64], have[64];
+					FormatSize(thisSize, need, sizeof(need));
+					FormatSize(freeB,   have, sizeof(have));
+					app.SetStatus("Not enough space for %s: need %s, have %s", bn, need, have);
+					break; // stop the whole batch (change to 'continue;' to try remaining items)
+				}
+			}
+			// --- end per-item check ---
+
 			if (!CopyRecursiveWithProgressA(sp, dstDir, total)){
 				if (ctx.canceled){
 					// Remove partial destination of the current item, then stop
 					DeleteRecursiveA(lastDstTop);
 					break;
 				}
-				// Non-cancel failure: continue to next item
+				// Non-cancel failure
+				++failed;
 			} else {
 				base += thisSize;
+				++copiedOk;
 			}
 		}
 
@@ -242,7 +267,8 @@ char srcFull[512] = "";
 		app.EndProgress();
 
 		if (ctx.canceled){
-			app.SetStatus("Copy canceled");
+			app.SetStatus("Copy canceled (%u done, %u skipped, %u failed)",
+						(unsigned)copiedOk, (unsigned)skipped, (unsigned)failed);
 			app.RefreshPane(app.m_pane[0]); app.RefreshPane(app.m_pane[1]);
 			break;
 		}
@@ -254,9 +280,16 @@ char srcFull[512] = "";
 		// Clear marks and refresh both panes
 		for (size_t i=0;i<src.items.size();++i) src.items[i].marked=false;
 		app.RefreshPane(app.m_pane[0]); app.RefreshPane(app.m_pane[1]);
-		app.SetStatus("Copied %d item(s)", (int)srcs.size());
+
+		// Final toast that reflects what actually happened
+		if (failed==0 && skipped==0) {
+			app.SetStatus("Copied %u item(s)", (unsigned)copiedOk);
+		} else {
+			app.SetStatus("Copied %u, %u skipped, %u failed",
+						(unsigned)copiedOk, (unsigned)skipped, (unsigned)failed);
+		}
 		break;
-	}
+}
 
 
     // ---- Move -----------------------------------------------------------------
@@ -278,13 +311,12 @@ char srcFull[512] = "";
 		ULONGLONG total=0;
 		for (size_t i=0;i<srcs.size();++i) total += DirSizeRecursiveA(srcs[i].c_str());
 
-		// --- NEW: preflight space only when cross-volume (move will copy+delete) ---
+		// --- preflight space only when cross-volume (move will copy+delete) ---
 		{
 			const bool sameVol = SameDriveLetter(src.curPath, dstDir) != 0;
 			if (!sameVol){
 				ULONGLONG freeB=0, totB=0;
 				GetDriveFreeTotal(dstDir, freeB, totB);
-				// Optional safety margin: see COPY case above.
 				if (total > freeB){
 					char need[64], have[64];
 					FormatSize(total, need, sizeof(need));
@@ -294,13 +326,13 @@ char srcFull[512] = "";
 				}
 			}
 		}
-		// --- end NEW ---
+		// --- end preflight ---
 
 		app.BeginProgress(total, srcs[0].c_str(), "Moving...");
 		CopyProgCtx ctx = { &app, 0, false, false, 0, false };
 		SetCopyProgressCallback(CopyProgThunk, &ctx);
 
-		size_t movedOk = 0, failed = 0;
+		size_t movedOk = 0, failed = 0, skipped = 0;  // NEW: track results
 		ULONGLONG base = 0;
 
 		for (size_t i=0;i<srcs.size();++i){
@@ -312,7 +344,31 @@ char srcFull[512] = "";
 			const char* baseName = BaseNameOf(sp);
 			char dstTop[512]; JoinPath(dstTop, sizeof(dstTop), dstDir, baseName);
 
+			// --- NEW: prevent moving a folder into its own subfolder (or onto itself)
+			if (IsSubPathCaseI(sp, dstTop)) {
+				app.SetStatus("Cannot move a folder into its own subfolder");
+				++skipped;
+				continue; // skip this item and go on
+			}
+
 			BOOL doneThis = FALSE;
+
+			// --- NEW: per-item free-space check only if not a fast same-volume rename
+			const BOOL canFastRename =
+				SameDriveLetter(sp, dstDir) && !IsSubPathCaseI(sp, dstTop);
+
+			if (!canFastRename) {
+				ULONGLONG freeB=0, totB=0;
+				GetDriveFreeTotal(dstTop, freeB, totB);
+				if (thisSize > freeB) {
+					char need[64], have[64];
+					FormatSize(thisSize, need, sizeof(need));
+					FormatSize(freeB,   have, sizeof(have));
+					app.SetStatus("Not enough space to move %s: need %s, have %s", baseName, need, have);
+					break; // stop the whole batch (use 'continue;' if you prefer to try remaining items)
+				}
+			}
+			// --- end NEW ---
 
 			// Fast path: same drive and not moving into own subfolder -> MoveFileA
 			if (SameDriveLetter(sp, dstDir) && !IsSubPathCaseI(sp, dstTop)) {
@@ -329,17 +385,19 @@ char srcFull[512] = "";
 						DeleteRecursiveA(dstTop);
 						break;
 					}
-					// Non-cancel failure: continue
+					// Non-cancel failure
+					++failed;
 				} else {
 					if (DeleteRecursiveA(sp)) {
 						doneThis = TRUE;
 					} else {
 						// Optional: consider removing dstTop if source delete failed
+						++failed;
 					}
 				}
 			}
 
-			if (doneThis) ++movedOk; else ++failed;
+			if (doneThis) ++movedOk;
 			base += thisSize;
 		}
 
@@ -347,7 +405,8 @@ char srcFull[512] = "";
 		app.EndProgress();
 
 		if (ctx.canceled){
-			app.SetStatus("Move canceled");
+			app.SetStatus("Move canceled (%u done, %u skipped, %u failed)",
+						(unsigned)movedOk, (unsigned)skipped, (unsigned)failed);
 			// On cancel we keep originals; clear marks and refresh UI
 			for (size_t i=0;i<src.items.size();++i) src.items[i].marked=false;
 			if (src.mode==1) ListDirectory(src.curPath, src.items);
@@ -368,8 +427,13 @@ char srcFull[512] = "";
 		}
 		app.RefreshPane(app.m_pane[0]); app.RefreshPane(app.m_pane[1]);
 
-		if (failed == 0) app.SetStatus("Moved %u item(s)", (unsigned)movedOk);
-		else             app.SetStatus("Moved %u, %u failed", (unsigned)failed);
+		// NEW: accurate final toast
+		if (failed==0 && skipped==0) {
+			app.SetStatus("Moved %u item(s)", (unsigned)movedOk);
+		} else {
+			app.SetStatus("Moved %u, %u skipped, %u failed",
+						(unsigned)movedOk, (unsigned)skipped, (unsigned)failed);
+		}
 		break;
 	}
 
@@ -459,29 +523,28 @@ char srcFull[512] = "";
 
     // ---- Calculate size -------------------------------------------------------
     case ACT_CALCSIZE:
-	{
-		if (!sel) break;
-		if (!srcFull[0]) {
-			// Try to derive from selection directly (covers any future cases)
-			char tmpPath[512] = "";
-			if (src.mode == 0 && sel->isDir && !sel->isUpEntry) {
-				_snprintf(tmpPath, sizeof(tmpPath), "%s", sel->name);
-				tmpPath[sizeof(tmpPath)-1] = 0;
-				NormalizeDirA(tmpPath);
-			}
-			if (!tmpPath[0]) { app.SetStatus("Open a folder or select a drive"); break; }
-			ULONGLONG bytes = DirSizeRecursiveA(tmpPath);
-			char tmp[64]; FormatSize(bytes, tmp, sizeof(tmp));
-			app.SetStatus("%s", tmp);
-			break;
-		}
+    {
+        if (!sel) break;
+        if (!srcFull[0]) {
+            // Try to derive from selection directly (covers any future cases)
+            char tmpPath[512] = "";
+            if (src.mode == 0 && sel->isDir && !sel->isUpEntry) {
+                _snprintf(tmpPath, sizeof(tmpPath), "%s", sel->name);
+                tmpPath[sizeof(tmpPath)-1] = 0;
+                NormalizeDirA(tmpPath);
+            }
+            if (!tmpPath[0]) { app.SetStatus("Open a folder or select a drive"); break; }
+            ULONGLONG bytes = DirSizeRecursiveA(tmpPath);
+            char tmp[64]; FormatSize(bytes, tmp, sizeof(tmp));
+            app.SetStatus("%s", tmp);
+            break;
+        }
 
-		ULONGLONG bytes = DirSizeRecursiveA(srcFull);
-		char tmp[64]; FormatSize(bytes, tmp, sizeof(tmp));
-		app.SetStatus("%s", tmp);
-		break;
-	}
-
+        ULONGLONG bytes = DirSizeRecursiveA(srcFull);
+        char tmp[64]; FormatSize(bytes, tmp, sizeof(tmp));
+        app.SetStatus("%s", tmp);
+        break;
+    }
 
     // ---- Go to root (or back to drive list) ----------------------------------
     case ACT_GOROOT:
