@@ -164,6 +164,14 @@ private:
 
     // Copy current pad state so inputs do not leak between modes.
     void AbsorbPadState(const XBGAMEPAD& pad);
+
+	// --- Back-to-exit confirm state (press Back twice to exit) ---
+	bool  m_backConfirmArmed;   // true after first Back press
+	DWORD m_backConfirmUntil;   // snapshot of status expiry (informational)
+	unsigned char m_prevBack;   // edge detect for Back
+
+	// Exit helper (define one of the strategies inside)
+	void ExitNow();
 };
 
 #endif // FILEBROWSERAPP_H

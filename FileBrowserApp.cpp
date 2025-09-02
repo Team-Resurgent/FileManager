@@ -116,7 +116,8 @@ namespace {
 FileBrowserApp::FileBrowserApp(){
     m_visible=13; m_prevA=0; m_prevB=0; m_prevX=0; m_prevY=0; m_active=0;
     m_prevButtons = 0; m_prevWhite = m_prevBlack = 0;
-    m_navUDHeld=false; m_navUDDir=0; m_navUDNext=0;
+    m_navUDHeld=false; m_navUDDir=0; m_navUDNext=0;m_backConfirmArmed = false;
+	m_backConfirmUntil = 0; m_prevBack = 0;
 
     // Pre-populate D3D params (XDK CXBApplication uses m_d3dpp)
     ZeroMemory(&m_d3dpp,sizeof(m_d3dpp));
@@ -134,6 +135,12 @@ FileBrowserApp::FileBrowserApp(){
 // Small wrapper to match project primitive helpers.
 void FileBrowserApp::DrawRect(float x,float y,float w,float h,D3DCOLOR c){
     DrawSolidRect(m_pd3dDevice, x, y, w, h, c);
+}
+
+// --- Exit helper ------------------------------------------------------------
+// Jump to dashboard via XLaunchNewImage (fallback)
+void FileBrowserApp::ExitNow(){
+    XLaunchNewImage(NULL, NULL); // returns to dashboard
 }
 
 // ----- status ---------------------------------------------------------------
@@ -506,10 +513,34 @@ void FileBrowserApp::OnPad_Browse(const XBGAMEPAD& pad){
 // ----- input router ---------------------------------------------------------
 // Route pad to sub-handlers based on current modal state.
 void FileBrowserApp::OnPad(const XBGAMEPAD& pad){
+    
+	// --- Back-to-exit (press Back twice) -----------------------------------
+	const bool backNow  = (pad.wButtons & XINPUT_GAMEPAD_BACK) != 0;
+	const bool backTrig = backNow && !(m_prevButtons & XINPUT_GAMEPAD_BACK);
+	DWORD now = GetTickCount();
+
+	if (backTrig){
+		if (m_backConfirmArmed && now < m_statusUntilMs){
+			ExitNow();
+			return;
+		} else {
+			m_backConfirmArmed = true;
+			SetStatus("Press Back again to exit");
+			m_backConfirmUntil = m_statusUntilMs; // optional snapshot
+		}
+	}
+
+	if (m_backConfirmArmed && now >= m_statusUntilMs){
+		m_backConfirmArmed = false;
+	}
+
+    // -----------------------------------------------------------------------
+
     if (m_mode == MODE_RENAME){ OnPad_Rename(pad); return; }
     if (m_mode == MODE_MENU)  { OnPad_Menu(pad);   return; }
     OnPad_Browse(pad);
 }
+
 
 // Per-frame app logic. Also poll for drive-set changes and refresh panes.
 HRESULT FileBrowserApp::FrameMove(){
