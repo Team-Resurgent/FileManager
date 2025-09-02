@@ -403,7 +403,7 @@ void FileBrowserApp::OnPad_Menu(const XBGAMEPAD& pad){
     Action act;
     ContextMenu::Result r = m_ctx.OnPad(pad, act);
     if (r == ContextMenu::CHOSEN){
-        SetStatus("Chosen action=%d", (int)act);   // debug toast
+        //SetStatus("Chosen action=%d", (int)act);   // debug toast
         AppActions::Execute(act, *this);          // perform action
         CloseMenu();
     } else if (r == ContextMenu::CLOSED){
