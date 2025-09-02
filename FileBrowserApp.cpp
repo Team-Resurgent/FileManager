@@ -109,6 +109,28 @@ namespace {
         return mask;
     }
 
+	// Return last component of a path (handles trailing '\'). e.g. "E:\A\B\" -> "B"
+	static void ExtractLastComponent(const char* path, char* out, size_t cap){
+		if (!out || cap == 0) return;
+		out[0] = 0;
+		if (!path) return;
+
+		size_t n = strlen(path);
+		if (n == 0) return;
+
+		// Skip trailing '\' (but keep root like "E:\")
+		if (n > 3 && path[n-1] == '\\') --n;
+
+		// Find last '\'
+		int i = (int)n - 1;
+		while (i >= 0 && path[i] != '\\') --i;
+
+		const char* start = path + i + 1;
+		size_t len = n - (i + 1);
+		if (len >= cap) len = cap - 1;
+		if (cap) { memcpy(out, start, len); out[len] = 0; }
+	}
+
 } // anonymous namespace
 
 // ----------------------------------------------------------------------------
@@ -614,15 +636,29 @@ void FileBrowserApp::EnterSelection(Pane& p){
     }
 
     // Directory listing
-    if (it.isUpEntry){
-        // If at root (E:\), switch back to drive list; otherwise go to parent.
-        if (strlen(p.curPath)<=3){
-            p.mode=0; p.sel=0; p.scroll=0; BuildDriveItems(p.items); p.curPath[0]=0;
-        } else {
-            ParentPath(p.curPath); p.sel=0; p.scroll=0; ListDirectory(p.curPath,p.items);
-        }
-        return;
-    }
+	if (it.isUpEntry){
+		// Reselect the folder we’re leaving (same as UpOne)
+		char childName[256]; ExtractLastComponent(p.curPath, childName, sizeof(childName));
+
+		if (strlen(p.curPath) <= 3){
+			char driveRoot[4] = { p.curPath[0], ':', '\\', 0 };
+			p.mode = 0;
+			p.sel = 0; p.scroll = 0;
+			BuildDriveItems(p.items);
+			for (int i=0; i<(int)p.items.size(); ++i){
+				if (_stricmp(p.items[i].name, driveRoot) == 0){ p.sel = i; break; }
+			}
+			if (p.sel < p.scroll) p.scroll = p.sel;
+			if (p.sel >= p.scroll + m_visible) p.scroll = p.sel - (m_visible - 1);
+			p.curPath[0] = 0;
+		} else {
+			ParentPath(p.curPath);
+			p.sel = 0; p.scroll = 0;
+			ListDirectory(p.curPath, p.items);
+			SelectItemInPane(p, childName);
+		}
+		return;
+	}
     if (it.isDir){
         // Descend into subdirectory.
         char next[512]; JoinPath(next,sizeof(next),p.curPath,it.name);
@@ -651,9 +687,35 @@ void FileBrowserApp::EnterSelection(Pane& p){
 // Move up one level; from root goes back to drive list.
 void FileBrowserApp::UpOne(Pane& p){
     if (p.mode==0) return;
-    if (strlen(p.curPath)<=3){ p.mode=0; p.sel=0; p.scroll=0; BuildDriveItems(p.items); p.curPath[0]=0; return; }
-    ParentPath(p.curPath); p.sel=0; p.scroll=0; ListDirectory(p.curPath,p.items);
+
+    // Name of the child we’re currently inside (to reselect in parent)
+    char childName[256]; ExtractLastComponent(p.curPath, childName, sizeof(childName));
+
+    // If at drive root, go back to drive list and select that drive
+    if (strlen(p.curPath) <= 3){
+        char driveRoot[4] = { p.curPath[0], ':', '\\', 0 };
+        p.mode = 0;
+        p.sel = 0; p.scroll = 0;
+        BuildDriveItems(p.items);
+
+        // Try to select the drive we came from
+        for (int i=0; i<(int)p.items.size(); ++i){
+            if (_stricmp(p.items[i].name, driveRoot) == 0){ p.sel = i; break; }
+        }
+        if (p.sel < p.scroll) p.scroll = p.sel;
+        if (p.sel >= p.scroll + m_visible) p.scroll = p.sel - (m_visible - 1);
+
+        p.curPath[0] = 0;
+        return;
+    }
+
+    // Go to parent and select the child folder we just left
+    ParentPath(p.curPath);
+    p.sel = 0; p.scroll = 0;
+    ListDirectory(p.curPath, p.items);
+    SelectItemInPane(p, childName);
 }
+
 
 // ----- Initialize / Render --------------------------------------------------
 // Create font, input, initial drive mapping, and compute responsive layout.

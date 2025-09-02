@@ -41,21 +41,44 @@ void PaneRenderer::DrawRightAligned(CXBFont& font, const char* s, FLOAT rightX, 
 
 // Compute column width for file sizes (clamped to reasonable bounds).
 FLOAT PaneRenderer::ComputeSizeColW(CXBFont& font, const Pane& p, const PaneStyle& st){
-    FLOAT maxW = MeasureTextW(font, "Size");
-    int limit = (int)p.items.size(); if(limit>200) limit=200; // avoid scanning huge lists
-    char buf[64];
-    for(int i=0;i<limit;++i){
-        const Item& it = p.items[i];
-        if(!it.isDir && !it.isUpEntry){
-            FormatSize(it.size, buf, sizeof(buf));
-            FLOAT w = MeasureTextW(font, buf); if(w>maxW) maxW=w;
+    // Start with header label width
+    const char* hdr = (p.mode == 0) ? "Free / Total" : "Size";
+    FLOAT maxW = MeasureTextW(font, hdr);
+
+    char buf[128];
+
+    if (p.mode == 0){
+        // Drive list: measure "Free / Total" per drive (cap scan to keep it cheap)
+        int limit = (int)p.items.size(); if (limit > 32) limit = 32;
+        for (int i=0; i<limit; ++i){
+            const Item& it = p.items[i];
+            if (it.isDir && !it.isUpEntry){
+                ULONGLONG fb=0, tb=0;
+                GetDriveFreeTotal(it.name, fb, tb);
+                char f[64], t[64];
+                FormatSize(fb, f, sizeof(f));
+                FormatSize(tb, t, sizeof(t));
+                _snprintf(buf, sizeof(buf), "%s / %s", f, t); buf[sizeof(buf)-1] = 0;
+                FLOAT w = MeasureTextW(font, buf); if (w > maxW) maxW = w;
+            }
+        }
+    } else {
+        // Directory listing: measure file sizes
+        int limit = (int)p.items.size(); if (limit > 200) limit = 200;
+        for (int i=0; i<limit; ++i){
+            const Item& it = p.items[i];
+            if (!it.isDir && !it.isUpEntry){
+                FormatSize(it.size, buf, sizeof(buf));
+                FLOAT w = MeasureTextW(font, buf); if (w > maxW) maxW = w;
+            }
         }
     }
+
     maxW += 16.0f;
     const FLOAT minW = MaxF(90.0f, st.lineH * 4.0f);
     const FLOAT maxWClamp = st.listW * 0.40f;
-    if(maxW < minW) maxW = minW;
-    if(maxW > maxWClamp) maxW = maxWClamp;
+    if (maxW < minW) maxW = minW;
+    if (maxW > maxWClamp) maxW = maxWClamp;
     return maxW;
 }
 
@@ -157,6 +180,78 @@ void PaneRenderer::DrawNameFittedOrMarquee(CXBFont& font, FLOAT x, FLOAT y, FLOA
     MbToW(vis,wtmp,512); font.DrawText(x,y,color,wtmp,0,0.0f);
 }
 
+void PaneRenderer::DrawHeaderFittedOrMarquee(CXBFont& font, FLOAT x, FLOAT y, FLOAT maxW,
+                                             DWORD color, const char* text, int paneIndex)
+{
+    if (!text) text = "";
+    // Measure full width
+    WCHAR wfull[512]; MbToW(text, wfull, 512);
+    FLOAT fullW=0, fullH=0; font.GetTextExtent(wfull, &fullW, &fullH);
+
+    // Fits? draw and reset header marquee state
+    if (fullW <= maxW){
+        DrawAnsi(font, x, y, color, text);
+        m_hdrMarq[paneIndex].row = -1;
+        m_hdrMarq[paneIndex].px  = 0.0f;
+        m_hdrMarq[paneIndex].nextTick = 0;
+        m_hdrMarq[paneIndex].resetPause = 0;
+        return;
+    }
+
+    // Keep last string to reset scroll when header text changes
+    static char s_prevHdr[2][512] = { {0}, {0} };
+    if (_stricmp(s_prevHdr[paneIndex], text) != 0){
+        _snprintf(s_prevHdr[paneIndex], sizeof(s_prevHdr[paneIndex]), "%s", text);
+        s_prevHdr[paneIndex][sizeof(s_prevHdr[paneIndex])-1] = 0;
+        m_hdrMarq[paneIndex].row = -1;  // not used here, but keep consistent
+        m_hdrMarq[paneIndex].px  = 0.0f;
+        m_hdrMarq[paneIndex].nextTick   = GetTickCount() + 600; // initial pause
+        m_hdrMarq[paneIndex].resetPause = 0;
+    }
+
+    // Scroll logic (same feel as filename marquee)
+    const DWORD now         = GetTickCount();
+    const DWORD kStepMs     = 25;
+    const FLOAT kStepPx     = 2.0f;
+    const DWORD kInitPause  = 600;
+    const DWORD kEndPause   = 800;
+    const FLOAT maxScroll   = fullW - maxW;
+
+    MarqueeState& M = m_hdrMarq[paneIndex];
+    if (now >= M.nextTick){
+        if (M.resetPause){
+            M.px = 0.0f;
+            M.resetPause = 0;
+            M.nextTick = now + kInitPause;
+        }else{
+            M.px += kStepPx;
+            if (M.px >= maxScroll){
+                M.px = maxScroll;
+                M.resetPause = now + kEndPause;
+                M.nextTick   = M.resetPause;
+            }else{
+                M.nextTick = now + kStepMs;
+            }
+        }
+    }
+
+    // Build visible substring at the current scroll offset and draw it
+    FLOAT skipped = 0.0f;
+    const char* start = SkipToPixelOffset(font, text, M.px, skipped);
+
+    char vis[512]; vis[0]=0; int n=0;
+    WCHAR wtmp[512]; FLOAT tw=0, th=0;
+    const char* p = start;
+    while (*p && n < (int)sizeof(vis)-2){
+        vis[n++] = *p; vis[n] = 0;
+        MbToW(vis, wtmp, 512); font.GetTextExtent(wtmp, &tw, &th);
+        if (tw > maxW){ vis[--n] = 0; break; }
+        ++p;
+    }
+    DrawAnsi(font, x, y, color, vis);
+}
+
+
 /*
 ===============================================================================
  DrawPane
@@ -180,8 +275,10 @@ void PaneRenderer::DrawPane(
     hdr[sizeof(hdr)-1] = 0;
 
     FLOAT tW, tH; MeasureAnsiWH(font, hdr, tW, tH);
-    const FLOAT titleY = st.hdrY + (st.hdrH - tH) * 0.5f;
-    DrawAnsi(font, hx + 5.0f, titleY, 0xFFFFFFFF, hdr);
+	const FLOAT titleY     = st.hdrY + (st.hdrH - tH) * 0.5f;
+	const FLOAT headerLeft = hx + 5.0f;
+	const FLOAT headerMaxW = st.hdrW - 10.0f;   // left+right padding
+	DrawHeaderFittedOrMarquee(font, headerLeft, titleY, headerMaxW, 0xFFFFFFFF, hdr, paneIndex);
 
     // ----- compute Size column metrics -----
     const FLOAT sizeColW  = ComputeSizeColW(font, p, st);
@@ -190,23 +287,28 @@ void PaneRenderer::DrawPane(
 
     // ----- column headers -----
     const FLOAT colHdrY = st.hdrY + st.hdrH + headerGap;
-    const FLOAT colHdrH = 24.0f;
-    DrawRect(dev, baseX-10.0f, colHdrY, st.listW+20.0f, colHdrH, 0x60333333);
+	const FLOAT colHdrH = 24.0f;
+	DrawRect(dev, baseX-10.0f, colHdrY, st.listW+20.0f, colHdrH, 0x60333333);
 
 	FLOAT nameW, nameH; MeasureAnsiWH(font, "Name", nameW, nameH);
-	FLOAT sizeW, sizeH; MeasureAnsiWH(font, "Size", sizeW, sizeH);
-    const FLOAT nameY = colHdrY + (colHdrH - nameH) * 0.5f;
-    const FLOAT sizeY = colHdrY + (colHdrH - sizeH) * 0.5f;
 
-    DrawAnsi(font, NameColX(baseX, st), nameY, 0xFFDDDDDD, "Name");
-    DrawRightAligned(font, "Size", sizeRight, sizeY, 0xFFDDDDDD);
+	// NEW: pick header by mode (drive list uses "Free / Total")
+	const char* sizeHdr = (p.mode == 0) ? "Free / Total" : "Size";
+	FLOAT sizeW, sizeH; MeasureAnsiWH(font, sizeHdr, sizeW, sizeH);
+
+	const FLOAT nameY = colHdrY + (colHdrH - nameH) * 0.5f;
+	const FLOAT sizeY = colHdrY + (colHdrH - sizeH) * 0.5f;
+
+	DrawAnsi(font, NameColX(baseX, st), nameY, 0xFFDDDDDD, "Name");
+	DrawRightAligned(font, sizeHdr, sizeRight, sizeY, 0xFFDDDDDD);
 
     // underline + vertical divider
     DrawRect(dev, baseX-10.0f, colHdrY + colHdrH, st.listW+20.0f, 1.0f, 0x80444444);
     DrawRect(dev, sizeColX - 8.0f, colHdrY + 1.0f, 1.0f, colHdrH - 2.0f, 0x40444444);
 
     // ----- list background -----
-    DrawRect(dev, baseX-10.0f, st.listY-6.0f, st.listW+20.0f, st.lineH*st.visibleRows+12.0f, 0x30101010);
+    DrawRect(dev, baseX-10.0f, st.listY-6.0f, st.lineH*st.visibleRows+12.0f + (st.listW - st.lineH*st.visibleRows), st.lineH*st.visibleRows+12.0f, 0x30101010);
+    // ^ same visual area as before; keeps your background box
 
     // alternating row stripes
     int end = p.scroll + st.visibleRows; if (end > (int)p.items.size()) end = (int)p.items.size();
@@ -229,7 +331,7 @@ void PaneRenderer::DrawPane(
         DWORD sizeCol = (i==p.sel)?0xFFFFFF00:0xFFB0B0B0;
         D3DCOLOR ico = it.isUpEntry ? 0xFFAAAAAA
                             : (it.marked ? 0xFFFF4040               // red = marked
-                                         : (it.isDir ? 0xFF5EA4FF   // blue = folder
+                                         : (it.isDir ? 0xFF5EA4FF   // blue = folder/drive
                                                      : 0xFF89D07E));// green = file
         DrawRect(dev, baseX+2.0f, y+6.0f, st.gutterW-8.0f, st.lineH-12.0f, ico);
 
@@ -239,15 +341,27 @@ void PaneRenderer::DrawPane(
         // filename (fitted or marquee-scrolled)
         char nameBuf[300]; _snprintf(nameBuf, sizeof(nameBuf), "%s", it.name); nameBuf[sizeof(nameBuf)-1] = 0;
         const FLOAT nameX    = NameColX(baseX, st);
-		const FLOAT rightPad = st.paddingX + st.scrollBarW + 2.0f;
-		const FLOAT nameMaxW = (baseX + st.listW) - rightPad - nameX - ComputeSizeColW(font, p, st);
+        const FLOAT rightPad = st.paddingX + st.scrollBarW + 2.0f;
+        const FLOAT nameMaxW = (baseX + st.listW) - rightPad - nameX - sizeColW;
 
-		const bool isSel = active && (i == p.sel);
-		DrawNameFittedOrMarquee(font, nameX, y, nameMaxW,
-								nameCol, nameBuf, isSel, paneIndex, i - p.scroll);
+        const bool isSel = active && (i == p.sel);
+        DrawNameFittedOrMarquee(font, nameX, y, nameMaxW,
+                                nameCol, nameBuf, isSel, paneIndex, i - p.scroll);
 
-        // size column (blank for dirs / up-entry)
-        char sz[64]=""; if(!it.isDir && !it.isUpEntry){ FormatSize(it.size, sz, sizeof(sz)); }
+        // size column:
+        // - drive list (mode 0): show "free / total"
+        // - directory list: files show size, folders/".." are blank
+        char sz[96] = "";
+        if (p.mode == 0 && it.isDir && !it.isUpEntry) {
+            ULONGLONG fb = 0, tb = 0;
+            GetDriveFreeTotal(it.name, fb, tb);
+            char f[32], t[32];
+            FormatSize(fb, f, sizeof(f));
+            FormatSize(tb, t, sizeof(t));
+            _snprintf(sz, sizeof(sz), "%s / %s", f, t);
+        } else if (!it.isDir && !it.isUpEntry) {
+            FormatSize(it.size, sz, sizeof(sz));
+        }
         DrawRightAligned(font, sz, sizeRight, y, sizeCol);
 
         y += st.lineH;

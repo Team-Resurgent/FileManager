@@ -296,12 +296,32 @@ bool ListDirectory(const char* path,std::vector<Item>& out){
 // Misc info helpers
 // ============================================================================
 
-void FormatSize(ULONGLONG sz, char* out, size_t cap){
-    const char* unit="B"; double v=(double)sz;
-    if(sz>=(1ULL<<30)){ v/=(double)(1ULL<<30); unit="GB"; }
-    else if(sz>=(1ULL<<20)){ v/=(double)(1ULL<<20); unit="MB"; }
-    else if(sz>=(1ULL<<10)){ v/=(double)(1ULL<<10); unit="KB"; }
-    _snprintf(out,(int)cap,(unit[0]=='B')?"%.0f %s":"%.1f %s",v,unit); out[cap-1]=0;
+void FormatSize(ULONGLONG bytes, char* out, size_t cap)
+{
+    if (!out || cap == 0) return;
+    out[0] = 0;
+
+    const ULONGLONG KB = 1024ULL;
+    const ULONGLONG MB = KB * 1024ULL;
+    const ULONGLONG GB = MB * 1024ULL;
+    const ULONGLONG TB = GB * 1024ULL;
+
+    double val = 0.0;
+    const char* unit = "B";
+
+    if (bytes >= TB) { val = (double)bytes / (double)TB; unit = "TB"; }
+    else if (bytes >= GB) { val = (double)bytes / (double)GB; unit = "GB"; }
+    else if (bytes >= MB) { val = (double)bytes / (double)MB; unit = "MB"; }
+    else if (bytes >= KB) { val = (double)bytes / (double)KB; unit = "KB"; }
+    else {
+        _snprintf(out, (int)cap, "%llu B", (unsigned long long)bytes);
+        out[cap-1] = 0;
+        return;
+    }
+
+    // One decimal place (e.g., 1.5 GB / 12.0 TB). Tweak if you prefer.
+    _snprintf(out, (int)cap, "%.2f %s", val, unit);
+    out[cap-1] = 0;
 }
 
 void GetDriveFreeTotal(const char* anyPathInDrive, ULONGLONG& freeBytes, ULONGLONG& totalBytes){

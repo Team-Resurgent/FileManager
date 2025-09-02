@@ -140,13 +140,21 @@ void Execute(Action act, FileBrowserApp& app)
     Pane& src = app.m_pane[app.m_active];
 
     const Item* sel = NULL;
-    if (!src.items.empty()) sel = &src.items[src.sel];
+if (!src.items.empty()) sel = &src.items[src.sel];
 
-    // Full path of selection (if any)
-    char srcFull[512] = "";
-    if (sel && src.mode == 1 && !sel->isUpEntry)
-        JoinPath(srcFull, sizeof(srcFull), src.curPath, sel->name);
-
+char srcFull[512] = "";
+	if (sel) {
+		if (src.mode == 1 && !sel->isUpEntry) {
+			// Normal directory listing: dir + name
+			JoinPath(srcFull, sizeof(srcFull), src.curPath, sel->name);
+			srcFull[sizeof(srcFull)-1] = 0;
+		} else if (src.mode == 0 && sel->isDir && !sel->isUpEntry) {
+			// Drive list: item name is already something like "E:\"
+			_snprintf(srcFull, sizeof(srcFull), "%s", sel->name);
+			srcFull[sizeof(srcFull)-1] = 0;
+			NormalizeDirA(srcFull); // ensure trailing slash
+		}
+	}
     switch (act)
     {
     // ---- Open / Enter / Launch ------------------------------------------------
@@ -162,172 +170,209 @@ void Execute(Action act, FileBrowserApp& app)
         break;
 
     // ---- Copy -----------------------------------------------------------------
-    case ACT_COPY:
-    {
-        if (src.mode != 1) { app.SetStatus("Open a folder"); break; }
+	case ACT_COPY:
+	{
+		if (src.mode != 1) { app.SetStatus("Open a folder"); break; }
 
-        // Resolve destination (other pane preferred)
-        char dstDir[512];
-        if (!app.ResolveDestDir(dstDir, sizeof(dstDir))) { app.SetStatus("Pick a destination"); break; }
-        if ((dstDir[0]=='D'||dstDir[0]=='d') && dstDir[1]==':'){ app.SetStatus("Cannot copy to D:\\"); break; }
-        NormalizeDirA(dstDir);
-        if (!CanWriteHereA(dstDir)){ app.SetStatusLastErr("Dest not writable"); break; }
+		// Resolve destination (other pane preferred)
+		char dstDir[512];
+		if (!app.ResolveDestDir(dstDir, sizeof(dstDir))) { app.SetStatus("Pick a destination"); break; }
+		if ((dstDir[0]=='D'||dstDir[0]=='d') && dstDir[1]==':'){ app.SetStatus("Cannot copy to D:\\"); break; }
+		NormalizeDirA(dstDir);
+		if (!CanWriteHereA(dstDir)){ app.SetStatusLastErr("Dest not writable"); break; }
 
-        // Gather sources
-        std::vector<std::string> srcs;
-        GatherMarkedOrSelectedFullPaths(src, srcs);
-        if (srcs.empty()) { app.SetStatus("Nothing to copy"); break; }
+		// Gather sources
+		std::vector<std::string> srcs;
+		GatherMarkedOrSelectedFullPaths(src, srcs);
+		if (srcs.empty()) { app.SetStatus("Nothing to copy"); break; }
 
-        // Compute total bytes for progress bar
-        ULONGLONG total=0;
-        for (size_t i=0;i<srcs.size();++i) total += DirSizeRecursiveA(srcs[i].c_str());
+		// Compute total bytes for progress bar
+		ULONGLONG total=0;
+		for (size_t i=0;i<srcs.size();++i) total += DirSizeRecursiveA(srcs[i].c_str());
 
-        // Begin progress + set callback
-        app.BeginProgress(total, srcs[0].c_str(), "Copying...");
-        CopyProgCtx ctx = { &app, 0, false, false, 0, false };
-        SetCopyProgressCallback(CopyProgThunk, &ctx);
+		// --- NEW: preflight free-space check on destination ---
+		{
+			ULONGLONG freeB=0, totB=0;
+			GetDriveFreeTotal(dstDir, freeB, totB);
+			// Optional safety margin for cluster rounding: add a little headroom if desired.
+			// const ULONGLONG margin = 16ull * 1024ull * 1024ull; // 16 MiB
+			// if (total + margin > freeB) { ... }
+			if (total > freeB){
+				char need[64], have[64];
+				FormatSize(total, need, sizeof(need));
+				FormatSize(freeB, have, sizeof(have));
+				app.SetStatus("Not enough space: need %s, have %s", need, have);
+				break;
+			}
+		}
+		// --- end NEW ---
 
-        ULONGLONG base = 0;     // cumulative bytes completed
-        char lastDstTop[512] = {0}; // for cancel cleanup
+		// Begin progress + set callback
+		app.BeginProgress(total, srcs[0].c_str(), "Copying...");
+		CopyProgCtx ctx = { &app, 0, false, false, 0, false };
+		SetCopyProgressCallback(CopyProgThunk, &ctx);
 
-        for (size_t i=0;i<srcs.size();++i){
-            const char* sp = srcs[i].c_str();
+		ULONGLONG base = 0;     // cumulative bytes completed
+		char lastDstTop[512] = {0}; // for cancel cleanup
 
-            // Compute top-level destination path (dstDir\basename(sp)) for cleanup
-            const char* bn = BaseNameOf(sp);
-            JoinPath(lastDstTop, sizeof(lastDstTop), dstDir, bn);
+		for (size_t i=0;i<srcs.size();++i){
+			const char* sp = srcs[i].c_str();
 
-            ULONGLONG thisSize = DirSizeRecursiveA(sp);
-            ctx.base = base;
+			// Compute top-level destination path (dstDir\basename(sp)) for cleanup
+			const char* bn = BaseNameOf(sp);
+			JoinPath(lastDstTop, sizeof(lastDstTop), dstDir, bn);
 
-            if (!CopyRecursiveWithProgressA(sp, dstDir, total)){
-                if (ctx.canceled){
-                    // Remove partial destination of the current item, then stop
-                    DeleteRecursiveA(lastDstTop);
-                    break;
-                }
-                // Non-cancel failure: continue to next item
-            } else {
-                base += thisSize;
-            }
-        }
+			ULONGLONG thisSize = DirSizeRecursiveA(sp);
+			ctx.base = base;
 
-        // End progress and clear callback
-        SetCopyProgressCallback(NULL, NULL);
-        app.EndProgress();
+			if (!CopyRecursiveWithProgressA(sp, dstDir, total)){
+				if (ctx.canceled){
+					// Remove partial destination of the current item, then stop
+					DeleteRecursiveA(lastDstTop);
+					break;
+				}
+				// Non-cancel failure: continue to next item
+			} else {
+				base += thisSize;
+			}
+		}
 
-        if (ctx.canceled){
-            app.SetStatus("Copy canceled");
-            app.RefreshPane(app.m_pane[0]); app.RefreshPane(app.m_pane[1]);
-            break;
-        }
+		// End progress and clear callback
+		SetCopyProgressCallback(NULL, NULL);
+		app.EndProgress();
 
-        // If we copied into the currently displayed dest folder, refresh it
-        Pane& dstp = app.m_pane[1 - app.m_active];
-        if (dstp.mode==1 && _stricmp(dstp.curPath, dstDir)==0) ListDirectory(dstp.curPath, dstp.items);
+		if (ctx.canceled){
+			app.SetStatus("Copy canceled");
+			app.RefreshPane(app.m_pane[0]); app.RefreshPane(app.m_pane[1]);
+			break;
+		}
 
-        // Clear marks and refresh both panes
-        for (size_t i=0;i<src.items.size();++i) src.items[i].marked=false;
-        app.RefreshPane(app.m_pane[0]); app.RefreshPane(app.m_pane[1]);
-        app.SetStatus("Copied %d item(s)", (int)srcs.size());
-        break;
-    }
+		// If we copied into the currently displayed dest folder, refresh it
+		Pane& dstp = app.m_pane[1 - app.m_active];
+		if (dstp.mode==1 && _stricmp(dstp.curPath, dstDir)==0) ListDirectory(dstp.curPath, dstp.items);
+
+		// Clear marks and refresh both panes
+		for (size_t i=0;i<src.items.size();++i) src.items[i].marked=false;
+		app.RefreshPane(app.m_pane[0]); app.RefreshPane(app.m_pane[1]);
+		app.SetStatus("Copied %d item(s)", (int)srcs.size());
+		break;
+	}
+
 
     // ---- Move -----------------------------------------------------------------
-    case ACT_MOVE:
-    {
-        if (src.mode != 1) { app.SetStatus("Open a folder"); break; }
+	case ACT_MOVE:
+	{
+		if (src.mode != 1) { app.SetStatus("Open a folder"); break; }
 
-        char dstDir[512];
-        if (!app.ResolveDestDir(dstDir, sizeof(dstDir))) { app.SetStatus("Pick a destination"); break; }
-        if ((dstDir[0]=='D'||dstDir[0]=='d') && dstDir[1]==':'){ app.SetStatus("Cannot move to D:\\"); break; }
-        NormalizeDirA(dstDir);
-        if (!CanWriteHereA(dstDir)){ app.SetStatusLastErr("Dest not writable"); break; }
+		char dstDir[512];
+		if (!app.ResolveDestDir(dstDir, sizeof(dstDir))) { app.SetStatus("Pick a destination"); break; }
+		if ((dstDir[0]=='D'||dstDir[0]=='d') && dstDir[1]==':'){ app.SetStatus("Cannot move to D:\\"); break; }
+		NormalizeDirA(dstDir);
+		if (!CanWriteHereA(dstDir)){ app.SetStatusLastErr("Dest not writable"); break; }
 
-        std::vector<std::string> srcs;
-        GatherMarkedOrSelectedFullPaths(src, srcs);
-        if (srcs.empty()) { app.SetStatus("Nothing to move"); break; }
+		std::vector<std::string> srcs;
+		GatherMarkedOrSelectedFullPaths(src, srcs);
+		if (srcs.empty()) { app.SetStatus("Nothing to move"); break; }
 
-        // Total bytes for progress
-        ULONGLONG total=0;
-        for (size_t i=0;i<srcs.size();++i) total += DirSizeRecursiveA(srcs[i].c_str());
+		// Total bytes for progress
+		ULONGLONG total=0;
+		for (size_t i=0;i<srcs.size();++i) total += DirSizeRecursiveA(srcs[i].c_str());
 
-        app.BeginProgress(total, srcs[0].c_str(), "Moving...");
-        CopyProgCtx ctx = { &app, 0, false, false, 0, false };
-        SetCopyProgressCallback(CopyProgThunk, &ctx);
+		// --- NEW: preflight space only when cross-volume (move will copy+delete) ---
+		{
+			const bool sameVol = SameDriveLetter(src.curPath, dstDir) != 0;
+			if (!sameVol){
+				ULONGLONG freeB=0, totB=0;
+				GetDriveFreeTotal(dstDir, freeB, totB);
+				// Optional safety margin: see COPY case above.
+				if (total > freeB){
+					char need[64], have[64];
+					FormatSize(total, need, sizeof(need));
+					FormatSize(freeB, have, sizeof(have));
+					app.SetStatus("Not enough space: need %s, have %s", need, have);
+					break;
+				}
+			}
+		}
+		// --- end NEW ---
 
-        size_t movedOk = 0, failed = 0;
-        ULONGLONG base = 0;
+		app.BeginProgress(total, srcs[0].c_str(), "Moving...");
+		CopyProgCtx ctx = { &app, 0, false, false, 0, false };
+		SetCopyProgressCallback(CopyProgThunk, &ctx);
 
-        for (size_t i=0;i<srcs.size();++i){
-            const char* sp = srcs[i].c_str();
-            ULONGLONG thisSize = DirSizeRecursiveA(sp);
-            ctx.base = base;
+		size_t movedOk = 0, failed = 0;
+		ULONGLONG base = 0;
 
-            // Destination top (dstDir\basename(sp))
-            const char* baseName = BaseNameOf(sp);
-            char dstTop[512]; JoinPath(dstTop, sizeof(dstTop), dstDir, baseName);
+		for (size_t i=0;i<srcs.size();++i){
+			const char* sp = srcs[i].c_str();
+			ULONGLONG thisSize = DirSizeRecursiveA(sp);
+			ctx.base = base;
 
-            BOOL doneThis = FALSE;
+			// Destination top (dstDir\basename(sp))
+			const char* baseName = BaseNameOf(sp);
+			char dstTop[512]; JoinPath(dstTop, sizeof(dstTop), dstDir, baseName);
 
-            // Fast path: same drive and not moving into own subfolder -> MoveFileA
-            if (SameDriveLetter(sp, dstDir) && !IsSubPathCaseI(sp, dstTop)) {
-                if (MoveFileA(sp, dstTop)) {
-                    doneThis = TRUE;  // instant rename/move within volume
-                }
-            }
+			BOOL doneThis = FALSE;
 
-            // Fallback: copy -> delete original (only delete if copy succeeded)
-            if (!doneThis) {
-                if (!CopyRecursiveWithProgressA(sp, dstDir, total)){
-                    if (ctx.canceled){
-                        // Clean partial dest and stop
-                        DeleteRecursiveA(dstTop);
-                        break;
-                    }
-                    // Non-cancel failure: continue
-                } else {
-                    if (DeleteRecursiveA(sp)) {
-                        doneThis = TRUE;
-                    } else {
-                        // Optional: consider removing dstTop if source delete failed
-                    }
-                }
-            }
+			// Fast path: same drive and not moving into own subfolder -> MoveFileA
+			if (SameDriveLetter(sp, dstDir) && !IsSubPathCaseI(sp, dstTop)) {
+				if (MoveFileA(sp, dstTop)) {
+					doneThis = TRUE;  // instant rename/move within volume
+				}
+			}
 
-            if (doneThis) ++movedOk; else ++failed;
-            base += thisSize;
-        }
+			// Fallback: copy -> delete original (only delete if copy succeeded)
+			if (!doneThis) {
+				if (!CopyRecursiveWithProgressA(sp, dstDir, total)){
+					if (ctx.canceled){
+						// Clean partial dest and stop
+						DeleteRecursiveA(dstTop);
+						break;
+					}
+					// Non-cancel failure: continue
+				} else {
+					if (DeleteRecursiveA(sp)) {
+						doneThis = TRUE;
+					} else {
+						// Optional: consider removing dstTop if source delete failed
+					}
+				}
+			}
 
-        SetCopyProgressCallback(NULL, NULL);
-        app.EndProgress();
+			if (doneThis) ++movedOk; else ++failed;
+			base += thisSize;
+		}
 
-        if (ctx.canceled){
-            app.SetStatus("Move canceled");
-            // On cancel we keep originals; clear marks and refresh UI
-            for (size_t i=0;i<src.items.size();++i) src.items[i].marked=false;
-            if (src.mode==1) ListDirectory(src.curPath, src.items);
-            {
-                Pane& dstp = app.m_pane[1 - app.m_active];
-                if (dstp.mode==1 && _stricmp(dstp.curPath, dstDir)==0) ListDirectory(dstp.curPath, dstp.items);
-            }
-            app.RefreshPane(app.m_pane[0]); app.RefreshPane(app.m_pane[1]);
-            break;
-        }
+		SetCopyProgressCallback(NULL, NULL);
+		app.EndProgress();
 
-        // Normal completion: refresh both panes, clear marks
-        for (size_t i=0;i<src.items.size();++i) src.items[i].marked=false;
-        if (src.mode==1) ListDirectory(src.curPath, src.items);
-        {
-            Pane& dstp = app.m_pane[1 - app.m_active];
-            if (dstp.mode==1 && _stricmp(dstp.curPath, dstDir)==0) ListDirectory(dstp.curPath, dstp.items);
-        }
-        app.RefreshPane(app.m_pane[0]); app.RefreshPane(app.m_pane[1]);
+		if (ctx.canceled){
+			app.SetStatus("Move canceled");
+			// On cancel we keep originals; clear marks and refresh UI
+			for (size_t i=0;i<src.items.size();++i) src.items[i].marked=false;
+			if (src.mode==1) ListDirectory(src.curPath, src.items);
+			{
+				Pane& dstp = app.m_pane[1 - app.m_active];
+				if (dstp.mode==1 && _stricmp(dstp.curPath, dstDir)==0) ListDirectory(dstp.curPath, dstp.items);
+			}
+			app.RefreshPane(app.m_pane[0]); app.RefreshPane(app.m_pane[1]);
+			break;
+		}
 
-        if (failed == 0) app.SetStatus("Moved %u item(s)", (unsigned)movedOk);
-        else             app.SetStatus("Moved %u, %u failed", (unsigned)failed);
-        break;
-    }
+		// Normal completion: refresh both panes, clear marks
+		for (size_t i=0;i<src.items.size();++i) src.items[i].marked=false;
+		if (src.mode==1) ListDirectory(src.curPath, src.items);
+		{
+			Pane& dstp = app.m_pane[1 - app.m_active];
+			if (dstp.mode==1 && _stricmp(dstp.curPath, dstDir)==0) ListDirectory(dstp.curPath, dstp.items);
+		}
+		app.RefreshPane(app.m_pane[0]); app.RefreshPane(app.m_pane[1]);
+
+		if (failed == 0) app.SetStatus("Moved %u item(s)", (unsigned)movedOk);
+		else             app.SetStatus("Moved %u, %u failed", (unsigned)failed);
+		break;
+	}
+
 
     // ---- Delete ---------------------------------------------------------------
     case ACT_DELETE:
@@ -414,12 +459,29 @@ void Execute(Action act, FileBrowserApp& app)
 
     // ---- Calculate size -------------------------------------------------------
     case ACT_CALCSIZE:
-        if (sel){
-            ULONGLONG bytes = DirSizeRecursiveA(srcFull);
-            char tmp[64]; FormatSize(bytes, tmp, sizeof(tmp));
-            app.SetStatus("%s", tmp);
-        }
-        break;
+	{
+		if (!sel) break;
+		if (!srcFull[0]) {
+			// Try to derive from selection directly (covers any future cases)
+			char tmpPath[512] = "";
+			if (src.mode == 0 && sel->isDir && !sel->isUpEntry) {
+				_snprintf(tmpPath, sizeof(tmpPath), "%s", sel->name);
+				tmpPath[sizeof(tmpPath)-1] = 0;
+				NormalizeDirA(tmpPath);
+			}
+			if (!tmpPath[0]) { app.SetStatus("Open a folder or select a drive"); break; }
+			ULONGLONG bytes = DirSizeRecursiveA(tmpPath);
+			char tmp[64]; FormatSize(bytes, tmp, sizeof(tmp));
+			app.SetStatus("%s", tmp);
+			break;
+		}
+
+		ULONGLONG bytes = DirSizeRecursiveA(srcFull);
+		char tmp[64]; FormatSize(bytes, tmp, sizeof(tmp));
+		app.SetStatus("%s", tmp);
+		break;
+	}
+
 
     // ---- Go to root (or back to drive list) ----------------------------------
     case ACT_GOROOT:

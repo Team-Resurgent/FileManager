@@ -76,6 +76,12 @@ private:
     // stateless with respect to the model while marquee scroll stays smooth.
     MarqueeState m_marq[2];            // new
 
+	//Header marquee (per pane)
+	void DrawHeaderFittedOrMarquee(CXBFont& font, FLOAT x, FLOAT y, FLOAT maxW,
+								DWORD color, const char* text, int paneIndex);
+	MarqueeState m_hdrMarq[2];   // independent from row marquee
+
+
 private:
     // Existing helpers (ANSI -> wide text, primitives, metrics)
     static void  DrawAnsi(CXBFont& font, FLOAT x, FLOAT y, DWORD color, const char* text);
