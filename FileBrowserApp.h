@@ -172,6 +172,10 @@ private:
 
 	// Exit helper (define one of the strategies inside)
 	void ExitNow();
+	
+	ULONGLONG m_dvdUsedBytes;   // no in-class init here
+	ULONGLONG m_dvdTotalBytes;  // "
+	bool      m_dvdHaveStats;
 };
 
 #endif // FILEBROWSERAPP_H

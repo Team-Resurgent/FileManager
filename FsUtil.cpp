@@ -1,4 +1,5 @@
 #include "FsUtil.h"
+
 #include <algorithm>
 #include <string.h>
 #include <ctype.h>
@@ -13,35 +14,46 @@
   - Copy/move helpers with progress callbacks
   - .xbe launcher (remaps D: and calls XLaunchNewImageA)
   - FATX cache format helpers (X/Y/Z) via XapiFormatFATVolumeEx
+  - Integrated DVD helpers (tray state, media sniff, cold remount)
+  - No dependency on undocumented.h; minimal kernel shims are declared here.
 ============================================================================
 */
 
-
-// --- xboxkrnl drive link APIs ------------------------------------------------
+// --- xboxkrnl shims ----------------------------------------------------------
 // We create DOS-style links like "\??\E:" that point to kernel device paths such
-// as "\Device\Harddisk0\Partition1". STATUS_SUCCESS == 0 on Xbox.
+// as "\Device\Harddisk0\Partition1". On Xbox, STATUS_SUCCESS == 0 (not Win32).
+// We also expose SMC tray IO and the Cdrom dismount entrypoint.
 extern "C" {
     typedef struct _STRING { USHORT Length; USHORT MaximumLength; PCHAR Buffer; } STRING, *PSTRING;
+
     LONG __stdcall IoCreateSymbolicLink(PSTRING SymbolicLinkName, PSTRING DeviceName);
     LONG __stdcall IoDeleteSymbolicLink(PSTRING SymbolicLinkName);
+    LONG __stdcall IoDismountVolumeByName(PSTRING VolumeName);
+
+    VOID    __stdcall HalReadSMCTrayState(DWORD* pdwTrayState, DWORD* pdwTrayCount);
+    BOOLEAN __stdcall HalWriteSMBusValue(UCHAR Address, UCHAR Command, BOOLEAN ReadWord, UCHAR Data);
 }
 
-// Small helpers to build XDK STRINGs and "\??\X:" strings.
-static inline void BuildString(STRING& s,const char* z){
-    USHORT L=(USHORT)strlen(z); s.Length=L; s.MaximumLength=L+1; s.Buffer=(PCHAR)z;
-}
-static inline void MakeDosString(char* out,size_t cap,const char* letter){
-    _snprintf(out,(int)cap,"\\??\\%s",letter); out[cap-1]=0;
-}
+// TRAY_* and DRIVE_* come from FsUtil.h (kept out of this .cpp on purpose).
 
 #ifndef FILE_READ_ONLY_VOLUME
-#define FILE_READ_ONLY_VOLUME 0x00080000u  // Win32 FILE_READ_ONLY_VOLUME (for GetVolumeInformationA)
+#define FILE_READ_ONLY_VOLUME 0x00080000u  // for GetVolumeInformationA
 #endif
+
+// ----- Small STRING helpers --------------------------------------------------
+// Build an XDK STRING directly (avoid Rtl* to keep header surface tiny)
+static inline void BuildString(STRING& s, const char* z){
+    USHORT L=(USHORT)strlen(z); s.Length=L; s.MaximumLength=L+1; s.Buffer=(PCHAR)z;
+}
+// "\??\X:" is the DOS devices directory; drive letters live here
+static inline void MakeDosString(char* out, size_t cap, const char* letter){
+    _snprintf(out, (int)cap, "\\??\\%s", letter); out[cap-1]=0;
+}
 
 // ============================================================================
 // Copy progress callback plumbing
 // ============================================================================
-static CopyProgressFn g_copyProgFn = 0;
+static CopyProgressFn g_copyProgFn   = 0;
 static void*          g_copyProgUser = 0;
 
 void SetCopyProgressCallback(CopyProgressFn fn, void* user){
@@ -53,7 +65,7 @@ void SetCopyProgressCallback(CopyProgressFn fn, void* user){
 // Attribute & volume helpers
 // ============================================================================
 
-// Remove READONLY/SYSTEM/HIDDEN so we can delete/overwrite.
+// Remove READONLY/SYSTEM/HIDDEN so we can delete/overwrite stubborn files.
 static inline void StripROSysHiddenA(const char* path){
     DWORD a = GetFileAttributesA(path);
     if (a == INVALID_FILE_ATTRIBUTES) return;
@@ -61,125 +73,174 @@ static inline void StripROSysHiddenA(const char* path){
     if (na != a) SetFileAttributesA(path, na);
 }
 
-// Detect read-only volumes. If GetVolumeInformationA fails, treat D:\ (DVD)
-// as read-only to be safe on OG Xbox.
+// If GetVolumeInformationA fails, treat D:\ (DVD) as read-only to be safe.
 static bool IsReadOnlyVolumeA(const char* path){
     if (!path || !path[0]) return false;
     char root[4]; _snprintf(root, sizeof(root), "%c:\\", (char)toupper((unsigned char)path[0])); root[sizeof(root)-1]=0;
     DWORD fsFlags = 0;
     if (GetVolumeInformationA(root, NULL, 0, NULL, NULL, &fsFlags, NULL, 0))
         return (fsFlags & FILE_READ_ONLY_VOLUME) != 0;
-    return (root[0] == 'D'); // OG Xbox DVD
+    return (root[0] == 'D'); // OG Xbox DVD (CDFS)
 }
 
 // ============================================================================
 // Drive letter mapping (DOS -> device) via IoCreateSymbolicLink
 // ============================================================================
 
-static BOOL MapLetterToDevice(const char* letter,const char* devicePath){
-    // Remove any stale mapping first
-    char dosBuf[16]={0}; MakeDosString(dosBuf,sizeof(dosBuf),letter);
-    STRING sDos; BuildString(sDos,dosBuf); IoDeleteSymbolicLink(&sDos);
+static BOOL MapLetterToDevice(const char* letter, const char* devicePath){
+    // Remove any stale mapping first (deleting a non-existent link is fine)
+    char dosBuf[16]={0}; MakeDosString(dosBuf, sizeof(dosBuf), letter);
+    STRING sDos; BuildString(sDos, dosBuf);
+    IoDeleteSymbolicLink(&sDos);
 
-    // Create new mapping
-    STRING sDev; BuildString(sDev,devicePath);
-    if (IoCreateSymbolicLink(&sDos,&sDev)!=0) return FALSE; // STATUS_SUCCESS==0
+    // Create new mapping; STATUS_SUCCESS == 0 on Xbox
+    STRING sDev; BuildString(sDev, devicePath);
+    if (IoCreateSymbolicLink(&sDos, &sDev) != 0) return FALSE;
 
-    // Light probe to confirm the new link resolves
-    char root[8]={0}; _snprintf(root,sizeof(root),"%s\\",letter);
-    if (GetFileAttributesA(root)==INVALID_FILE_ATTRIBUTES){
-        IoDeleteSymbolicLink(&sDos); return FALSE;
+    // Light probe to confirm the new link resolves to something real
+    char root[8]={0}; _snprintf(root, sizeof(root), "%s\\", letter);
+    if (GetFileAttributesA(root) == INVALID_FILE_ATTRIBUTES){
+        IoDeleteSymbolicLink(&sDos);
+        return FALSE;
     }
     return TRUE;
 }
 
 // Standard OG Xbox letters: C/E/X/Y/Z/F/G plus D (DVD).
 void MapStandardDrives_Io(){
-    MapLetterToDevice("D:","\\Device\\Cdrom0");
-    MapLetterToDevice("C:","\\Device\\Harddisk0\\Partition2");
-    MapLetterToDevice("E:","\\Device\\Harddisk0\\Partition1");
-    MapLetterToDevice("X:","\\Device\\Harddisk0\\Partition3");
-    MapLetterToDevice("Y:","\\Device\\Harddisk0\\Partition4");
-    MapLetterToDevice("Z:","\\Device\\Harddisk0\\Partition5");
-    MapLetterToDevice("F:","\\Device\\Harddisk0\\Partition6");
-    MapLetterToDevice("G:","\\Device\\Harddisk0\\Partition7");
+    MapLetterToDevice("D:", "\\Device\\Cdrom0");
+    MapLetterToDevice("C:", "\\Device\\Harddisk0\\Partition2");
+    MapLetterToDevice("E:", "\\Device\\Harddisk0\\Partition1");
+    MapLetterToDevice("X:", "\\Device\\Harddisk0\\Partition3");
+    MapLetterToDevice("Y:", "\\Device\\Harddisk0\\Partition4");
+    MapLetterToDevice("Z:", "\\Device\\Harddisk0\\Partition5");
+    MapLetterToDevice("F:", "\\Device\\Harddisk0\\Partition6");
+    MapLetterToDevice("G:", "\\Device\\Harddisk0\\Partition7");
 }
 
 // ============================================================================
-// FATX cache format helpers (X/Y/Z) using XDK's XapiFormatFATVolumeEx
-//  - We pass a *device path* (not a drive letter) to guarantee a real format.
-//  - bytesPerCluster = 0 -> 16 KiB (typical for cache partitions)
+// DVD helpers (tray state, media detect, remount, size cache)
 // ============================================================================
 
-extern "C" {
-typedef struct _ANSI_STRING_ { USHORT Length; USHORT MaximumLength; PCHAR Buffer; } ANSI_STRING_, *PANSI_STRING_;
-void  __stdcall RtlInitAnsiString(PANSI_STRING_ DestinationString, const char* SourceString);
-BOOL  WINAPI    XapiFormatFATVolumeEx(PANSI_STRING_ VolumePath, ULONG BytesPerCluster);
+// TRAY_* -> DRIVE_* normalize (our app logic uses DRIVE_* consistently)
+static inline DWORD _NormalizeToDriveCode(DWORD code){
+    if (code == TRAY_OPEN)                 return DRIVE_OPEN;
+    if (code == TRAY_CLOSED_NO_MEDIA)      return DRIVE_CLOSED_NO_MEDIA;
+    if (code == TRAY_CLOSED_MEDIA_PRESENT) return DRIVE_CLOSED_MEDIA_PRESENT;
+    return code; // already DRIVE_* or unknown
 }
 
-// Translate X/Y/Z drive letters to their device paths.
-static const char* _CacheLetterToDevice(char dl)
-{
-    char c = (dl >= 'a' && dl <= 'z') ? (char)(dl - 32) : dl;
-    switch (c) {
-        case 'X': return "\\Device\\Harddisk0\\Partition3";
-        case 'Y': return "\\Device\\Harddisk0\\Partition4";
-        case 'Z': return "\\Device\\Harddisk0\\Partition5";
-        default:  return 0;
+// Minimal wrapper; keeps SMC calls private to this TU.
+class CIoSupport {
+public:
+    CIoSupport(){ m_dwTrayState=0; m_dwTrayCount=0; m_dwLastTrayState=0; }
+    DWORD GetTrayState(){
+        HalReadSMCTrayState(&m_dwTrayState, &m_dwTrayCount); // returns TRAY_*
+        m_dwLastTrayState = m_dwTrayState;
+        return m_dwTrayState;
     }
+    // Unused at the moment but intentionally kept as handy hooks:
+    HRESULT EjectTray(){ HalWriteSMBusValue(0x20, 0x0C, FALSE, 0x00); return S_OK; }
+    HRESULT CloseTray(){ HalWriteSMBusValue(0x20, 0x0C, FALSE, 0x01); return S_OK; }
+private:
+    DWORD m_dwTrayState, m_dwTrayCount, m_dwLastTrayState;
+};
+
+// DVD size cache (expensive to recompute on CDFS; keyed by volume serial)
+static DWORD      g_dvdSerialCache = 0xFFFFFFFFu;  // 0xFFFFFFFF => unknown
+static ULONGLONG  g_dvdUsedCache   = 0;            // bytes used on the disc
+static ULONGLONG  g_dvdTotalCache  = 0;            // disc capacity (for reference)
+
+static void DvdInvalidateSizeCache(){
+    g_dvdSerialCache = 0xFFFFFFFFu;
+    g_dvdUsedCache   = 0;
+    g_dvdTotalCache  = 0;
 }
 
-// Low-level format call: writes FATX superblock + FAT and empties root.
-static bool _FormatDeviceFatx(const char* devicePath, unsigned long bytesPerCluster)
-{
-    if (!devicePath || !devicePath[0]) { SetLastError(ERROR_INVALID_PARAMETER); return false; }
-    if (bytesPerCluster == 0) bytesPerCluster = 16 * 1024; // default for cache
+// Map/unmap D: with cache invalidation
+void DvdMap_Io(){    MapLetterToDevice("D:", "\\Device\\Cdrom0"); DvdInvalidateSizeCache(); }
+void DvdUnmap_Io(){  char dosBuf[16]; MakeDosString(dosBuf, sizeof(dosBuf), "D:"); STRING s; BuildString(s, dosBuf); IoDeleteSymbolicLink(&s); DvdInvalidateSizeCache(); }
 
-    ANSI_STRING_ vol;
-    RtlInitAnsiString(&vol, devicePath);
+// “Is D:\…” convenience (app also uses a local inline; this is exported)
+bool IsDPath(const char* p){
+    return p && (p[0]=='D' || p[0]=='d') && p[1]==':' && p[2]=='\\';
+}
 
-    // Nonzero on success per XDK
-    BOOL ok = XapiFormatFATVolumeEx(&vol, bytesPerCluster);
-    if (!ok) {
-        // XapiFormatFATVolumeEx does not expose a concrete last error.
-        // Caller reads only success/failure.
+// Volume serial helper (used for cache key)
+bool GetDvdVolumeSerial(DWORD* outSerial){
+    if (!outSerial) return false;
+    if (GetFileAttributesA("D:\\") == INVALID_FILE_ATTRIBUTES) return false;
+    DWORD serial = 0;
+    if (!GetVolumeInformationA("D:\\", NULL, 0, &serial, NULL, NULL, NULL, 0))
         return false;
-    }
+    *outSerial = serial;
     return true;
 }
 
-// Public: format exactly one cache drive (X/Y/Z). Temporarily unmaps the DOS
-// link to avoid open-handle surprises, then restores standard mapping.
-bool FormatCacheDrive(char driveLetter, unsigned long bytesPerCluster)
-{
-    const char* dev = _CacheLetterToDevice(driveLetter);
-    if (!dev) { SetLastError(ERROR_INVALID_PARAMETER); return false; }
+// Simple media sniff: 1=game, 2=video, 3=data, 0=unknown. Writes label.
+int DvdDetectMediaSimple(char* outLabel, size_t cap){
+    if (!outLabel || cap==0) return 0;
+    outLabel[0]=0;
 
-    // Best-effort unmap DOS link first
-    char dosBuf[16] = {0};
-    _snprintf(dosBuf, sizeof(dosBuf), "\\??\\%c:", (driveLetter >= 'a' && driveLetter <= 'z') ? (driveLetter - 32) : driveLetter);
-    STRING sDos; BuildString(sDos, dosBuf);
-    IoDeleteSymbolicLink(&sDos);
+    // Make sure D: points to the physical Cdrom0
+    MapLetterToDevice("D:", "\\Device\\Cdrom0");
 
-    bool ok = _FormatDeviceFatx(dev, bytesPerCluster);
-
-    // Always restore standard letters so the app keeps working
-    MapStandardDrives_Io();
-    return ok;
+    // Xbox game?
+    DWORD a = GetFileAttributesA("D:\\default.xbe");
+    if (a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY)){
+        _snprintf(outLabel, (int)cap, "DVD: Xbox Game"); outLabel[cap-1]=0; return 1;
+    }
+    // DVD-Video?
+    a = GetFileAttributesA("D:\\VIDEO_TS");
+    if (a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY)){
+        _snprintf(outLabel, (int)cap, "DVD: Video"); outLabel[cap-1]=0; return 2;
+    }
+    // Any content at all => Data
+    WIN32_FIND_DATAA fd; HANDLE h = FindFirstFileA("D:\\*", &fd);
+    if (h != INVALID_HANDLE_VALUE){
+        do{
+            const char* n = fd.cFileName;
+            if (!strcmp(n,".") || !strcmp(n,"..")) continue;
+            _snprintf(outLabel, (int)cap, "DVD: Data"); outLabel[cap-1]=0;
+            FindClose(h); return 3;
+        }while(FindNextFileA(h, &fd));
+        FindClose(h);
+    }
+    _snprintf(outLabel, (int)cap, "DVD: Unknown"); outLabel[cap-1]=0;
+    return 0;
 }
 
-// Format X, Y, Z; optionally blow away and recreate E:\CACHE for good measure.
-bool FormatCacheXYZ(unsigned long bytesPerCluster, bool alsoClearECACHE)
-{
-    bool okX = FormatCacheDrive('X', bytesPerCluster);
-    bool okY = FormatCacheDrive('Y', bytesPerCluster);
-    bool okZ = FormatCacheDrive('Z', bytesPerCluster);
+// Return a DRIVE_* code only when the tray/media state *changes*; otherwise READY.
+DWORD DvdGetDriveStateOneShot(){
+    static DWORD      s_last = 0xFFFFFFFFu;
+    static CIoSupport s_io;
 
-    if (alsoClearECACHE) {
-        DeleteRecursiveA("E:\\CACHE");
-        EnsureDirA("E:\\CACHE");
-    }
-    return okX && okY && okZ;
+    DWORD raw  = s_io.GetTrayState();         // TRAY_*
+    DWORD code = _NormalizeToDriveCode(raw);  // DRIVE_*
+    if (code != s_last){ s_last = code; return code; }
+    return DRIVE_READY;
+}
+
+// Force old CDFS instance to drop, then remap D: to Cdrom0 and "touch" root.
+// Helps ensure fresh directory trees after fast disc swaps.
+void DvdColdRemount(){
+    // Best-effort unmap D:
+    DvdUnmap_Io();
+
+    // Dismount the cdrom device so CDFS forgets previous disc
+    char dev[] = "\\Device\\Cdrom0";
+    STRING sDev; BuildString(sDev, dev);
+    IoDismountVolumeByName(&sDev);
+
+    // Give the kernel a beat to settle
+    Sleep(120);
+
+    // Remap D: -> Cdrom0 and force a root directory probe
+    DvdMap_Io();
+    Sleep(120);
+    WIN32_FIND_DATAA fd;
+    HANDLE h = FindFirstFileA("D:\\*", &fd);
+    if (h != INVALID_HANDLE_VALUE) FindClose(h);
 }
 
 // ============================================================================
@@ -187,12 +248,24 @@ bool FormatCacheXYZ(unsigned long bytesPerCluster, bool alsoClearECACHE)
 // ============================================================================
 
 namespace {
+    // We only care about the OG Xbox set of letters
     const char* kRoots[] = { "C:\\", "D:\\", "E:\\", "F:\\", "G:\\", "X:\\", "Y:\\", "Z:\\" };
     const int   kNumRoots = sizeof(kRoots)/sizeof(kRoots[0]);
     int  g_presentIdx[16];
     int  g_presentCount = 0;
 
     inline int ci_cmp(const char* a,const char* b){ return _stricmp(a,b); }
+}
+
+// 26-bit A..Z mask (handy for quick change detection)
+unsigned int QueryDriveMaskAZ(){
+    unsigned int mask = 0;
+    for (char d='A'; d<='Z'; ++d){
+        char root[4] = { d, ':', '\\', 0 };
+        DWORD attr = GetFileAttributesA(root);
+        if (attr != INVALID_FILE_ATTRIBUTES) mask |= (1u << (d - 'A'));
+    }
+    return mask;
 }
 
 // Probe which standard roots exist and record indices into kRoots[]
@@ -211,7 +284,7 @@ void BuildDriveItems(std::vector<Item>& out){
         int i = g_presentIdx[j];
         Item it; ZeroMemory(&it, sizeof(it));
         strncpy(it.name, kRoots[i], 255); it.name[255]=0;
-        it.isDir=true; it.size=0; it.isUpEntry=false; it.marked=false; 
+        it.isDir=true; it.size=0; it.isUpEntry=false; it.marked=false;
         out.push_back(it);
     }
 }
@@ -225,6 +298,7 @@ void EnsureTrailingSlash(char* s,size_t cap){
     if(n && s[n-1]!='\\' && n+1<cap){ s[n]='\\'; s[n+1]=0; }
 }
 
+// JoinPath does not normalize components; input must be well-formed.
 void JoinPath(char* dst,size_t cap,const char* base,const char* name){
     size_t bl=strlen(base);
     if(bl && base[bl-1]=='\\') _snprintf(dst,(int)cap,"%s%s",base,name);
@@ -319,16 +393,49 @@ void FormatSize(ULONGLONG bytes, char* out, size_t cap)
         return;
     }
 
-    // One decimal place (e.g., 1.5 GB / 12.0 TB). Tweak if you prefer.
+    // Two decimals keeps the footer stable but not too noisy (e.g., 3.09 GB)
     _snprintf(out, (int)cap, "%.2f %s", val, unit);
     out[cap-1] = 0;
 }
 
-void GetDriveFreeTotal(const char* anyPathInDrive, ULONGLONG& freeBytes, ULONGLONG& totalBytes){
-    freeBytes=0; totalBytes=0; 
-    char root[8]; _snprintf(root,sizeof(root),"%c:\\",anyPathInDrive[0]); root[sizeof(root)-1]=0;
-    ULARGE_INTEGER a,t,f; a.QuadPart=0; t.QuadPart=0; f.QuadPart=0;
-    if(GetDiskFreeSpaceExA(root,&a,&t,&f)){ freeBytes=f.QuadPart; totalBytes=t.QuadPart; }
+// For normal drives, we return true "free / total".
+// For D:, CDFS reports "free=0". To match the UI label "Free / Total" and avoid
+// confusion, we intentionally return "0 / <used_on_disc>" for DVDs.
+// We recompute <used_on_disc> only when the volume serial changes.
+void GetDriveFreeTotal(const char* anyPathInDrive,
+                       ULONGLONG& freeBytes, ULONGLONG& totalBytes)
+{
+    freeBytes = 0; totalBytes = 0;
+    if (!anyPathInDrive || !anyPathInDrive[0]) return;
+
+    const char letter = (char)toupper((unsigned char)anyPathInDrive[0]);
+
+    if (letter == 'D') {
+        // If D:\ is gone, leave 0/0.
+        if (GetFileAttributesA("D:\\") == INVALID_FILE_ATTRIBUTES) return;
+
+        DWORD serial = 0xFFFFFFFF;
+        GetVolumeInformationA("D:\\", NULL, 0, &serial, NULL, NULL, NULL, 0);
+
+        if (serial != g_dvdSerialCache) {
+            // Disc changed (or first time) — recompute and cache
+            ULARGE_INTEGER a, t, f; a.QuadPart = t.QuadPart = f.QuadPart = 0;
+            GetDiskFreeSpaceExA("D:\\", &a, &t, &f);   // capacity of media
+            g_dvdTotalCache  = t.QuadPart;             // kept for reference
+            g_dvdUsedCache   = DirSizeRecursiveA("D:\\");
+            g_dvdSerialCache = serial;
+        }
+
+        // "Free / Total"   =>   "0 / <used>"
+        freeBytes  = 0;
+        totalBytes = g_dvdUsedCache;
+        return;
+    }
+
+    // Normal drives: true free/total via GetDiskFreeSpaceExA
+    char root[8]; _snprintf(root, sizeof(root), "%c:\\", letter); root[sizeof(root)-1]=0;
+    ULARGE_INTEGER a, t, f; a.QuadPart = t.QuadPart = f.QuadPart = 0;
+    if (GetDiskFreeSpaceExA(root, &a, &t, &f)) { freeBytes = f.QuadPart; totalBytes = t.QuadPart; }
 }
 
 // ============================================================================
@@ -346,9 +453,11 @@ bool EnsureDirA(const char* path){
     return CreateDirectoryA(path, NULL) ? true : false;
 }
 
-// Recursively delete files/directories with attribute clearing and safety rails:
-//  - Rejects drive roots
-//  - Rejects read-only volumes
+// Recursively delete with safety rails:
+//  - Refuses drive roots
+//  - Refuses read-only volumes (CDFS / cache)
+//  - Clears READONLY/SYSTEM/HIDDEN before delete
+//  - Continues on child failures; tiny retry on RemoveDirectoryA
 bool DeleteRecursiveA(const char* path){
     if (!path || !path[0]) { SetLastError(ERROR_INVALID_PARAMETER); return false; }
     if (IsDriveRoot(path)) { SetLastError(ERROR_ACCESS_DENIED);     return false; }
@@ -375,7 +484,7 @@ bool DeleteRecursiveA(const char* path){
 
                 // Best-effort delete; continue on failure
                 if (!DeleteRecursiveA(sub)){
-                    // optional: collect first error somewhere if desired
+                    // Optionally capture first error here
                 }
             } while (FindNextFileA(h, &fd));
             FindClose(h);
@@ -410,24 +519,23 @@ bool HasXbeExt(const char* name){
 
 // ============================================================================
 // Copy (chunked) + recursive copy with progress/cancel
-//  - CopyFileChunkedA: fixed 64 KiB buffer, attribute normalization
-//  - CopyRecursiveCoreA: mkdirs and recurse
-//  - CopyRecursiveWithProgressA: guards against copying into a subfolder of self
+//  - 64 KiB fixed buffer (predictable RAM use on Xbox)
+//  - Normalizes dest attributes before overwrite
+//  - Progress callback may cancel; on cancel we delete the partial output
 // ============================================================================
 
 static bool CopyFileChunkedA(const char* s, const char* d,
                              ULONGLONG& inoutBytesDone, ULONGLONG totalBytes)
 {
-    // Open source (read-only, allow sharing with readers)
+    // Open source (read-only, allow readers to share)
     HANDLE hs = CreateFileA(s, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING,
                             FILE_ATTRIBUTE_NORMAL, NULL);
     if (hs == INVALID_HANDLE_VALUE) return false;
 
-    // Preflight destination: normalize attributes if overwriting a file
+    // Preflight dest: directory collision -> error; else clear R/O etc.
     DWORD da = GetFileAttributesA(d);
     if (da != INVALID_FILE_ATTRIBUTES) {
         if (da & FILE_ATTRIBUTE_DIRECTORY) {
-            // Name collision with existing directory
             CloseHandle(hs);
             SetLastError(ERROR_ALREADY_EXISTS);
             return false;
@@ -468,12 +576,9 @@ static bool CopyFileChunkedA(const char* s, const char* d,
     CloseHandle(hs);
     CloseHandle(hd);
 
-    // Normalize destination attributes; on failure, remove partial.
-	if (!ok) {
-        DeleteFileA(d);
-	} else {
-		SetFileAttributesA(d, FILE_ATTRIBUTE_NORMAL);
-	}
+    // Normalize dest; on failure, remove partial
+    if (!ok) { DeleteFileA(d); }
+    else     { SetFileAttributesA(d, FILE_ATTRIBUTE_NORMAL); }
     return ok;
 }
 
@@ -490,8 +595,8 @@ static bool CopyRecursiveCoreA(const char* srcPath, const char* dstDir,
     if (a & FILE_ATTRIBUTE_DIRECTORY){
         if (!EnsureDirA(dstPath)) return false;
 
-		// Do NOT preserve source dir attributes
-		SetFileAttributesA(dstPath, FILE_ATTRIBUTE_NORMAL);
+        // Do NOT preserve source dir attributes
+        SetFileAttributesA(dstPath, FILE_ATTRIBUTE_NORMAL);
 
         char mask[512]; JoinPath(mask, sizeof(mask), srcPath, "*");
         WIN32_FIND_DATAA fd; HANDLE h = FindFirstFileA(mask, &fd);
@@ -531,19 +636,13 @@ bool CopyRecursiveWithProgressA(const char* srcPath, const char* dstDir,
     char dstTop[512]; JoinPath(dstTop, sizeof(dstTop), dstDir, base);
 
     // Guard: prevent copying into own subfolder
-    if (IsSubPathCI(srcPath, dstTop)) {
-        SetLastError(ERROR_INVALID_PARAMETER);
-        return false;
-    }
+    if (IsSubPathCI(srcPath, dstTop)) { SetLastError(ERROR_INVALID_PARAMETER); return false; }
 
-    // Optional free-space preflight
+    // Optional free-space preflight (skip if unknown)
     if (totalBytes > 0) {
         ULONGLONG freeB=0, totalB=0;
         GetDriveFreeTotal(dstDir, freeB, totalB);
-        if (freeB > 0 && freeB < totalBytes) {
-            SetLastError(ERROR_DISK_FULL);
-            return false;
-        }
+        if (freeB > 0 && freeB < totalBytes) { SetLastError(ERROR_DISK_FULL); return false; }
     }
 
     ULONGLONG done = 0;
@@ -583,7 +682,10 @@ ULONGLONG DirSizeRecursiveA(const char* path){
     return sum;
 }
 
-// Quick write test: create + delete a small temp file in 'dir'.
+// ============================================================================
+// Quick writability probe
+// ============================================================================
+
 bool CanWriteHereA(const char* dir){
     char test[512];
     JoinPath(test, sizeof(test), dir, ".__xwtest$__");
@@ -597,7 +699,7 @@ bool CanWriteHereA(const char* dir){
 }
 
 // ============================================================================
-// FATX-ish naming rules (very close to what dashboards/games expect)
+// FATX-ish naming rules (close to dashboard behavior)
 // ============================================================================
 
 bool IsBadFatxChar(char c){
@@ -616,11 +718,10 @@ void SanitizeFatxNameInPlace(char* s){
 
 // ============================================================================
 // .xbe launcher
-//  - Accepts either a specific .xbe or a directory (launches default.xbe).
+//  - Accepts either a specific .xbe or a directory (implies "default.xbe").
 //  - Repoints D: to the folder's *device path* and calls XLaunchNewImageA.
 // ============================================================================
 
-// DOS "E:\Games\Foo" -> device "\Device\Harddisk0\Partition1\Games\Foo"
 static bool DosToDevicePathA(const char* dos, char* out, size_t cap){
     if (!dos || strlen(dos) < 2 || dos[1] != ':') return false;
     char drive = (char)toupper((unsigned char)dos[0]);
@@ -645,7 +746,6 @@ static bool DosToDevicePathA(const char* dos, char* out, size_t cap){
     return true;
 }
 
-// Launch a .xbe or a folder's default.xbe by remapping D: and jumping to it.
 bool LaunchXbeA(const char* pathOrDir)
 {
     if (!pathOrDir || !pathOrDir[0]){ SetLastError(ERROR_INVALID_PARAMETER); return false; }
@@ -691,11 +791,7 @@ bool LaunchXbeA(const char* pathOrDir)
 
     STRING sDev; BuildString(sDev, devPath);
     LONG st = IoCreateSymbolicLink(&sDos, &sDev);
-    if (st != 0){
-        // STATUS_SUCCESS == 0
-        SetLastError(ERROR_ACCESS_DENIED);
-        return false;
-    }
+    if (st != 0){ SetLastError(ERROR_ACCESS_DENIED); return false; } // STATUS_SUCCESS == 0
 
     // Launch D:\<file>
     char launchPath[512];
@@ -707,4 +803,75 @@ bool LaunchXbeA(const char* pathOrDir)
 
     SetLastError(rc);
     return false;
+}
+
+// ============================================================================
+// FATX cache format helpers (X/Y/Z) using XapiFormatFATVolumeEx
+//  - We pass device paths to guarantee a real format (not a file on a volume).
+//  - Temporarily unmap the DOS letter to reduce open-handle surprises.
+//  - Always restore standard mappings afterward.
+// ============================================================================
+
+extern "C" {
+typedef struct _ANSI_STRING_ { USHORT Length; USHORT MaximumLength; PCHAR Buffer; } ANSI_STRING_, *PANSI_STRING_;
+BOOL  WINAPI XapiFormatFATVolumeEx(PANSI_STRING_ VolumePath, ULONG BytesPerCluster);
+}
+
+static const char* _CacheLetterToDevice(char dl)
+{
+    char c = (dl >= 'a' && dl <= 'z') ? (char)(dl - 32) : dl;
+    switch (c) {
+        case 'X': return "\\Device\\Harddisk0\\Partition3";
+        case 'Y': return "\\Device\\Harddisk0\\Partition4";
+        case 'Z': return "\\Device\\Harddisk0\\Partition5";
+        default:  return 0;
+    }
+}
+
+static bool _FormatDeviceFatx(const char* devicePath, unsigned long bytesPerCluster)
+{
+    if (!devicePath || !devicePath[0]) { SetLastError(ERROR_INVALID_PARAMETER); return false; }
+    if (bytesPerCluster == 0) bytesPerCluster = 16 * 1024; // default for cache
+
+    // Manual init (avoid RtlInitAnsiString to keep header surface small)
+    ANSI_STRING_ vol;
+    vol.Buffer = (PCHAR)devicePath;
+    vol.Length = (USHORT)strlen(devicePath);
+    vol.MaximumLength = vol.Length + 1;
+
+    // Nonzero on success per XDK
+    BOOL ok = XapiFormatFATVolumeEx(&vol, bytesPerCluster);
+    if (!ok) return false;
+    return true;
+}
+
+bool FormatCacheDrive(char driveLetter, unsigned long bytesPerCluster)
+{
+    const char* dev = _CacheLetterToDevice(driveLetter);
+    if (!dev) { SetLastError(ERROR_INVALID_PARAMETER); return false; }
+
+    // Best-effort unmap DOS link first
+    char dosBuf[16] = {0};
+    _snprintf(dosBuf, sizeof(dosBuf), "\\??\\%c:", (driveLetter >= 'a' && driveLetter <= 'z') ? (driveLetter - 32) : driveLetter);
+    STRING sDos; BuildString(sDos, dosBuf);
+    IoDeleteSymbolicLink(&sDos);
+
+    bool ok = _FormatDeviceFatx(dev, bytesPerCluster);
+
+    // Always restore standard letters so the app keeps working
+    MapStandardDrives_Io();
+    return ok;
+}
+
+bool FormatCacheXYZ(unsigned long bytesPerCluster, bool alsoClearECACHE)
+{
+    bool okX = FormatCacheDrive('X', bytesPerCluster);
+    bool okY = FormatCacheDrive('Y', bytesPerCluster);
+    bool okZ = FormatCacheDrive('Z', bytesPerCluster);
+
+    if (alsoClearECACHE) {
+        DeleteRecursiveA("E:\\CACHE");
+        EnsureDirA("E:\\CACHE");
+    }
+    return okX && okY && okZ;
 }

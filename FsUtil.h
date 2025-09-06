@@ -1,16 +1,16 @@
 #ifndef FSUTIL_H
 #define FSUTIL_H
-
 /*
 ============================================================================
  FsUtil
-  - Drive letter mapping (C/E/F/G/X/Y/Z/D) via IoCreateSymbolicLink
-  - Drive discovery and drive-list item building
+  - Drive-letter mapping (C/E/F/G/X/Y/Z/D) via IoCreateSymbolicLink
+  - Drive discovery + building drive-list items
   - Directory listing + path utilities
   - Basic file/dir ops (delete, mkdir-if-needed, size, free space)
   - Copy-with-progress infrastructure
-  - FATX cache partition formatting (X/Y/Z) via XDK XapiFormatFATVolumeEx
+  - FATX cache partition formatting (X/Y/Z)
   - .xbe launching (remap D: and call XLaunchNewImageA)
+  - DVD helpers (tray/media polling & safe remount) — app uses only functions
 ============================================================================
 */
 
@@ -21,104 +21,102 @@
 #define INVALID_FILE_ATTRIBUTES 0xFFFFFFFF
 #endif
 
-// Represents one entry in a pane listing (file, directory, drive root, or "..").
+// ---------------- DVD tray codes (SMC) + normalized drive codes -------------
+#ifndef TRAY_OPEN
+#define TRAY_OPEN                   16
+#define TRAY_CLOSED_NO_MEDIA        64
+#define TRAY_CLOSED_MEDIA_PRESENT   96
+#endif
+
+#ifndef DRIVE_OPEN
+#define DRIVE_OPEN                      0
+#define DRIVE_NOT_READY                 1
+#define DRIVE_READY                     2   // "no change" sentinel from one-shot API
+#define DRIVE_CLOSED_NO_MEDIA           3
+#define DRIVE_CLOSED_MEDIA_PRESENT      4
+#endif
+
+// ----- Pane item (shared with UI) -------------------------------------------
 struct Item {
-    char        name[256];   // File/dir name or drive-root string (e.g. "E:\")
-    bool        isDir;       // True if directory (including drive roots and "..")
+    char        name[256];   // File/dir name or drive-root (e.g. "E:\")
+    bool        isDir;       // True if directory (incl. drive roots and "..")
     ULONGLONG   size;        // File size (0 for dirs/roots/"..")
-    bool        isUpEntry;   // True only for the synthetic ".." row
-    bool        marked;      // UI mark flag (selection for batch ops)
+    bool        isUpEntry;   // True only for synthetic ".." row
+    bool        marked;      // UI mark flag
 };
 
-// ----- Drive mapping / discovery --------------------------------------------
-// Create the standard DOS links (C/E/F/G/X/Y/Z/D) to their kernel device paths.
-void MapStandardDrives_Io();
+// ===== Drive mapping / discovery ============================================
+void MapStandardDrives_Io();                     // Map C/E/F/G/X/Y/Z and D
+void RescanDrives();                             // Recompute present roots
+void BuildDriveItems(std::vector<Item>& out);    // Build UI items from roots
+unsigned int QueryDriveMaskAZ();                 // Bitmask A..Z (1<<('A'+n))
 
-// Probe which of the standard roots are present (used by BuildDriveItems).
-void RescanDrives();
-
-// Fill 'out' with one Item per present drive root (e.g. "E:\", "F:\", ...).
-void BuildDriveItems(std::vector<Item>& out);
-
-// ----- Directory listing -----------------------------------------------------
-// List files/directories in 'path'. For non-root folders, prepends a ".." entry.
-// The vector is sorted directories-first, then case-insensitive by name.
+// ===== Directory listing =====================================================
 bool ListDirectory(const char* path, std::vector<Item>& out);
 
-// ----- Path helpers ----------------------------------------------------------
-// JoinPath(dst, cap, base, name): dst = base + '\' + name (handles trailing '\').
+// ===== Path helpers ==========================================================
 void JoinPath(char* dst, size_t cap, const char* base, const char* name);
-
-// EnsureTrailingSlash("E:\Games") -> "E:\Games\"
 void EnsureTrailingSlash(char* s, size_t cap);
-
-// ParentPath("E:\Games\Foo") -> "E:\Games\"  ; ParentPath("E:\") -> ""
 void ParentPath(char* path);
-
-// NormalizeDirA("E:") => "E:\" ; always ensures trailing slash.
 void NormalizeDirA(char* s);
-
-// True for exactly "X:\" form (length 3, colon, backslash).
 bool IsDriveRoot(const char* p);
 
-// ----- Simple file/dir ops ---------------------------------------------------
-// Existence checks / mkdir-if-needed / recursive delete / recursive size.
+// ===== Simple file/dir ops ===================================================
 bool DirExistsA(const char* path);
 bool EnsureDirA(const char* path);
 bool DeleteRecursiveA(const char* path);
 ULONGLONG DirSizeRecursiveA(const char* path);
 
-// ----- Misc info -------------------------------------------------------------
-// Format byte size as "123 MB", "1.4 GB", etc.
+// ===== Misc info =============================================================
 void FormatSize(ULONGLONG sz, char* out, size_t cap);
-
-// Free/total bytes for the drive that contains 'anyPathInDrive'.
 void GetDriveFreeTotal(const char* anyPathInDrive,
                        ULONGLONG& freeBytes, ULONGLONG& totalBytes);
-
-// Quick writability probe: tries to create+delete a tiny temp file in 'dir'.
 bool CanWriteHereA(const char* dir);
 
-// ----- FATX-ish naming rules -------------------------------------------------
-// Basic Xbox FATX compatibility: replace bad chars, trim trailing space/dot,
-// clamp to 42 chars, and avoid "."/".." by substituting "NewName".
+// ===== FATX-ish naming rules ================================================
 bool IsBadFatxChar(char c);
 void SanitizeFatxNameInPlace(char* s);
 
-// ----- Copy progress callback ------------------------------------------------
-// Called periodically during file copies. Return false to cancel copy.
+// ===== Copy progress callback ===============================================
 typedef bool (*CopyProgressFn)(ULONGLONG bytesDone,
                                ULONGLONG bytesTotal,
                                const char* currentPath,
                                void* user);
-
-// Register (or clear) the global progress callback + user cookie.
 void SetCopyProgressCallback(CopyProgressFn fn, void* user);
-
-// High-level recursive copy with optional bytesTotal preflight. Honors the
-// progress callback and cancels if it returns false. Prevents copying a folder
-// into its own subfolder.
 bool CopyRecursiveWithProgressA(const char* srcPath, const char* dstDir,
                                 ULONGLONG totalBytes);
 
-// ----- .xbe launching --------------------------------------------------------
-// Simple helper to check for ".xbe" extension (case-insensitive).
+// ===== .xbe launching ========================================================
 bool HasXbeExt(const char* name);
-
-// Launch either a specific .xbe or a folder's default.xbe:
-// - Remaps D: to the directory's *device path*
-// - Calls XLaunchNewImageA("D:\file.xbe")
 bool LaunchXbeA(const char* pathOrDir);
 
-// ----- FATX formatting (cache partitions) ------------------------------------
-// Formats cache partitions by *device* path (not by DOS letter) using
-// XapiFormatFATVolumeEx. Pass bytesPerCluster=0 for default 16 KiB. Returns
-// true on success (on failure, GetLastError() may be set for some code paths).
-bool FormatCacheDrive(char driveLetter, unsigned long bytesPerCluster /* 0 = 16 KiB */);
+// ===== FATX formatting (cache partitions) ===================================
+bool FormatCacheDrive(char driveLetter, unsigned long bytesPerCluster /*0=16KiB*/);
+bool FormatCacheXYZ(unsigned long bytesPerCluster /*0=16KiB*/, bool alsoClearECACHE);
 
-// Convenience: format X, Y, Z in sequence; optionally clears and recreates
-// E:\CACHE afterwards for compatibility with some apps.
-bool FormatCacheXYZ(unsigned long bytesPerCluster /* 0 = 16 KiB */,
-                    bool alsoClearECACHE);
+// ================== DVD helpers (keep FileBrowserApp lean) ==================
+// These are all you need in the app; implementation details stay in fsutil.cpp
+
+// Quick test for "D:\..." path
+bool  IsDPath(const char* p);
+
+// Try to read the current disc’s volume serial from D:\ (returns true on success)
+bool  GetDvdVolumeSerial(DWORD* outSerial);
+
+// Map / unmap DOS D:
+void  DvdMap_Io();                   // D: -> \Device\Cdrom0
+void  DvdUnmap_Io();                 // delete \??\D:
+void  DvdInvalidateSizeCache(); 
+
+// Detect media type in the tray (also forces a light probe of D:\)
+// Returns: 1=game, 2=video, 3=data, 0=unknown. Writes label like "DVD: Xbox Game".
+int   DvdDetectMediaSimple(char* outLabel, size_t cap);
+
+// One-shot tray/media state: returns DRIVE_* only when state changes;
+// returns DRIVE_READY if no change since last call.
+DWORD DvdGetDriveStateOneShot(void);
+
+// Drop old CDFS instance and remap D: cleanly; touches D:\ to force a fresh view.
+void  DvdColdRemount();
 
 #endif // FSUTIL_H

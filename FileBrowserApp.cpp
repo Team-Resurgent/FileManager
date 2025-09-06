@@ -98,17 +98,6 @@ namespace {
         return p;
     }
 
-    // Build a 26-bit mask of existing drive roots (A:\..Z:\).
-    inline unsigned int BuildDriveMask(){
-        unsigned int mask = 0;
-        for (char d='A'; d<='Z'; ++d){
-            char root[4] = { d, ':', '\\', 0 };
-            DWORD attr = GetFileAttributesA(root);
-            if (attr != 0xFFFFFFFF) mask |= (1u << (d - 'A'));
-        }
-        return mask;
-    }
-
 	// Return last component of a path (handles trailing '\'). e.g. "E:\A\B\" -> "B"
 	static void ExtractLastComponent(const char* path, char* out, size_t cap){
 		if (!out || cap == 0) return;
@@ -140,6 +129,9 @@ FileBrowserApp::FileBrowserApp(){
     m_prevButtons = 0; m_prevWhite = m_prevBlack = 0;
     m_navUDHeld=false; m_navUDDir=0; m_navUDNext=0;m_backConfirmArmed = false;
 	m_backConfirmUntil = 0; m_prevBack = 0;
+	m_dvdUsedBytes  = 0;
+    m_dvdTotalBytes = 0;
+    m_dvdHaveStats  = false;
 
     // Pre-populate D3D params (XDK CXBApplication uses m_d3dpp)
     ZeroMemory(&m_d3dpp,sizeof(m_d3dpp));
@@ -151,6 +143,9 @@ FileBrowserApp::FileBrowserApp(){
 
     m_mode=MODE_BROWSE;
     m_status[0]=0; m_statusUntilMs=0;
+	m_dvdUsedBytes  = 0;
+    m_dvdTotalBytes = 0;
+    m_dvdHaveStats  = false;
 }
 
 // ----- draw prims ------------------------------------------------------------
@@ -158,7 +153,6 @@ FileBrowserApp::FileBrowserApp(){
 void FileBrowserApp::DrawRect(float x,float y,float w,float h,D3DCOLOR c){
     DrawSolidRect(m_pd3dDevice, x, y, w, h, c);
 }
-
 // --- Exit helper ------------------------------------------------------------
 // Jump to dashboard via XLaunchNewImage (fallback)
 void FileBrowserApp::ExitNow(){
@@ -568,33 +562,176 @@ void FileBrowserApp::OnPad(const XBGAMEPAD& pad){
 HRESULT FileBrowserApp::FrameMove(){
     XBInput_GetInput();
 
-    // Auto map and rescan if drive set changes
+    // --- Poll for general drive-set changes (ignore D:) ----------------------
     {
-        static DWORD        s_nextPollMs = 0;
-        static unsigned int s_lastMask   = 0;
+        static DWORD        s_nextPollMs  = 0;
+        static unsigned int s_lastMaskNoD = 0xFFFFFFFF; // sentinel = uninitialized
 
         DWORD now = GetTickCount();
         if (now >= s_nextPollMs) {
-            s_nextPollMs = now + 1200;              // poll about 1.2s
+            s_nextPollMs = now + 1200; // ~1.2s
 
-            MapStandardDrives_Io();                 // ensure standard links exist
-            unsigned int mask = BuildDriveMask();   // presence mask A:..Z:
+            const unsigned int dBit = (1u << ('D' - 'A'));
+            unsigned int mask    = QueryDriveMaskAZ();    // A:..Z:
+            unsigned int maskNoD = (mask & ~dBit);      // exclude D:
 
-            if (s_lastMask == 0) {
-                s_lastMask = mask;                  // prime on first run (no toast)
-            } else if (mask != s_lastMask) {
-                s_lastMask = mask;
-                RescanDrives();                     // re-enumerate volumes
-                EnsureListing(m_pane[0]);           // refresh both panes
+            if (s_lastMaskNoD == 0xFFFFFFFF) {
+                s_lastMaskNoD = maskNoD;               // prime (no toast)
+            } else if (maskNoD != s_lastMaskNoD) {
+                s_lastMaskNoD = maskNoD;
+
+                RescanDrives();                         // non-D changes
+                EnsureListing(m_pane[0]);
                 EnsureListing(m_pane[1]);
-                SetStatus("Drives refreshed");      // brief toast
+
+                // comment out if you never want this toast:
+                 SetStatus("Drives refreshed");
             }
         }
     }
 
+    // --- DVD tray/media polling + serial watchdog (no stale listings) ----------
+{
+    static DWORD s_nextDvdPollMs = 0;
+    static DWORD s_lastDvdSerial = 0xFFFFFFFF; // unknown
+    static BOOL  s_dMapped       = FALSE;      // our belief about D: mapping
+
+    DWORD now2 = GetTickCount();
+    if (now2 >= s_nextDvdPollMs) {
+        s_nextDvdPollMs = now2 + 250; // ~4 Hz
+
+        DWORD code = DvdGetDriveStateOneShot(); // DRIVE_* or DRIVE_READY (no change)
+        if (code != DRIVE_READY) {
+            BOOL needRefresh = FALSE;
+
+            switch (code) {
+            case DRIVE_OPEN:
+            case DRIVE_CLOSED_NO_MEDIA:
+                DvdUnmap_Io();
+                s_dMapped       = FALSE;
+                s_lastDvdSerial = 0xFFFFFFFF;   // forget old serial
+				m_dvdHaveStats  = false;          // <— clear
+				m_dvdUsedBytes  = 0;
+				m_dvdTotalBytes = 0;
+                needRefresh     = TRUE;
+                if (code == DRIVE_OPEN) SetStatus("DVD: Tray Open");
+                else                     SetStatus("DVD: No Disc");
+                break;
+
+            case DRIVE_CLOSED_MEDIA_PRESENT: {
+				DvdColdRemount();
+				s_dMapped = TRUE;
+
+				DWORD curSer = 0;
+				if (GetDvdVolumeSerial(&curSer)) s_lastDvdSerial = curSer;
+
+				// Cache total (capacity) and used (sum of files on disc)
+				ULONGLONG fb=0, tb=0;
+				GetDriveFreeTotal("D:\\", fb, tb);
+				m_dvdTotalBytes = tb;
+				m_dvdUsedBytes  = DirSizeRecursiveA("D:\\");   // from FsUtil
+				m_dvdHaveStats  = true;
+
+				{ char lbl[64]; if (DvdDetectMediaSimple(lbl, sizeof(lbl))) SetStatus("%s", lbl); }
+				needRefresh = TRUE;
+				break; }
+
+
+            case DRIVE_NOT_READY:
+            default:
+                break;
+            }
+
+            if (needRefresh) {
+                RescanDrives();
+
+                // Refresh both panes; bounce out of D:\ if it vanished
+                for (int iPane = 0; iPane < 2; ++iPane) {
+                    Pane& P = m_pane[iPane];
+
+                    if (P.mode == 0) {
+                        BuildDriveItems(P.items);
+                        if (P.sel >= (int)P.items.size()) P.sel = (int)P.items.size()-1;
+                        if (P.sel < 0) P.sel = 0;
+                        P.scroll = 0;
+                    } else if (IsDPath(P.curPath)) {
+                        if (s_dMapped) {
+                            // HARD re-list so a new disc shows correct files
+                            ListDirectory(P.curPath, P.items);
+                            if (P.sel >= (int)P.items.size()) P.sel = (int)P.items.size()-1;
+                            if (P.sel < 0) P.sel = 0;
+                            if (P.scroll > P.sel) P.scroll = P.sel;
+                            { int maxScroll = (int)P.items.size() - m_visible; if (maxScroll < 0) maxScroll = 0; if (P.scroll > maxScroll) P.scroll = maxScroll; }
+                        } else {
+                            // D: gone => drive list
+                            P.mode = 0; P.curPath[0] = 0;
+                            BuildDriveItems(P.items);
+                            P.sel = 0; P.scroll = 0;
+                        }
+                    } else {
+                        RefreshPane(P);
+                    }
+                }
+            }
+        }
+    }
+
+    // Serial watchdog: catches fast swaps if tray state change was missed
+    {
+        static DWORD s_nextSerChk = 0;
+        DWORD now3 = GetTickCount();
+        if (now3 >= s_nextSerChk) {
+            s_nextSerChk = now3 + 800; // ~1.25 Hz
+
+            if (s_dMapped) {
+                DWORD curSer = 0;
+                if (GetDvdVolumeSerial(&curSer)) {
+                    if (s_lastDvdSerial != 0xFFFFFFFF && curSer != s_lastDvdSerial) {
+                        // New disc detected silently — force remount and refresh
+                        DvdColdRemount();
+                        s_lastDvdSerial = curSer;
+						// refresh cached used/total
+						ULONGLONG fb=0, tb=0;
+						GetDriveFreeTotal("D:\\", fb, tb);
+						m_dvdTotalBytes = tb;
+						m_dvdUsedBytes  = DirSizeRecursiveA("D:\\");
+						m_dvdHaveStats  = true;
+
+
+                        RescanDrives();
+                        for (int iPane = 0; iPane < 2; ++iPane) {
+                            Pane& P = m_pane[iPane];
+                            if (P.mode == 0) {
+                                BuildDriveItems(P.items);
+                                if (P.sel >= (int)P.items.size()) P.sel = (int)P.items.size()-1;
+                                if (P.sel < 0) P.sel = 0;
+                                P.scroll = 0;
+                            } else if (IsDPath(P.curPath)) {
+                                ListDirectory(P.curPath, P.items);
+                                if (P.sel >= (int)P.items.size()) P.sel = (int)P.items.size()-1;
+                                if (P.sel < 0) P.sel = 0;
+                                if (P.scroll > P.sel) P.scroll = P.sel;
+                                { int maxScroll = (int)P.items.size() - m_visible; if (maxScroll < 0) maxScroll = 0; if (P.scroll > maxScroll) P.scroll = maxScroll; }
+                            } else {
+                                RefreshPane(P);
+                            }
+                        }
+
+                        SetStatus("DVD: Media changed");
+                    }
+                }
+            }
+        }
+    }
+}
+
     OnPad(g_Gamepads[0]);
     return S_OK;
 }
+
+
+
+
 
 // ----- draw: menu / rename / panes -----------------------------------------
 // Draw the context menu if open (coordinates set in OpenMenu).
@@ -968,20 +1105,38 @@ HRESULT FileBrowserApp::Render(){
     DrawRect(footerX, footerY, footerW, 28.0f, 0x802A2A2A);
 
     // Hints differ between drive list and directory mode.
-    if (m_pane[m_active].mode==0){
-        const char* hints = "D-Pad: Move  |  Left/Right: Switch pane  |  A: Enter  |  X: Menu  |  Black/White: Page";
-        DrawAnsiCenteredX(m_font, footerX, footerW, footerY+4.0f, 0xFFCCCCCC, hints);
+    if (m_pane[m_active].mode != 0) {
+    const char* curPath = m_pane[m_active].curPath;
+
+    char leftLabel[16] = "Free";
+    ULONGLONG leftVal = 0, rightVal = 0;
+
+    if (IsDPath(curPath) && m_dvdHaveStats) {
+        // For DVD show used size instead of free
+        strcpy(leftLabel, "Size");
+        leftVal  = m_dvdUsedBytes;
+        rightVal = m_dvdTotalBytes;
     } else {
-        ULONGLONG fb=0, tb=0; GetDriveFreeTotal(m_pane[m_active].curPath, fb, tb);
-        // Build Free/Total string for the active drive.
-        char fstr[64], tstr[64], bar[420];
-        FormatSize(fb, fstr, sizeof(fstr)); FormatSize(tb, tstr, sizeof(tstr));
-        _snprintf(bar,sizeof(bar),
-                "Active: %s   |   B: Up   |   Free: %s / Total: %s   |   X: Menu   |   Y: %s   |   Black/White: Page",
-                (m_active==0?"Left":"Right"), fstr, tstr, yLabel);
-        bar[sizeof(bar)-1]=0;
-        DrawAnsiCenteredX(m_font, footerX, footerW, footerY+4.0f, 0xFFCCCCCC, bar);
+        // Normal drives: Free / Total
+        ULONGLONG fb=0, tb=0;
+        GetDriveFreeTotal(curPath, fb, tb);
+        leftVal  = fb;
+        rightVal = tb;
     }
+
+    char leftStr[64], rightStr[64];
+    FormatSize(leftVal,  leftStr,  sizeof(leftStr));
+    FormatSize(rightVal, rightStr, sizeof(rightStr));
+
+    char bar[420];
+    _snprintf(bar, sizeof(bar),
+        "Active: %s   |   B: Up   |   %s: %s / Total: %s   |   X: Menu   |   Y: %s   |   Black/White: Page",
+        (m_active==0?"Left":"Right"), leftLabel, leftStr, rightStr,
+        (cur && !cur->isUpEntry && cur->marked) ? "Unmark" : "Mark");
+    bar[sizeof(bar)-1]=0;
+
+    DrawAnsiCenteredX(m_font, footerX, footerW, footerY+4.0f, 0xFFCCCCCC, bar);
+}
 
     // transient status toast (centered above the footer)
     DWORD now = GetTickCount();
