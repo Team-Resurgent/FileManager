@@ -127,26 +127,56 @@ namespace {
 FileBrowserApp::FileBrowserApp(){
     m_visible=13; m_prevA=0; m_prevB=0; m_prevX=0; m_prevY=0; m_active=0;
     m_prevButtons = 0; m_prevWhite = m_prevBlack = 0;
-    m_navUDHeld=false; m_navUDDir=0; m_navUDNext=0;m_backConfirmArmed = false;
-	m_backConfirmUntil = 0; m_prevBack = 0;
-	m_dvdUsedBytes  = 0;
+    m_navUDHeld=false; m_navUDDir=0; m_navUDNext=0; m_backConfirmArmed = false;
+    m_backConfirmUntil = 0; m_prevBack = 0;
+    m_dvdUsedBytes  = 0;
     m_dvdTotalBytes = 0;
     m_dvdHaveStats  = false;
 
-    // Pre-populate D3D params (XDK CXBApplication uses m_d3dpp)
-    ZeroMemory(&m_d3dpp,sizeof(m_d3dpp));
-    m_d3dpp.BackBufferWidth=1280; m_d3dpp.BackBufferHeight=720;
-    m_d3dpp.BackBufferFormat=D3DFMT_X8R8G8B8; m_d3dpp.SwapEffect=D3DSWAPEFFECT_DISCARD;
-    m_d3dpp.FullScreen_RefreshRateInHz=60; m_d3dpp.EnableAutoDepthStencil=TRUE;
-    m_d3dpp.AutoDepthStencilFormat=D3DFMT_D24S8;
-    m_d3dpp.Flags = D3DPRESENTFLAG_PROGRESSIVE | D3DPRESENTFLAG_WIDESCREEN;
+    // --- Auto-detect video capabilities and set PresentParams ----------------
+    ZeroMemory(&m_d3dpp, sizeof(m_d3dpp));
+
+    // What the user enabled in the MS dashboard
+    DWORD vf = XGetVideoFlags();
+
+    const bool hasWS    = (vf & XC_VIDEO_FLAGS_WIDESCREEN)   != 0;
+    const bool has480p  = (vf & XC_VIDEO_FLAGS_HDTV_480p)    != 0; // progressive 480
+    const bool has720p  = (vf & XC_VIDEO_FLAGS_HDTV_720p)    != 0; // 1280x720p
+    const bool has1080i = (vf & XC_VIDEO_FLAGS_HDTV_1080i)   != 0; // 1920x1080i (heavy)
+
+    // Pick a device backbuffer the TV supports.
+    // Priority: 720p -> 1080i (optional) -> 480p -> 480i
+    if (has720p) {
+        m_d3dpp.BackBufferWidth  = 1280;
+        m_d3dpp.BackBufferHeight = 720;
+        m_d3dpp.Flags            = D3DPRESENTFLAG_PROGRESSIVE;   // 720p is progressive
+    }
+    else {
+        // 480 path: 640x480; set PROGRESSIVE only if 480p is enabled
+        m_d3dpp.BackBufferWidth  = 640;
+        m_d3dpp.BackBufferHeight = 480;
+        m_d3dpp.Flags            = 0;
+        if (has480p) m_d3dpp.Flags |= D3DPRESENTFLAG_PROGRESSIVE;  // 480p
+    }
+
+    if (hasWS) m_d3dpp.Flags |= D3DPRESENTFLAG_WIDESCREEN;         // 16:9 (anamorphic for 480)
+
+    // Common params
+    m_d3dpp.BackBufferFormat           = D3DFMT_X8R8G8B8;
+    m_d3dpp.SwapEffect                 = D3DSWAPEFFECT_DISCARD;
+    m_d3dpp.EnableAutoDepthStencil     = TRUE;
+    m_d3dpp.AutoDepthStencilFormat     = D3DFMT_D24S8;
+    m_d3dpp.FullScreen_RefreshRateInHz = 60; // keep 60; handle PAL-50 elsewhere if you support it
+
+    // -------------------------------------------------------------------------
 
     m_mode=MODE_BROWSE;
     m_status[0]=0; m_statusUntilMs=0;
-	m_dvdUsedBytes  = 0;
+    m_dvdUsedBytes  = 0;
     m_dvdTotalBytes = 0;
-    m_dvdHaveStats  = false;
+    m_dvdHaveStats  = 0;
 }
+
 
 // ----- draw prims ------------------------------------------------------------
 // Small wrapper to match project primitive helpers.
@@ -1094,60 +1124,82 @@ HRESULT FileBrowserApp::Render(){
     m_renderer.DrawPane(m_font, m_pd3dDevice, kListX_L + kListW + kPaneGap, m_pane[1], m_active==1, st, 1);
 
     // ---- footer / hints ----
-    D3DVIEWPORT8 vp2; m_pd3dDevice->GetViewport(&vp2);
-    const FLOAT footerY = (FLOAT)vp2.Height - MaxF(48.0f, vp2.Height * 0.09f);
-    const FLOAT footerX = HdrX(kListX_L);
-    const FLOAT footerW = kHdrW*2 + kPaneGap + 30.0f;
+	D3DVIEWPORT8 vp2; 
+	m_pd3dDevice->GetViewport(&vp2);
 
-    const Pane& ap = m_pane[m_active];
-    const Item* cur = (ap.items.empty()? NULL : &ap.items[ap.sel]);
-    const char* yLabel = (cur && !cur->isUpEntry && cur->marked) ? "Unmark" : "Mark";
+	// Compute a target width similar to the two headers, then clamp to screen
+	const FLOAT desiredW = kHdrW * 2.0f + kPaneGap + 30.0f;
+	const FLOAT margin   = 10.0f;                         // side padding
+	const FLOAT maxW     = (FLOAT)vp2.Width - margin * 2; // clamp to screen
+	const FLOAT footerW  = (desiredW < maxW) ? desiredW : maxW;
 
-    DrawRect(footerX, footerY, footerW, 28.0f, 0x802A2A2A);
+	// Center the footer band horizontally (pixel-align)
+	const FLOAT footerX  = floorf(((FLOAT)vp2.Width - footerW) * 0.5f);
+	const FLOAT footerY  = (FLOAT)vp2.Height - MaxF(48.0f, vp2.Height * 0.09f);
 
-    if (m_pane[m_active].mode == 0){
-        // Drive list: generic nav hints
-        const char* hints = "D-Pad: Move  |  Left/Right: Switch pane  |  A: Enter  |  X: Menu  |  Black/White: Page";
-        DrawAnsiCenteredX(m_font, footerX, footerW, footerY+4.0f, 0xFFCCCCCC, hints);
-    } else {
-        // Directory: show Free/Total, except for DVD show Size/Total if we have stats
-        const char* curPath = m_pane[m_active].curPath;
+	// Draw the footer band
+	DrawRect(footerX, footerY, footerW, 28.0f, 0x802A2A2A);
 
-        char       leftLabel[16] = "Free";
-        ULONGLONG  leftVal = 0, rightVal = 0;
+	const Pane& ap   = m_pane[m_active];
+	const Item* cur  = (ap.items.empty()? NULL : &ap.items[ap.sel]);
+	const char* yLab = (cur && !cur->isUpEntry && cur->marked) ? "Unmark" : "Mark";
 
-        if (IsDPath(curPath) && m_dvdHaveStats) {
-            // DVD: used ("Size") vs capacity
-            strcpy(leftLabel, "Size");
-            leftVal  = m_dvdUsedBytes;
-            rightVal = m_dvdTotalBytes;
-        } else {
-            // Normal drive: free vs total
-            ULONGLONG fb=0, tb=0;
-            GetDriveFreeTotal(curPath, fb, tb);
-            leftVal  = fb;
-            rightVal = tb;
-        }
+	// Compact copy on small widths
+	const bool smallFooter = (footerW <= 620.0f);
 
-        char leftStr[64], rightStr[64];
-        FormatSize(leftVal,  leftStr,  sizeof(leftStr));
-        FormatSize(rightVal, rightStr, sizeof(rightStr));
+	if (m_pane[m_active].mode == 0){
+		// Drive list hints
+		const char* hintsVerbose = "D-Pad: Move  |  Left/Right: Switch pane  |  A: Enter  |  X: Menu  |  Black/White: Page";
+		const char* hintsCompact = "DPad:Move | L/R:Pane | A:Enter | X:Menu | Pg:Blk/Wht";
+		const char* base = smallFooter ? hintsCompact : hintsVerbose;
 
-        char bar[420];
-        _snprintf(bar, sizeof(bar),
-            "Active: %s   |   B: Up   |   %s: %s / Total: %s   |   X: Menu   |   Y: %s   |   Black/White: Page",
-            (m_active==0 ? "Left" : "Right"),
-            leftLabel, leftStr, rightStr, yLabel);
-        bar[sizeof(bar)-1] = 0;
+		char fitted[256];
+		LeftEllipsizeToFit(m_font, base, footerW - 10.0f, fitted, sizeof(fitted));
+		DrawAnsiCenteredX(m_font, footerX, footerW, footerY + 4.0f, 0xFFCCCCCC, fitted);
+	} else {
+		// Directory: Free/Total (or DVD Size/Total)
+		const char* curPath = m_pane[m_active].curPath;
 
-        DrawAnsiCenteredX(m_font, footerX, footerW, footerY+4.0f, 0xFFCCCCCC, bar);
-    }
+		char       leftLabel[16] = "Free";
+		ULONGLONG  leftVal = 0, rightVal = 0;
+		if (IsDPath(curPath) && m_dvdHaveStats) {
+			strcpy(leftLabel, "Size");
+			leftVal  = m_dvdUsedBytes;
+			rightVal = m_dvdTotalBytes;
+		} else {
+			ULONGLONG fb=0, tb=0; GetDriveFreeTotal(curPath, fb, tb);
+			leftVal  = fb; rightVal = tb;
+		}
 
-    // ---- status toast ----
-    DWORD now = GetTickCount();
-    if (now < m_statusUntilMs && m_status[0]){
-        DrawAnsiCenteredX(m_font, footerX, footerW, footerY + 25.0f, 0xFFBBDDEE, m_status);
-    }
+		char leftStr[64], rightStr[64];
+		FormatSize(leftVal,  leftStr,  sizeof(leftStr));
+		FormatSize(rightVal, rightStr, sizeof(rightStr));
+
+		char bar[420];
+		if (smallFooter) {
+			_snprintf(bar, sizeof(bar),
+				"Active:%s | B:Up | %s:%s/%s | X:Menu | Y:%s | Pg:Blk/Wht",
+				(m_active==0 ? "L" : "R"), leftLabel, leftStr, rightStr, yLab);
+		} else {
+			_snprintf(bar, sizeof(bar),
+				"Active: %s   |   B: Up   |   %s: %s / Total: %s   |   X: Menu   |   Y: %s   |   Black/White: Page",
+				(m_active==0 ? "Left" : "Right"), leftLabel, leftStr, rightStr, yLab);
+		}
+		bar[sizeof(bar)-1] = 0;
+
+		char fitted[420];
+		LeftEllipsizeToFit(m_font, bar, footerW - 10.0f, fitted, sizeof(fitted));
+		DrawAnsiCenteredX(m_font, footerX, footerW, footerY + 4.0f, 0xFFCCCCCC, fitted);
+	}
+
+	// ---- status toast (also centered and fitted) ----
+	DWORD now = GetTickCount();
+	if (now < m_statusUntilMs && m_status[0]){
+		char fitted[256];
+		LeftEllipsizeToFit(m_font, m_status, footerW - 10.0f, fitted, sizeof(fitted));
+		DrawAnsiCenteredX(m_font, footerX, footerW, footerY + 25.0f, 0xFFBBDDEE, fitted);
+	}
+
 
     // ---- overlays ----
     DrawMenu();
@@ -1158,7 +1210,6 @@ HRESULT FileBrowserApp::Render(){
     m_pd3dDevice->Present(NULL,NULL,NULL,NULL);
     return S_OK;
 }
-
 
 // ---- static layout defaults (overwritten in Initialize) --------------------
 FLOAT FileBrowserApp::kListX_L    = 50.0f;

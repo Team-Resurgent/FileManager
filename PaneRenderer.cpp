@@ -264,21 +264,34 @@ void PaneRenderer::DrawPane(
     CXBFont& font, LPDIRECT3DDEVICE8 dev, FLOAT baseX,
     const Pane& p, bool active, const PaneStyle& st, int paneIndex)
 {
-    // ----- header band -----
-    const FLOAT hx        = baseX - 15.0f;   // align with FileBrowserApp::HdrX
-    const FLOAT headerGap = 8.0f;
-    DrawRect(dev, hx, st.hdrY, st.hdrW, st.hdrH, active ? 0xFF3A3A3A : 0x802A2A2A);
+	// ----- header band -----
+	const FLOAT hx        = baseX - 15.0f;   // align with FileBrowserApp::HdrX
+	const FLOAT headerGap = 8.0f;
+	DrawRect(dev, hx, st.hdrY, st.hdrW, st.hdrH, active ? 0xFF3A3A3A : 0x802A2A2A);
 
-    char hdr[600];
-    if (p.mode == 0) _snprintf(hdr, sizeof(hdr), "%s", "Detected Drives");
-    else             _snprintf(hdr, sizeof(hdr), "%s",  p.curPath);
-    hdr[sizeof(hdr)-1] = 0;
+	// Build header text
+	char hdr[600];
+	if (p.mode == 0) _snprintf(hdr, sizeof(hdr), "%s", "Detected Drives");
+	else             _snprintf(hdr, sizeof(hdr), "%s",  p.curPath);
+	hdr[sizeof(hdr)-1] = 0;
 
-    FLOAT tW, tH; MeasureAnsiWH(font, hdr, tW, tH);
+	// Center if it fits; otherwise fall back to your existing marquee/fitter
+	FLOAT tW=0, tH=0;
+	MeasureAnsiWH(font, hdr, tW, tH);
+
 	const FLOAT titleY     = st.hdrY + (st.hdrH - tH) * 0.5f;
-	const FLOAT headerLeft = hx + 5.0f;
-	const FLOAT headerMaxW = st.hdrW - 10.0f;   // left+right padding
-	DrawHeaderFittedOrMarquee(font, headerLeft, titleY, headerMaxW, 0xFFFFFFFF, hdr, paneIndex);
+	const FLOAT headerLeft = hx + 5.0f;                // padding inside the bar
+	const FLOAT headerMaxW = st.hdrW - 10.0f;          // symmetric 5px padding
+
+	if (tW <= headerMaxW) {
+		// center horizontally within the header band
+		const FLOAT cx = headerLeft + (headerMaxW - tW) * 0.5f;
+		DrawAnsi(font, cx, titleY, 0xFFFFFFFF, hdr);
+	} else {
+		// too wide -> use your marquee/fitting helper (left edge at headerLeft)
+		DrawHeaderFittedOrMarquee(font, headerLeft, titleY, headerMaxW, 0xFFFFFFFF, hdr, paneIndex);
+	}
+
 
     // ----- compute Size column metrics -----
     const FLOAT sizeColW  = ComputeSizeColW(font, p, st);
