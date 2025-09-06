@@ -1072,11 +1072,12 @@ void FileBrowserApp::DrawProgressOverlay(){
 HRESULT FileBrowserApp::Render(){
     m_pd3dDevice->Clear(0,NULL,D3DCLEAR_TARGET,0x20202020,1.0f,0);
     m_pd3dDevice->BeginScene();
+
     m_pd3dDevice->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
-    m_pd3dDevice->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+    m_pd3dDevice->SetRenderState(D3DRS_SRCBLEND,  D3DBLEND_SRCALPHA);
     m_pd3dDevice->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
 
-    // Render left and right panes via the renderer helper.
+    // ---- panes ----
     PaneStyle st;
     st.listW       = kListW;
     st.listY       = kListY;
@@ -1092,7 +1093,7 @@ HRESULT FileBrowserApp::Render(){
     m_renderer.DrawPane(m_font, m_pd3dDevice, kListX_L,                     m_pane[0], m_active==0, st, 0);
     m_renderer.DrawPane(m_font, m_pd3dDevice, kListX_L + kListW + kPaneGap, m_pane[1], m_active==1, st, 1);
 
-    // footer band with control hints and disk space
+    // ---- footer / hints ----
     D3DVIEWPORT8 vp2; m_pd3dDevice->GetViewport(&vp2);
     const FLOAT footerY = (FLOAT)vp2.Height - MaxF(48.0f, vp2.Height * 0.09f);
     const FLOAT footerX = HdrX(kListX_L);
@@ -1104,54 +1105,60 @@ HRESULT FileBrowserApp::Render(){
 
     DrawRect(footerX, footerY, footerW, 28.0f, 0x802A2A2A);
 
-    // Hints differ between drive list and directory mode.
-    if (m_pane[m_active].mode != 0) {
-    const char* curPath = m_pane[m_active].curPath;
-
-    char leftLabel[16] = "Free";
-    ULONGLONG leftVal = 0, rightVal = 0;
-
-    if (IsDPath(curPath) && m_dvdHaveStats) {
-        // For DVD show used size instead of free
-        strcpy(leftLabel, "Size");
-        leftVal  = m_dvdUsedBytes;
-        rightVal = m_dvdTotalBytes;
+    if (m_pane[m_active].mode == 0){
+        // Drive list: generic nav hints
+        const char* hints = "D-Pad: Move  |  Left/Right: Switch pane  |  A: Enter  |  X: Menu  |  Black/White: Page";
+        DrawAnsiCenteredX(m_font, footerX, footerW, footerY+4.0f, 0xFFCCCCCC, hints);
     } else {
-        // Normal drives: Free / Total
-        ULONGLONG fb=0, tb=0;
-        GetDriveFreeTotal(curPath, fb, tb);
-        leftVal  = fb;
-        rightVal = tb;
+        // Directory: show Free/Total, except for DVD show Size/Total if we have stats
+        const char* curPath = m_pane[m_active].curPath;
+
+        char       leftLabel[16] = "Free";
+        ULONGLONG  leftVal = 0, rightVal = 0;
+
+        if (IsDPath(curPath) && m_dvdHaveStats) {
+            // DVD: used ("Size") vs capacity
+            strcpy(leftLabel, "Size");
+            leftVal  = m_dvdUsedBytes;
+            rightVal = m_dvdTotalBytes;
+        } else {
+            // Normal drive: free vs total
+            ULONGLONG fb=0, tb=0;
+            GetDriveFreeTotal(curPath, fb, tb);
+            leftVal  = fb;
+            rightVal = tb;
+        }
+
+        char leftStr[64], rightStr[64];
+        FormatSize(leftVal,  leftStr,  sizeof(leftStr));
+        FormatSize(rightVal, rightStr, sizeof(rightStr));
+
+        char bar[420];
+        _snprintf(bar, sizeof(bar),
+            "Active: %s   |   B: Up   |   %s: %s / Total: %s   |   X: Menu   |   Y: %s   |   Black/White: Page",
+            (m_active==0 ? "Left" : "Right"),
+            leftLabel, leftStr, rightStr, yLabel);
+        bar[sizeof(bar)-1] = 0;
+
+        DrawAnsiCenteredX(m_font, footerX, footerW, footerY+4.0f, 0xFFCCCCCC, bar);
     }
 
-    char leftStr[64], rightStr[64];
-    FormatSize(leftVal,  leftStr,  sizeof(leftStr));
-    FormatSize(rightVal, rightStr, sizeof(rightStr));
-
-    char bar[420];
-    _snprintf(bar, sizeof(bar),
-        "Active: %s   |   B: Up   |   %s: %s / Total: %s   |   X: Menu   |   Y: %s   |   Black/White: Page",
-        (m_active==0?"Left":"Right"), leftLabel, leftStr, rightStr,
-        (cur && !cur->isUpEntry && cur->marked) ? "Unmark" : "Mark");
-    bar[sizeof(bar)-1]=0;
-
-    DrawAnsiCenteredX(m_font, footerX, footerW, footerY+4.0f, 0xFFCCCCCC, bar);
-}
-
-    // transient status toast (centered above the footer)
+    // ---- status toast ----
     DWORD now = GetTickCount();
     if (now < m_statusUntilMs && m_status[0]){
-        DrawAnsiCenteredX(m_font, footerX, footerW, footerY +25.0f, 0xFFBBDDEE, m_status);
+        DrawAnsiCenteredX(m_font, footerX, footerW, footerY + 25.0f, 0xFFBBDDEE, m_status);
     }
 
-    // Modal overlays (menu/keyboard/progress) render last.
+    // ---- overlays ----
     DrawMenu();
     DrawRename();
     DrawProgressOverlay();
 
-    m_pd3dDevice->EndScene(); m_pd3dDevice->Present(NULL,NULL,NULL,NULL);
+    m_pd3dDevice->EndScene();
+    m_pd3dDevice->Present(NULL,NULL,NULL,NULL);
     return S_OK;
 }
+
 
 // ---- static layout defaults (overwritten in Initialize) --------------------
 FLOAT FileBrowserApp::kListX_L    = 50.0f;
