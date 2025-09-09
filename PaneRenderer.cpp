@@ -1,71 +1,121 @@
 #include "PaneRenderer.h"
 #include "GfxPrims.h"
 #include <wchar.h>
-#include <stdio.h>  // _snprintf
+#include <stdio.h>
+#include <string.h>
+#include <math.h>
 
 /*
-===============================================================================
- PaneRenderer
-  - Responsible for rendering directory panes (file lists) in the browser.
-  - Handles text measuring, right-alignment, ellipsizing, and marquee scrolling.
-  - Draws headers, stripes, selection highlights, icons, filenames, sizes, and 
-    scrollbars with Direct3D primitives and CXBFont text.
-===============================================================================
+============================================================================
+ PaneRenderer (implementation)
+  - Draws header/title, column headers, rows, selection highlight, scrollbar
+  - Keeps Size column aligned across panes via per-frame shared width
+  - Looping, character-step marquee with start/end pauses for long text
+  - Substring-fitting instead of scissor; avoids per-pixel motion -> sharp text
+  - Zero heap allocations in hot paths (ANSI -> WCHAR on stack; cached measures)
+  - Tuning knobs:
+      * kMarqInitPauseMs / kMarqEndPauseMs
+      * kMarqStepMs / kMarqStepChars
+      * kNearFitSlackPx / kRightGuardPx / kMeasureFudgePx
+  - Depends on: XBFont (text), GfxPrims (rects), PaneModel (data)
+============================================================================
 */
 
-// --- tiny ANSI->wide helpers for CXBFont (Xbox fonts are wide only) ---------
-static void MeasureAnsiWH(CXBFont& font, const char* s, FLOAT& outW, FLOAT& outH)
-{
-    WCHAR wbuf[512];
-    MultiByteToWideChar(CP_ACP, 0, s, -1, wbuf, 512);
-    font.GetTextExtent(wbuf, &outW, &outH);
-}
 
+// --- local constants --------------------------------------------------------
+static inline FLOAT Snap(FLOAT v){ return (FLOAT)((int)(v + 0.5f)); }
+
+static const FLOAT kRightGuardPx   = 2.0f;  // keep a sliver on the right
+static const FLOAT kMeasureFudgePx = 2.0f;  // measurement slack
+static const FLOAT kNearFitSlackPx = 1.5f;  // near-fit no-scroll slack
+
+// --- marquee speed tuning (easy to tweak in one place) ----------------------
+static const DWORD kMarqInitPauseMs = 900;   // pause before first move
+static const DWORD kMarqEndPauseMs  = 1200;  // pause when tail fully visible
+static const DWORD kMarqStepMs      = 150;   // time between steps (bigger = slower)
+static const int   kMarqStepChars   = 1;     // how many characters to advance per step
+
+// --- shared size-column width backing --------------------------------------
+FLOAT PaneRenderer::s_sharedSizeColW = 0.0f;
+void  PaneRenderer::BeginFrameSharedCols(){ s_sharedSizeColW = 0.0f; }
+void  PaneRenderer::UpdateSharedSizeColW(FLOAT w){ if (w > s_sharedSizeColW) s_sharedSizeColW = w; }
+FLOAT PaneRenderer::GetSharedSizeColW(){ return s_sharedSizeColW; }
+
+// --- ANSI/WIDE helpers ------------------------------------------------------
+static void MbToW(const char* s, WCHAR* w, int capW){
+    MultiByteToWideChar(CP_ACP,0,s?s:"",-1,w,capW);
+}
+static void MeasureAnsiWH(CXBFont& font, const char* s, FLOAT& outW, FLOAT& outH){
+    WCHAR wbuf[512]; MbToW(s, wbuf, 512); font.GetTextExtent(wbuf, &outW, &outH);
+}
 void PaneRenderer::DrawAnsi(CXBFont& font, FLOAT x, FLOAT y, DWORD color, const char* text){
-    WCHAR wbuf[512]; MultiByteToWideChar(CP_ACP,0,text,-1,wbuf,512);
-    font.DrawText(x,y,color,wbuf,0,0.0f);
+    WCHAR wbuf[512]; MbToW(text?text:"", wbuf, 512); font.DrawText(x,y,color,wbuf,0,0.0f);
 }
 void PaneRenderer::DrawRect(LPDIRECT3DDEVICE8 dev, float x,float y,float w,float h,D3DCOLOR c){
     DrawSolidRect(dev, x, y, w, h, c);
 }
 void PaneRenderer::MeasureTextWH(CXBFont& font, const char* s, FLOAT& outW, FLOAT& outH){
-    WCHAR wbuf[256]; MultiByteToWideChar(CP_ACP, 0, s, -1, wbuf, 256);
-    font.GetTextExtent(wbuf, &outW, &outH);
+    WCHAR wbuf[256]; MbToW(s ? s : "", wbuf, 256); font.GetTextExtent(wbuf, &outW, &outH);
 }
 FLOAT PaneRenderer::MeasureTextW(CXBFont& font, const char* s){
-    FLOAT w=0.0f, h=0.0f; MeasureTextWH(font, s, w, h); return w;
+    FLOAT w=0.0f,h=0.0f; MeasureTextWH(font,s,w,h); return w;
 }
 void PaneRenderer::DrawRightAligned(CXBFont& font, const char* s, FLOAT rightX, FLOAT y, DWORD color){
-    DrawAnsi(font, rightX - MeasureTextW(font, s), y, color, s);
+    WCHAR wbuf[512]; MbToW(s?s:"", wbuf, 512); FLOAT tw=0,th=0; font.GetTextExtent(wbuf,&tw,&th);
+    font.DrawText(Snap(rightX - tw), y, color, wbuf, 0, 0.0f);
 }
 
-// Compute column width for file sizes (clamped to reasonable bounds).
+// Center a one-line ANSI string vertically in a band (slight downward bias)
+static FLOAT CenterYForText(CXBFont& font, const char* s, FLOAT bandY, FLOAT bandH, FLOAT biasPx = 1.0f)
+{
+    WCHAR wbuf[512]; MbToW(s ? s : "", wbuf, 512);
+    FLOAT tw=0, th=0; font.GetTextExtent(wbuf, &tw, &th);
+    return Snap(bandY + (bandH - th) * 0.5f + biasPx);
+}
+
+// Right ellipsize (non-selected rows)
+void PaneRenderer::RightEllipsizeToFit(CXBFont& font, const char* src, FLOAT maxW,
+                                       char* out, size_t cap)
+{
+    if (!src){ out[0]=0; return; }
+    const FLOAT fitW = (maxW > kRightGuardPx) ? (maxW - kRightGuardPx) : 0.0f;
+
+    WCHAR wbuf[512]; MbToW(src, wbuf, 512);
+    FLOAT tw=0,th=0; font.GetTextExtent(wbuf,&tw,&th);
+    if (tw <= fitW + kMeasureFudgePx){ _snprintf(out,(int)cap,"%s",src); out[cap-1]=0; return; }
+
+    size_t n = strlen(src), lo=0, hi=n; char buf[512];
+    while (lo < hi){
+        size_t mid=(lo+hi)/2;
+        _snprintf(buf,sizeof(buf),"%.*s...",(int)mid,src);
+        MbToW(buf,wbuf,512); font.GetTextExtent(wbuf,&tw,&th);
+        if (tw <= fitW + kMeasureFudgePx) lo = mid+1; else hi = mid;
+    }
+    size_t take = (lo>0)?(lo-1):0;
+    _snprintf(out,(int)cap,"%.*s...",(int)take,src);
+    out[cap-1]=0;
+}
+
+// Compute size column width from data (clamped to sane bounds)
 FLOAT PaneRenderer::ComputeSizeColW(CXBFont& font, const Pane& p, const PaneStyle& st){
-    // Start with header label width
     const char* hdr = (p.mode == 0) ? "Free / Total" : "Size";
     FLOAT maxW = MeasureTextW(font, hdr);
-
     char buf[128];
 
     if (p.mode == 0){
-        // Drive list: measure "Free / Total" per drive (cap scan to keep it cheap)
         int limit = (int)p.items.size(); if (limit > 32) limit = 32;
-        for (int i=0; i<limit; ++i){
+        for (int i=0;i<limit;++i){
             const Item& it = p.items[i];
             if (it.isDir && !it.isUpEntry){
-                ULONGLONG fb=0, tb=0;
-                GetDriveFreeTotal(it.name, fb, tb);
-                char f[64], t[64];
-                FormatSize(fb, f, sizeof(f));
-                FormatSize(tb, t, sizeof(t));
-                _snprintf(buf, sizeof(buf), "%s / %s", f, t); buf[sizeof(buf)-1] = 0;
+                ULONGLONG fb=0,tb=0; GetDriveFreeTotal(it.name, fb, tb);
+                char f[64], t[64]; FormatSize(fb,f,sizeof(f)); FormatSize(tb,t,sizeof(t));
+                _snprintf(buf,sizeof(buf),"%s / %s",f,t); buf[sizeof(buf)-1]=0;
                 FLOAT w = MeasureTextW(font, buf); if (w > maxW) maxW = w;
             }
         }
     } else {
-        // Directory listing: measure file sizes
         int limit = (int)p.items.size(); if (limit > 200) limit = 200;
-        for (int i=0; i<limit; ++i){
+        for (int i=0;i<limit;++i){
             const Item& it = p.items[i];
             if (!it.isDir && !it.isUpEntry){
                 FormatSize(it.size, buf, sizeof(buf));
@@ -74,303 +124,324 @@ FLOAT PaneRenderer::ComputeSizeColW(CXBFont& font, const Pane& p, const PaneStyl
         }
     }
 
-    maxW += 16.0f;
-    const FLOAT minW = MaxF(90.0f, st.lineH * 4.0f);
-    const FLOAT maxWClamp = st.listW * 0.40f;
+    maxW += 12.0f;
+    const FLOAT minW = PaneRenderer::MaxF(90.0f, st.lineH * 3.5f);
+    const FLOAT maxWClamp = st.listW * 0.45f;
     if (maxW < minW) maxW = minW;
     if (maxW > maxWClamp) maxW = maxWClamp;
     return maxW;
 }
 
-// --- multi-byte -> wide helper ------------------------------------------------
-static void MbToW(const char* s, WCHAR* w, int capW){
-    MultiByteToWideChar(CP_ACP,0,s?s:"",-1,w,capW);
+void PaneRenderer::PrimeSharedSizeColW(CXBFont& font, const Pane& p, const PaneStyle& st){
+    const FLOAT localW = ComputeSizeColW(font, p, st);
+    UpdateSharedSizeColW(localW);
 }
 
-// Ellipsize string with "..." if it doesn’t fit; binary search for max chars.
-void PaneRenderer::RightEllipsizeToFit(CXBFont& font, const char* src, FLOAT maxW,
-                                       char* out, size_t cap)
+// --- LOOPING MARQUEE: filenames (selected row) ------------------------------
+void PaneRenderer::DrawNameFittedOrMarquee(
+    CXBFont& font, FLOAT x, FLOAT y, FLOAT maxW,
+    DWORD color, const char* name,
+    bool isSelected, int paneIndex, int rowIndex)
 {
-    if (!src){ out[0]=0; return; }
-    WCHAR wbuf[512]; MbToW(src, wbuf, 512);
-    FLOAT tw=0,th=0; font.GetTextExtent(wbuf,&tw,&th);
-    if (tw <= maxW){ _snprintf(out,(int)cap,"%s",src); out[cap-1]=0; return; }
+    const char* s = name ? name : "";
+    const int   len = (int)strlen(s);
+    const FLOAT fitW_now = floorf(((maxW > 0.0f) ? maxW : 0.0f) + 0.5f);
 
-    size_t n = strlen(src), lo=0, hi=n;
-    char buf[512];
-    while (lo < hi){
-        size_t mid=(lo+hi)/2;
-        _snprintf(buf,sizeof(buf),"%.*s...",(int)mid,src);
-        MbToW(buf,wbuf,512); font.GetTextExtent(wbuf,&tw,&th);
-        if (tw <= maxW) lo = mid+1; else hi = mid;
-    }
-    size_t take = (lo>0)?(lo-1):0;
-    _snprintf(out,(int)cap,"%.*s...",(int)take,src);
-    out[cap-1]=0;
-}
-
-// Skip characters until pixel offset px is reached (for marquee start).
-const char* PaneRenderer::SkipToPixelOffset(CXBFont& font, const char* s, FLOAT px, FLOAT& skippedW)
-{
-    skippedW = 0.0f; if (!s || px <= 0) return s?s:"";
-    const char* p = s;
-    WCHAR wtmp[256]; FLOAT tw=0,th=0;
-    while (*p){
-        int len = (int)(p - s + 1); if (len > 255) len = 255;
-        char tmp[256]; _snprintf(tmp,sizeof(tmp),"%.*s",len,s);
-        MbToW(tmp,wtmp,256); font.GetTextExtent(wtmp,&tw,&th);
-        if (tw >= px) break;
-        ++p;
-    }
-    skippedW = tw; return p;
-}
-
-// Draw filename: ellipsized normally, or marquee-scroll if selected & clipped.
-void PaneRenderer::DrawNameFittedOrMarquee(CXBFont& font, FLOAT x, FLOAT y, FLOAT maxW,
-                                           DWORD color, const char* name,
-                                           bool isSelected, int paneIndex, int rowIndex)
-{
-    WCHAR wfull[512]; MbToW(name, wfull, 512);
-    FLOAT fullW=0, fullH=0; font.GetTextExtent(wfull,&fullW,&fullH);
-
-    if (!isSelected || fullW <= maxW){
-        // Normal draw with ellipsis if needed
-        char tmp[512]; RightEllipsizeToFit(font, name, maxW, tmp, sizeof(tmp));
-        WCHAR wtmp[512]; MbToW(tmp,wtmp,512);
-        font.DrawText(x,y,color,wtmp,0,0.0f);
-        if (m_marq[paneIndex].row == rowIndex){ m_marq[paneIndex].row=-1; m_marq[paneIndex].px=0.0f; }
-        return;
-    }
-
-    // --- marquee scroll ---
-    const DWORD now = GetTickCount();
-    const DWORD kInitPauseMs = 500;  // wait before scrolling starts
-    const DWORD kStepMs      = 30;   // scroll speed (time per step)
-    const FLOAT kStepPx      = 2.0f; // scroll speed (pixels per step)
-    const DWORD kEndPauseMs  = 700;  // wait at end before reset
-
-    MarqueeState& M = m_marq[paneIndex];
-    if (M.row != rowIndex){
-        M.row = rowIndex; M.px = 0.0f; M.nextTick = now + kInitPauseMs; M.resetPause = 0;
-    }
-    if (now >= M.nextTick){
-        if (M.resetPause){
-            M.px = 0.0f; M.resetPause = 0; M.nextTick = now + kInitPauseMs;
-        }else{
-            M.px += kStepPx;
-            FLOAT maxScroll = fullW - maxW;
-            if (M.px >= maxScroll){ M.px = maxScroll; M.resetPause = now + kEndPauseMs; M.nextTick = M.resetPause; }
-            else                   { M.nextTick = now + kStepMs; }
-        }
-    }
-
-    // Render visible substring
-    FLOAT skipped=0.0f;
-    const char* start = SkipToPixelOffset(font, name, M.px, skipped);
-
-    char vis[512]; vis[0]=0; int n=0;
-    WCHAR wtmp[512]; FLOAT tw=0,th=0;
-    const char* p = start;
-    while (*p && n < (int)sizeof(vis)-2){
-        vis[n++]=*p; vis[n]=0;
-        MbToW(vis,wtmp,512); font.GetTextExtent(wtmp,&tw,&th);
-        if (tw > maxW){ vis[--n]=0; break; }
-        ++p;
-    }
-    MbToW(vis,wtmp,512); font.DrawText(x,y,color,wtmp,0,0.0f);
-}
-
-void PaneRenderer::DrawHeaderFittedOrMarquee(CXBFont& font, FLOAT x, FLOAT y, FLOAT maxW,
-                                             DWORD color, const char* text, int paneIndex)
-{
-    if (!text) text = "";
-    // Measure full width
-    WCHAR wfull[512]; MbToW(text, wfull, 512);
+    // Measure once
+    WCHAR wfull[512]; MbToW(s, wfull, 512);
     FLOAT fullW=0, fullH=0; font.GetTextExtent(wfull, &fullW, &fullH);
 
-    // Fits? draw and reset header marquee state
-    if (fullW <= maxW){
-        DrawAnsi(font, x, y, color, text);
-        m_hdrMarq[paneIndex].row = -1;
-        m_hdrMarq[paneIndex].px  = 0.0f;
-        m_hdrMarq[paneIndex].nextTick = 0;
-        m_hdrMarq[paneIndex].resetPause = 0;
+    MarqueeState& M = m_marq[paneIndex];
+
+    // Non-selected: draw/ellipsize; clear any marquee state for this row
+    if (!isSelected){
+        if (fullW <= fitW_now + kMeasureFudgePx){
+            font.DrawText(Snap(x), Snap(y), color, wfull, 0, 0.0f);
+        } else {
+            char tmp[512];
+            RightEllipsizeToFit(font, s, fitW_now + kRightGuardPx, tmp, sizeof(tmp));
+            WCHAR wtmp[512]; MbToW(tmp, wtmp, 512);
+            font.DrawText(Snap(x), Snap(y), color, wtmp, 0, 0.0f);
+        }
+        if (M.row == rowIndex){ M.row = -1; M.px = 0.0f; M.fitWLock = 0.0f; M.nextTick = 0; M.resetPause = 0; }
         return;
     }
 
-    // Keep last string to reset scroll when header text changes
-    static char s_prevHdr[2][512] = { {0}, {0} };
-    if (_stricmp(s_prevHdr[paneIndex], text) != 0){
-        _snprintf(s_prevHdr[paneIndex], sizeof(s_prevHdr[paneIndex]), "%s", text);
-        s_prevHdr[paneIndex][sizeof(s_prevHdr[paneIndex])-1] = 0;
-        m_hdrMarq[paneIndex].row = -1;  // not used here, but keep consistent
-        m_hdrMarq[paneIndex].px  = 0.0f;
-        m_hdrMarq[paneIndex].nextTick   = GetTickCount() + 600; // initial pause
-        m_hdrMarq[paneIndex].resetPause = 0;
+    // Selected and (near-)fits: draw and clear marquee
+    if (fullW <= fitW_now + kMeasureFudgePx + kNearFitSlackPx){
+        font.DrawText(Snap(x), Snap(y), color, wfull, 0, 0.0f);
+        if (M.row == rowIndex){ M.row = -1; M.px = 0.0f; M.fitWLock = 0.0f; M.nextTick = 0; M.resetPause = 0; }
+        return;
     }
 
-    // Scroll logic (same feel as filename marquee)
-    const DWORD now         = GetTickCount();
-    const DWORD kStepMs     = 25;
-    const FLOAT kStepPx     = 2.0f;
-    const DWORD kInitPause  = 600;
-    const DWORD kEndPause   = 800;
-    const FLOAT maxScroll   = fullW - maxW;
+    // Selected + clipped: character-step marquee
+    const DWORD now = GetTickCount();
+    const DWORD kInitPauseMs = kMarqInitPauseMs;
+    const DWORD kStepMs      = kMarqStepMs;
+    const DWORD kEndPauseMs  = kMarqEndPauseMs;
 
-    MarqueeState& M = m_hdrMarq[paneIndex];
+    if (M.row != rowIndex){
+        M.row       = rowIndex;
+        M.px        = 0.0f;               // start index (we store as float)
+        M.fitWLock  = fitW_now;           // lock visible width for stable end calc
+        M.nextTick  = now + kInitPauseMs; // initial pause
+        M.resetPause= 0;
+    }
+    if (M.fitWLock <= 0.0f) M.fitWLock = fitW_now;
+    const FLOAT fitW = floorf(M.fitWLock + 0.5f);
+
+    // Earliest start index where the entire tail fits
+    int lo = 0, hi = len;
+    while (lo < hi){
+        int mid = (lo + hi) / 2;
+        WCHAR wtmp[512]; MbToW(s + mid, wtmp, 512);
+        FLOAT tw=0, th=0; font.GetTextExtent(wtmp, &tw, &th);
+        if (tw <= fitW + kMeasureFudgePx) hi = mid; else lo = mid + 1;
+    }
+    const int lastStart = (lo > len) ? len : lo;
+
+    // Current start index
+    int startIdx = (int)M.px;
+    if (startIdx < 0) startIdx = 0;
+    if (startIdx > lastStart) startIdx = lastStart;
+
+    // Longest substring from s+startIdx that fits into fitW
+    const char* startPtr = s + startIdx;
+    const int remaining  = len - startIdx;
+    int lo2 = 0, hi2 = remaining;
+    while (lo2 < hi2){
+        int mid = (lo2 + hi2 + 1) / 2;
+        char tmp[512]; _snprintf(tmp, sizeof(tmp), "%.*s", mid, startPtr);
+        WCHAR wtmp[512]; MbToW(tmp, wtmp, 512);
+        FLOAT tw=0, th=0; font.GetTextExtent(wtmp, &tw, &th);
+        if (tw <= fitW + kMeasureFudgePx) lo2 = mid; else hi2 = mid - 1;
+    }
+    char vis[512]; _snprintf(vis, sizeof(vis), "%.*s", lo2, startPtr);
+    WCHAR wvis[512]; MbToW(vis, wvis, 512);
+
+    font.DrawText(Snap(x), Snap(y), color, wvis, 0, 0.0f);
+
+    // Step/pause/reset
     if (now >= M.nextTick){
         if (M.resetPause){
-            M.px = 0.0f;
-            M.resetPause = 0;
-            M.nextTick = now + kInitPause;
-        }else{
-            M.px += kStepPx;
-            if (M.px >= maxScroll){
-                M.px = maxScroll;
-                M.resetPause = now + kEndPause;
-                M.nextTick   = M.resetPause;
-            }else{
+            M.px        = 0.0f;                 // hard reset to first char
+            M.resetPause= 0;
+            M.nextTick  = now + kInitPauseMs;   // pause at start again
+        } else {
+            if (startIdx >= lastStart){
+                M.px        = (FLOAT)lastStart; // hold
+                M.resetPause= now + kEndPauseMs;
+                M.nextTick  = M.resetPause;
+            } else {
+                M.px       = (FLOAT)(startIdx + kMarqStepChars);
                 M.nextTick = now + kStepMs;
             }
         }
     }
-
-    // Build visible substring at the current scroll offset and draw it
-    FLOAT skipped = 0.0f;
-    const char* start = SkipToPixelOffset(font, text, M.px, skipped);
-
-    char vis[512]; vis[0]=0; int n=0;
-    WCHAR wtmp[512]; FLOAT tw=0, th=0;
-    const char* p = start;
-    while (*p && n < (int)sizeof(vis)-2){
-        vis[n++] = *p; vis[n] = 0;
-        MbToW(vis, wtmp, 512); font.GetTextExtent(wtmp, &tw, &th);
-        if (tw > maxW){ vis[--n] = 0; break; }
-        ++p;
-    }
-    DrawAnsi(font, x, y, color, vis);
 }
 
+// --- LOOPING MARQUEE: header path ------------------------------------------
+void PaneRenderer::DrawHeaderFittedOrMarquee(
+    CXBFont& font, FLOAT x, FLOAT y, FLOAT maxW,
+    DWORD color, const char* text, int paneIndex)
+{
+    const char* s = text ? text : "";
+    const int   len = (int)strlen(s);
+    const FLOAT fitW_now = floorf(((maxW > kRightGuardPx) ? (maxW - kRightGuardPx) : 0.0f) + 0.5f);
+
+    // Reset header marquee if text changed
+    static char s_prevHdr[2][512] = { {0}, {0} };
+    if (_stricmp(s_prevHdr[paneIndex], s) != 0){
+        _snprintf(s_prevHdr[paneIndex], sizeof(s_prevHdr[paneIndex]), "%s", s);
+        s_prevHdr[paneIndex][sizeof(s_prevHdr[paneIndex])-1] = 0;
+        m_hdrMarq[paneIndex] = MarqueeState();
+        m_hdrMarq[paneIndex].nextTick = GetTickCount() + kMarqInitPauseMs;
+    }
+
+    // Fits (with slack)? Draw and bail.
+    WCHAR wfull[512]; MbToW(s, wfull, 512);
+    FLOAT fullW=0, fullH=0; font.GetTextExtent(wfull, &fullW, &fullH);
+    if (fullW <= fitW_now + kMeasureFudgePx + kNearFitSlackPx){
+        font.DrawText(Snap(x), Snap(y), color, wfull, 0, 0.0f);
+        m_hdrMarq[paneIndex] = MarqueeState();
+        return;
+    }
+
+    // Character-step marquee
+    const DWORD now = GetTickCount();
+    const DWORD kInitPauseMs = kMarqInitPauseMs;
+    const DWORD kStepMs      = kMarqStepMs;
+    const DWORD kEndPauseMs  = kMarqEndPauseMs;
+
+    MarqueeState& M = m_hdrMarq[paneIndex];
+    if (M.fitWLock <= 0.0f) M.fitWLock = fitW_now;
+    const FLOAT fitW = floorf(M.fitWLock + 0.5f);
+
+    // Earliest start where whole tail fits
+    int lo = 0, hi = len;
+    while (lo < hi){
+        int mid = (lo + hi) / 2;
+        WCHAR wtmp[512]; MbToW(s + mid, wtmp, 512);
+        FLOAT tw=0, th=0; font.GetTextExtent(wtmp, &tw, &th);
+        if (tw <= fitW + kMeasureFudgePx) hi = mid; else lo = mid + 1;
+    }
+    const int lastStart = (lo > len) ? len : lo;
+
+    int startIdx = (int)M.px;
+    if (startIdx < 0) startIdx = 0;
+    if (startIdx > lastStart) startIdx = lastStart;
+
+    // Longest substring from s+startIdx that fits
+    const char* startPtr = s + startIdx;
+    const int remaining  = len - startIdx;
+    int lo2 = 0, hi2 = remaining;
+    while (lo2 < hi2){
+        int mid = (lo2 + hi2 + 1) / 2;
+        char tmp[512]; _snprintf(tmp, sizeof(tmp), "%.*s", mid, startPtr);
+        WCHAR wtmp[512]; MbToW(tmp, wtmp, 512);
+        FLOAT tw=0, th=0; font.GetTextExtent(wtmp, &tw, &th);
+        if (tw <= fitW + kMeasureFudgePx) lo2 = mid; else hi2 = mid - 1;
+    }
+    char vis[512]; _snprintf(vis, sizeof(vis), "%.*s", lo2, startPtr);
+    WCHAR wvis[512]; MbToW(vis, wvis, 512);
+
+    font.DrawText(Snap(x), Snap(y), color, wvis, 0, 0.0f);
+
+    // Step/pause/reset
+    if (now >= M.nextTick){
+        if (M.resetPause){
+            M.px        = 0.0f;
+            M.resetPause= 0;
+            M.nextTick  = now + kInitPauseMs;
+        } else {
+            if (startIdx >= lastStart){
+                M.px        = (FLOAT)lastStart;
+                M.resetPause= now + kEndPauseMs;
+                M.nextTick  = M.resetPause;
+            } else {
+                M.px       = (FLOAT)(startIdx + kMarqStepChars);
+                M.nextTick = now + kStepMs;
+            }
+        }
+    }
+}
 
 /*
 ===============================================================================
  DrawPane
-  - Master renderer for a pane: header, column headers, stripes, selection,
-    file rows (name + size), icons, and scrollbar.
-  - Uses helpers above for fitting/scrolling text and alignment.
 ===============================================================================
 */
 void PaneRenderer::DrawPane(
     CXBFont& font, LPDIRECT3DDEVICE8 dev, FLOAT baseX,
     const Pane& p, bool active, const PaneStyle& st, int paneIndex)
 {
-	// ----- header band -----
-	const FLOAT hx        = baseX - 15.0f;   // align with FileBrowserApp::HdrX
-	const FLOAT headerGap = 8.0f;
-	DrawRect(dev, hx, st.hdrY, st.hdrW, st.hdrH, active ? 0xFF3A3A3A : 0x802A2A2A);
+    // ----- header band -----
+    DrawRect(dev, baseX, st.hdrY, st.hdrH ? st.hdrW : st.listW, st.hdrH, active ? 0xFF3A3A3A : 0x802A2A2A);
 
-	// Build header text
-	char hdr[600];
-	if (p.mode == 0) _snprintf(hdr, sizeof(hdr), "%s", "Detected Drives");
-	else             _snprintf(hdr, sizeof(hdr), "%s",  p.curPath);
-	hdr[sizeof(hdr)-1] = 0;
+    // Header text
+    char hdr[600];
+    if (p.mode == 0) _snprintf(hdr, sizeof(hdr), "%s", "Detected Drives");
+    else             _snprintf(hdr, sizeof(hdr), "%s",  p.curPath);
+    hdr[sizeof(hdr)-1] = 0;
 
-	// Center if it fits; otherwise fall back to your existing marquee/fitter
-	FLOAT tW=0, tH=0;
-	MeasureAnsiWH(font, hdr, tW, tH);
+    // Center vertically
+    const FLOAT titleY     = CenterYForText(font, hdr, st.hdrY, st.hdrH, 1.0f);
+    const FLOAT headerLeft = baseX + 6.0f;
+    const FLOAT headerMaxW = st.listW - 12.0f;
 
-	const FLOAT titleY     = st.hdrY + (st.hdrH - tH) * 0.5f;
-	const FLOAT headerLeft = hx + 5.0f;                // padding inside the bar
-	const FLOAT headerMaxW = st.hdrW - 10.0f;          // symmetric 5px padding
+    // Draw header (fit or marquee)
+    FLOAT tW=0, tH=0; MeasureAnsiWH(font, hdr, tW, tH);
+    const FLOAT fitHdrW = (headerMaxW > kRightGuardPx) ? (headerMaxW - kRightGuardPx) : 0.0f;
+    if (tW <= fitHdrW + kMeasureFudgePx + kNearFitSlackPx) {
+        const FLOAT cx = Snap(headerLeft + (fitHdrW - tW) * 0.5f);
+        DrawAnsi(font, cx, titleY, 0xFFFFFFFF, hdr);
+        m_hdrMarq[paneIndex] = MarqueeState();
+    } else {
+        DrawHeaderFittedOrMarquee(font, headerLeft, titleY, headerMaxW, 0xFFFFFFFF, hdr, paneIndex);
+    }
 
-	if (tW <= headerMaxW) {
-		// center horizontally within the header band
-		const FLOAT cx = headerLeft + (headerMaxW - tW) * 0.5f;
-		DrawAnsi(font, cx, titleY, 0xFFFFFFFF, hdr);
-	} else {
-		// too wide -> use your marquee/fitting helper (left edge at headerLeft)
-		DrawHeaderFittedOrMarquee(font, headerLeft, titleY, headerMaxW, 0xFFFFFFFF, hdr, paneIndex);
-	}
-
-
-    // ----- compute Size column metrics -----
-    const FLOAT sizeColW  = ComputeSizeColW(font, p, st);
-    const FLOAT sizeColX  = baseX + st.listW - (st.scrollBarW + st.paddingX + sizeColW);
-    const FLOAT sizeRight = sizeColX + sizeColW;
+    // ----- size column metrics (shared) -----
+    const FLOAT sizeColW  = GetSharedSizeColW();
+    const FLOAT sizeRight = baseX + st.listW - (st.scrollBarW + st.paddingX);
+    const FLOAT sizeColX  = sizeRight - sizeColW;
 
     // ----- column headers -----
-    const FLOAT colHdrY = st.hdrY + st.hdrH + headerGap;
-	const FLOAT colHdrH = 24.0f;
-	DrawRect(dev, baseX-10.0f, colHdrY, st.listW+20.0f, colHdrH, 0x60333333);
+    const FLOAT colHdrY = st.hdrY + st.hdrH + PaneRenderer::MaxF(6.0f, st.lineH * 0.15f);
+    const FLOAT colHdrH = PaneRenderer::MaxF(22.0f, st.lineH);
+    DrawRect(dev, baseX, colHdrY, st.listW, colHdrH, 0x60333333);
 
-	FLOAT nameW, nameH; MeasureAnsiWH(font, "Name", nameW, nameH);
+    FLOAT nameW, nameH; MeasureAnsiWH(font, "Name", nameW, nameH);
+    const char* sizeHdr = (p.mode == 0) ? "Free / Total" : "Size";
+    FLOAT sizeW, sizeH; MeasureAnsiWH(font, sizeHdr, sizeW, sizeH);
 
-	// NEW: pick header by mode (drive list uses "Free / Total")
-	const char* sizeHdr = (p.mode == 0) ? "Free / Total" : "Size";
-	FLOAT sizeW, sizeH; MeasureAnsiWH(font, sizeHdr, sizeW, sizeH);
+    const FLOAT nameY = colHdrY + (colHdrH - nameH) * 0.5f;
+    const FLOAT sizeY = colHdrY + (colHdrH - sizeH) * 0.5f;
 
-	const FLOAT nameY = colHdrY + (colHdrH - nameH) * 0.5f;
-	const FLOAT sizeY = colHdrY + (colHdrH - sizeH) * 0.5f;
-
-	DrawAnsi(font, NameColX(baseX, st), nameY, 0xFFDDDDDD, "Name");
-	DrawRightAligned(font, sizeHdr, sizeRight, sizeY, 0xFFDDDDDD);
+    DrawAnsi(font, NameColX(baseX, st), nameY, 0xFFDDDDDD, "Name");
+    DrawRightAligned(font, sizeHdr, sizeRight, sizeY, 0xFFDDDDDD);
 
     // underline + vertical divider
-    DrawRect(dev, baseX-10.0f, colHdrY + colHdrH, st.listW+20.0f, 1.0f, 0x80444444);
-    DrawRect(dev, sizeColX - 8.0f, colHdrY + 1.0f, 1.0f, colHdrH - 2.0f, 0x40444444);
+    DrawRect(dev, baseX,    colHdrY + colHdrH,  st.listW, 1.0f, 0x80444444);
+    DrawRect(dev, sizeColX, colHdrY + 2.0f,     1.0f,     colHdrH - 4.0f, 0x40444444);
 
     // ----- list background -----
-    DrawRect(dev, baseX-10.0f, st.listY-6.0f, st.lineH*st.visibleRows+12.0f + (st.listW - st.lineH*st.visibleRows), st.lineH*st.visibleRows+12.0f, 0x30101010);
-    // ^ same visual area as before; keeps your background box
+    const FLOAT listTop = colHdrY + colHdrH;
+    const FLOAT listH   = st.lineH * st.visibleRows;
+    DrawRect(dev, baseX, listTop, st.listW, listH, 0x30101010);
 
-    // alternating row stripes
+    // alternating stripes
     int end = p.scroll + st.visibleRows; if (end > (int)p.items.size()) end = (int)p.items.size();
     int rowIndex = 0;
     for (int i = p.scroll; i < end; ++i, ++rowIndex) {
         D3DCOLOR stripe = (rowIndex & 1) ? 0x201E1E1E : 0x10000000;
-        DrawRect(dev, baseX, st.listY + rowIndex*st.lineH - 2.0f, st.listW-8.0f, st.lineH, stripe);
+        DrawRect(dev, baseX, listTop + rowIndex*st.lineH, st.listW, st.lineH, stripe);
     }
+
     // selection highlight
     if (!p.items.empty() && p.sel >= p.scroll && p.sel < end) {
         int selRow = p.sel - p.scroll;
-        DrawRect(dev, baseX, st.listY + selRow*st.lineH - 2.0f, st.listW-8.0f, st.lineH, active?0x60FFFF00:0x30FFFF00);
+        DrawRect(dev, baseX, listTop + selRow*st.lineH, st.listW, st.lineH, active?0x60FFFF00:0x30FFFF00);
     }
 
-    // ----- row content -----
-    FLOAT y = st.listY;
+    // ----- rows -----
+    FLOAT y = listTop;
     for (int i = p.scroll, r = 0; i < end; ++i, ++r) {
         const Item& it = p.items[i];
         DWORD nameCol = (i==p.sel)?0xFFFFFF00:0xFFE0E0E0;
         DWORD sizeCol = (i==p.sel)?0xFFFFFF00:0xFFB0B0B0;
         D3DCOLOR ico = it.isUpEntry ? 0xFFAAAAAA
-                            : (it.marked ? 0xFFFF4040               // red = marked
-                                         : (it.isDir ? 0xFF5EA4FF   // blue = folder/drive
-                                                     : 0xFF89D07E));// green = file
-        DrawRect(dev, baseX+2.0f, y+6.0f, st.gutterW-8.0f, st.lineH-12.0f, ico);
+                            : (it.marked ? 0xFFFF4040
+                                         : (it.isDir ? 0xFF5EA4FF
+                                                     : 0xFF89D07E));
 
+        // icon gutter
+        const FLOAT gutterX = baseX + 2.0f;
+        const FLOAT gutterW = st.gutterW - 4.0f;
+        const FLOAT gutterH = st.lineH - 6.0f;
+        DrawRect(dev, gutterX, y + (st.lineH - gutterH) * 0.5f, gutterW, gutterH, ico);
         const char* glyph = it.isUpEntry ? ".." : (it.isDir?"+":"-");
-        DrawAnsi(font, baseX+4.0f, y+4.0f, 0xFFFFFFFF, glyph);
+        DrawAnsi(font, gutterX + 2.0f, y + 2.0f, 0xFFFFFFFF, glyph);
 
-        // filename (fitted or marquee-scrolled)
+        // filename area (compute available width once)
         char nameBuf[300]; _snprintf(nameBuf, sizeof(nameBuf), "%s", it.name); nameBuf[sizeof(nameBuf)-1] = 0;
-        const FLOAT nameX    = NameColX(baseX, st);
-        const FLOAT rightPad = st.paddingX + st.scrollBarW + 2.0f;
-        const FLOAT nameMaxW = (baseX + st.listW) - rightPad - nameX - sizeColW;
+        const FLOAT nameXRaw     = NameColX(baseX, st);
+        const FLOAT rightPad     = st.paddingX + st.scrollBarW;
+        const FLOAT kNameSafePad = 2.0f;
+
+        const FLOAT nameRightEdge = Snap((baseX + st.listW) - rightPad - GetSharedSizeColW() - kNameSafePad - kRightGuardPx);
+        const FLOAT nameLeftEdge  = Snap(nameXRaw);
+        FLOAT nameMaxW = nameRightEdge - nameLeftEdge;
+        if (nameMaxW < 0.0f) nameMaxW = 0.0f;
 
         const bool isSel = active && (i == p.sel);
-        DrawNameFittedOrMarquee(font, nameX, y, nameMaxW,
+        DrawNameFittedOrMarquee(font, nameLeftEdge, y, nameMaxW,
                                 nameCol, nameBuf, isSel, paneIndex, i - p.scroll);
 
-        // size column:
-        // - drive list (mode 0): show "free / total"
-        // - directory list: files show size, folders/".." are blank
+        // size column
         char sz[96] = "";
         if (p.mode == 0 && it.isDir && !it.isUpEntry) {
-            ULONGLONG fb = 0, tb = 0;
-            GetDriveFreeTotal(it.name, fb, tb);
-            char f[32], t[32];
-            FormatSize(fb, f, sizeof(f));
-            FormatSize(tb, t, sizeof(t));
+            ULONGLONG fb=0, tb=0; GetDriveFreeTotal(it.name, fb, tb);
+            char f[32], t[32]; FormatSize(fb, f, sizeof(f)); FormatSize(tb, t, sizeof(t));
             _snprintf(sz, sizeof(sz), "%s / %s", f, t);
         } else if (!it.isDir && !it.isUpEntry) {
             FormatSize(it.size, sz, sizeof(sz));
@@ -382,9 +453,10 @@ void PaneRenderer::DrawPane(
 
     // ----- scrollbar -----
     if ((int)p.items.size() > st.visibleRows) {
-        FLOAT trackX = baseX + st.listW - st.scrollBarW - 4.0f;
-        FLOAT trackY = st.listY - 2.0f;
-        FLOAT trackH = st.visibleRows * st.lineH;
+        const FLOAT trackX = baseX + st.listW - st.scrollBarW;
+        const FLOAT trackY = listTop;
+        const FLOAT trackH = st.visibleRows * st.lineH;
+
         DrawRect(dev, trackX, trackY, st.scrollBarW, trackH, 0x40282828);
 
         int total = (int)p.items.size();

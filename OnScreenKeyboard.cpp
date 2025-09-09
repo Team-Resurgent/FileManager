@@ -2,6 +2,7 @@
 #include "GfxPrims.h"
 #include <stdio.h>
 #include <string.h>
+#include <wchar.h>   // for MultiByteToWideChar used by helpers
 
 /*
 ============================================================================
@@ -13,6 +14,165 @@
   - FATX-safe length (42) enforced
 ============================================================================
 */
+
+// ---------- local draw/measure helpers for the header path (marquee) ----------
+static inline FLOAT KB_Snap(FLOAT v){ return (FLOAT)((int)(v + 0.5f)); }
+
+static void KB_MbToW(const char* s, WCHAR* w, int capW){
+    MultiByteToWideChar(CP_ACP, 0, s ? s : "", -1, w, capW);
+}
+static void KB_MeasureWH(CXBFont& font, const char* s, FLOAT& W, FLOAT& H){
+    WCHAR wbuf[512]; KB_MbToW(s, wbuf, 512); font.GetTextExtent(wbuf, &W, &H);
+}
+static FLOAT KB_MeasureCharW(CXBFont& font, char ch){
+    WCHAR w[2] = { (WCHAR)(unsigned char)ch, 0 };
+    FLOAT wpx=0, hpx=0; font.GetTextExtent(w, &wpx, &hpx);
+    if (wpx <= 0.0f){ WCHAR sp[2] = { L' ', 0 }; font.GetTextExtent(sp, &wpx, &hpx); if (wpx<=0.0f) wpx=8.0f; }
+    return wpx;
+}
+// Walk forward until pixel offset 'px' is reached; returns pointer into s and total skipped width
+static const char* KB_SkipToPixelOffset(CXBFont& font, const char* s, FLOAT px, FLOAT& skippedW){
+    skippedW = 0.0f; if (!s || px <= 0) return s ? s : "";
+    const char* p = s; WCHAR wtmp[256]; FLOAT tw=0, th=0;
+    while (*p){
+        int len = (int)(p - s + 1); if (len > 255) len = 255;
+        char tmp[256]; _snprintf(tmp, sizeof(tmp), "%.*s", len, s);
+        KB_MbToW(tmp, wtmp, 256); font.GetTextExtent(wtmp, &tw, &th);
+        if (tw >= px) break; ++p;
+    }
+    skippedW = tw; return p;
+}
+
+// ------------------ Marquee for the path area ------------------
+struct KB_Marquee {
+    FLOAT px;         // current scroll offset in pixels
+    DWORD nextTick;   // next update time
+    DWORD resetPause; // nonzero while pausing at end
+    char  last[512];  // last path used (to reset when it changes)
+    KB_Marquee() : px(0.0f), nextTick(0), resetPause(0) { last[0] = 0; }
+};
+static KB_Marquee g_kbMarq;
+
+
+// Draw the header path centered vertically in a band [x,y,w,h].
+// If too long, marquee scrolls to (fullW - maxW) + width(one extra char) before restart.
+// Draw: fixed "In:" label + scrolling path inside the remaining area.
+// VC7.1-friendly (no lambdas/auto). Mirrors PaneRenderer’s marquee (+1 glyph overshoot).
+static void KB_DrawHeaderPath_FixedLabel(CXBFont& font, FLOAT x, FLOAT y, FLOAT w, FLOAT h,
+                                         DWORD color, const char* parentPath)
+{
+    if (!parentPath) parentPath = "";
+
+    // --- layout constants (match pane approach) ---
+    const FLOAT leftPad     = 6.0f;
+    const FLOAT rightPad    = 6.0f;
+    const FLOAT gapPx       = 4.0f;     // space between "In:" and the path
+    const FLOAT kTol        = 2.0f;     // small safety tolerance (same as panes)
+    const FLOAT kBiasDown   = 1.0f;     // tiny downward bias (like panes)
+    const FLOAT kRightGuard = 1.5f;     // shrink fit width a hair to avoid clipping
+
+    // Full band where we draw label + path
+    const FLOAT bandX = x + leftPad;
+    const FLOAT bandW = (w > leftPad + rightPad) ? (w - leftPad - rightPad) : 0.0f;
+    if (bandW <= 0.0f) return;
+
+    // ---- draw the fixed "In:" label ----
+    FLOAT inW=0, inH=0;
+    {
+        WCHAR wIn[16];
+        MultiByteToWideChar(CP_ACP, 0, "In:", -1, wIn, 16);
+        font.GetTextExtent(wIn, &inW, &inH);
+        const FLOAT ty = KB_Snap(y + (h - inH) * 0.5f + kBiasDown);
+        font.DrawText(KB_Snap(bandX), ty, color, wIn, 0, 0.0f);
+    }
+
+    // ---- path draw area (to the right of "In:") ----
+    const FLOAT pathX = bandX + inW + gapPx;
+    FLOAT       pathW = bandW - inW - gapPx;
+    if (pathW <= 0.0f) return;
+
+    // Tiny right guard to prevent the last glyph from kissing the edge
+    const FLOAT fitW = (pathW > kRightGuard) ? (pathW - kRightGuard) : 0.0f;
+
+    // Measure full path
+    WCHAR wPath[1024];
+    MultiByteToWideChar(CP_ACP, 0, parentPath, -1, wPath, 1024);
+    FLOAT fullW=0, fullH=0; font.GetTextExtent(wPath, &fullW, &fullH);
+
+    const FLOAT ty = KB_Snap(y + (h - fullH) * 0.5f + kBiasDown);
+
+    // If it fits (or nearly fits), draw and reset marquee
+    if (fullW <= fitW + kTol){
+        font.DrawText(KB_Snap(pathX), ty, color, wPath, 0, 0.0f);
+        g_kbMarq.px = 0.0f; g_kbMarq.nextTick = 0; g_kbMarq.resetPause = 0;
+        return;
+    }
+
+    // Reset marquee when text changes
+    static char s_prevPath[1024] = {0};
+    if (_stricmp(s_prevPath, parentPath) != 0){
+        _snprintf(s_prevPath, sizeof(s_prevPath), "%s", parentPath);
+        s_prevPath[sizeof(s_prevPath)-1] = 0;
+        g_kbMarq.px = 0.0f; g_kbMarq.resetPause = 0; g_kbMarq.nextTick = GetTickCount() + 600;
+    }
+
+    // --- marquee timing (mirrors pane header) ---
+    const DWORD now        = GetTickCount();
+    const DWORD kInitPause = 600;
+    const DWORD kStepMs    = 25;
+    const DWORD kEndPause  = 800;
+    const FLOAT kStepPx    = 2.0f;
+
+    // Overshoot by one glyph width (space) + 1px (like pane code)
+    FLOAT spaceW=0, sh=0;
+    {
+        WCHAR gw[2] = { L' ', 0 };
+        font.GetTextExtent(gw, &spaceW, &sh);
+        if (spaceW <= 0.0f) spaceW = 8.0f;
+    }
+    const FLOAT extraPx   = spaceW + 1.0f;
+    const FLOAT maxScroll = (fullW > fitW) ? ((fullW - fitW) + extraPx) : 0.0f;
+
+    if (g_kbMarq.nextTick == 0){
+        g_kbMarq.px = 0.0f; g_kbMarq.resetPause = 0; g_kbMarq.nextTick = now + kInitPause;
+    } else if (now >= g_kbMarq.nextTick){
+        if (g_kbMarq.resetPause){
+            g_kbMarq.px = 0.0f; g_kbMarq.resetPause = 0; g_kbMarq.nextTick = now + kInitPause;
+        } else {
+            g_kbMarq.px += kStepPx;
+            if (g_kbMarq.px >= maxScroll){
+                g_kbMarq.px = maxScroll;
+                g_kbMarq.resetPause = now + kEndPause;
+                g_kbMarq.nextTick   = g_kbMarq.resetPause;
+            } else {
+                g_kbMarq.nextTick = now + kStepMs;
+            }
+        }
+    }
+
+    // Slice start at current pixel offset (use your existing KB_SkipToPixelOffset)
+    FLOAT skipped = 0.0f;
+    const char* start = KB_SkipToPixelOffset(font, parentPath, g_kbMarq.px, skipped);
+
+    // Binary-search longest prefix from 'start' that fits (same as panes)
+    const int remaining = (int)strlen(start);
+    int lo = 0, hi = remaining;
+    WCHAR wtmp[1024]; FLOAT tw=0, th=0;
+    while (lo < hi){
+        const int mid = (lo + hi + 1) / 2;
+        char tmp[1024]; _snprintf(tmp, sizeof(tmp), "%.*s", mid, start);
+        MultiByteToWideChar(CP_ACP, 0, tmp, -1, wtmp, 1024);
+        font.GetTextExtent(wtmp, &tw, &th);
+        if (tw <= fitW + kTol) lo = mid; else hi = mid - 1;
+    }
+
+    char vis[1024]; _snprintf(vis, sizeof(vis), "%.*s", lo, start); vis[sizeof(vis)-1]=0;
+    MultiByteToWideChar(CP_ACP, 0, vis, -1, wtmp, 1024);
+    font.DrawText(KB_Snap(pathX), ty, color, wtmp, 0, 0.0f);
+}
+
+
+
 
 // ------------------ Local keyboard layouts ------------------
 // Alpha/number layer (your original). Rows target 10 keys each.
@@ -134,7 +294,6 @@ static int VisibleColsForRowHelper(bool symbols, int r) {
 }
 
 // ------------------ ctor / open / close ------------------
-// Initializes transient state; font/device are supplied at draw time.
 OnScreenKeyboard::OnScreenKeyboard(){
     m_active = false;
     m_lower = false;     // false = UPPER, true = lower (caps state for alpha)
@@ -153,10 +312,6 @@ OnScreenKeyboard::OnScreenKeyboard(){
     m_shiftOnce = false; // one-shot shift toggle in alpha mode
 }
 
-// Opens the keyboard with starting text and case mode.
-// - Enforces FATX max length (42)
-// - Positions caret at end
-// - Debounces the opener button press
 void OnScreenKeyboard::Open(const char* parentDir, const char* initialName, bool startLowerCase){
     _snprintf(m_parent, sizeof(m_parent), "%s", parentDir ? parentDir : "");
     m_parent[sizeof(m_parent)-1] = 0;
@@ -191,16 +346,11 @@ void OnScreenKeyboard::Open(const char* parentDir, const char* initialName, bool
     m_waitRelease = true;
 }
 
-// Close the keyboard (caller switches mode back to browse).
 void OnScreenKeyboard::Close(){
     m_active = false;
 }
 
 // ------------------ helpers (class methods) ------------------
-// Return the character at [row,col] respecting:
-// - current layout (alpha/symbols)
-// - glyph filtering
-// - one-shot shift and caps state (alpha only)
 char OnScreenKeyboard::KbCharAt(int row, int col) const{
     if (m_symbols) {
         if (row < 0 || row > 4) return 0; // 5 symbol rows
@@ -257,13 +407,6 @@ FLOAT OnScreenKeyboard::MeasureTextW(CXBFont& font, const char* s){
 }
 
 // ------------------ draw ------------------
-// Renders the modal panel, including:
-// - Header (title + length counter)
-// - Path info ("In: ...")
-// - Input box + caret
-// - Side column actions
-// - Character grid (alpha: 4 rows, symbols: 5 rows)
-// - Bottom row (Backspace | Space) and footer hints
 void OnScreenKeyboard::Draw(CXBFont& font, LPDIRECT3DDEVICE8 dev, FLOAT lineH){
     if (!m_active) return;
 
@@ -306,15 +449,14 @@ void OnScreenKeyboard::Draw(CXBFont& font, LPDIRECT3DDEVICE8 dev, FLOAT lineH){
     // Divider under header
     DrawRect(dev, x, y + headerH, panelW, 1.0f, 0x60FFFFFF);
 
-    // "In: <parent path>"
-    char hdr[640];
-    _snprintf(hdr, sizeof(hdr), "In: %s", m_parent); hdr[sizeof(hdr)-1]=0;
-    FLOAT infoW, infoH; MeasureTextWH(font, hdr, infoW, infoH);
-    const FLOAT infoY = Snap(y + headerH + afterLinePad);
-    DrawAnsi(font, x + 12, infoY, 0xFFCCCCCC, hdr);
+    // ----- Path band ("In: <parent>") with safe-fit + end-stop marquee -----
+    const FLOAT infoY      = Snap(y + headerH + afterLinePad);
+    const FLOAT infoBandH  = (lineH > 22.0f ? lineH : 22.0f);     // stable band height
+    const FLOAT infoBandW  = panelW - 24.0f;                      // x+12 .. x+panelW-12
+    KB_DrawHeaderPath_FixedLabel(font, x + 12.0f, infoY, infoBandW, infoBandH, 0xFFCCCCCC, m_parent);
 
     // Input box
-    const FLOAT boxY = Snap(infoY + infoH + labelToBoxPad);
+    const FLOAT boxY = Snap(infoY + infoBandH + labelToBoxPad);
     const FLOAT boxH = 30.0f;
     DrawRect(dev, x+12, boxY, panelW-24, boxH, 0xFF0E0E0E);
 
@@ -453,8 +595,6 @@ void OnScreenKeyboard::Draw(CXBFont& font, LPDIRECT3DDEVICE8 dev, FLOAT lineH){
 }
 
 // ------------------ input ------------------
-// Reads pad input and updates UI/contents.
-// Returns ACCEPTED (Start/Done or side “Done”), CANCELED (B), or NONE.
 OnScreenKeyboard::Result OnScreenKeyboard::OnPad(const XBGAMEPAD& pad){
     if (!m_active) return NONE;
 

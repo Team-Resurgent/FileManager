@@ -6,7 +6,7 @@
 #include <stdarg.h>
 #include <algorithm>
 #include <stdio.h> // _snprintf
-
+#include <xgraphics.h> 
 /*
 ===============================================================================
  FileBrowserApp
@@ -25,6 +25,7 @@ DWORD FileBrowserApp::StatusUntilMs() const { return m_statusUntilMs; }
 namespace {
     // Small math/layout helpers
     inline FLOAT MaxF(FLOAT a, FLOAT b){ return (a>b)?a:b; }
+	inline FLOAT MinF(FLOAT a, FLOAT b) { return (a < b) ? a : b; }
     inline int   MaxI (int a,   int b){ return (a>b)?a:b; }
     inline FLOAT Snap (FLOAT v){ return (FLOAT)((int)(v + 0.5f)); } // pixel-align
 
@@ -122,6 +123,57 @@ namespace {
 
 } // anonymous namespace
 
+
+// ----------------------------------------------------------------------------
+// ComputeResponsiveLayout
+//  - Derives all pane/header/row metrics from the current device viewport.
+//  - Ensures perfect left/right symmetry: [margin] [left pane] [gap] [right pane] [margin].
+//  - Keeps header bars exactly the same width as the panes.
+// ----------------------------------------------------------------------------
+void FileBrowserApp::ComputeResponsiveLayout()
+{
+    D3DVIEWPORT8 vp; m_pd3dDevice->GetViewport(&vp);
+
+    // Outer margins + gap scale with resolution (but have sensible floors)
+    const FLOAT margin = MaxF(24.0f,  vp.Width  * 0.04f);   // screen edge padding
+    const FLOAT gap    = MaxF(24.0f,  vp.Width  * 0.035f);  // space between panes
+
+    // Two equal panes + one gap + two margins must fit the screen width
+    const FLOAT paneW  = MaxF(260.0f, (vp.Width - (margin * 2.0f) - gap) * 0.5f);
+
+    // Positions
+    kPaneGap  = gap;
+    kListX_L  = margin;                 // left pane X
+    kListW    = paneW;                  // width for both panes
+
+    // Header fully matches each pane's width and sits above the list
+    kHdrW     = kListW;                 // <— header exactly equals pane
+    kHdrY     = MaxF(12.0f, vp.Height * 0.03f);
+    kHdrH     = MaxF(22.0f, vp.Height * 0.04f);
+
+    // List top is below the header band
+    const FLOAT headerGap = MaxF(6.0f, kHdrH * 0.35f);
+    kListY    = kHdrY + kHdrH + headerGap;
+
+    // Row height scales with resolution
+    kLineH    = MaxF(22.0f, vp.Height * 0.036f);
+
+    // Fixed micro-metrics (feel free to tweak)
+    kGutterW    = 18.0f;
+    kPaddingX   = 6.0f;
+    kScrollBarW = 3.0f;
+
+    // Visible rows (leave room for footer)
+    const FLOAT footerBand = MaxF(48.0f, vp.Height * 0.09f);
+    const FLOAT bottomY    = (FLOAT)vp.Height - footerBand;
+    FLOAT usableH          = bottomY - kListY; if (usableH < 0) usableH = 0;
+    m_visible              = (int)(usableH / kLineH);
+    if (m_visible < 6)  m_visible = 6;
+    if (m_visible > 30) m_visible = 30;
+}
+
+
+
 // ----------------------------------------------------------------------------
 // ctor: set defaults for input, layout, D3D, and app state
 FileBrowserApp::FileBrowserApp(){
@@ -134,41 +186,60 @@ FileBrowserApp::FileBrowserApp(){
     m_dvdHaveStats  = false;
 
     // --- Auto-detect video capabilities and set PresentParams ----------------
-    ZeroMemory(&m_d3dpp, sizeof(m_d3dpp));
+	ZeroMemory(&m_d3dpp, sizeof(m_d3dpp));
 
-    // What the user enabled in the MS dashboard
-    DWORD vf = XGetVideoFlags();
+	// Dashboard video flags and TV standard
+	const DWORD vf = XGetVideoFlags();
+	const DWORD vs = XGetVideoStandard(); // XC_VIDEO_STANDARD_*
 
-    const bool hasWS    = (vf & XC_VIDEO_FLAGS_WIDESCREEN)   != 0;
-    const bool has480p  = (vf & XC_VIDEO_FLAGS_HDTV_480p)    != 0; // progressive 480
-    const bool has720p  = (vf & XC_VIDEO_FLAGS_HDTV_720p)    != 0; // 1280x720p
-    const bool has1080i = (vf & XC_VIDEO_FLAGS_HDTV_1080i)   != 0; // 1920x1080i (heavy)
+	const bool hasWS    = (vf & XC_VIDEO_FLAGS_WIDESCREEN)   != 0;
+	const bool has480p  = (vf & XC_VIDEO_FLAGS_HDTV_480p)    != 0;
+	const bool has720p  = (vf & XC_VIDEO_FLAGS_HDTV_720p)    != 0;
+	const bool has1080i = (vf & XC_VIDEO_FLAGS_HDTV_1080i)   != 0;
 
-    // Pick a device backbuffer the TV supports.
-    // Priority: 720p -> 1080i (optional) -> 480p -> 480i
-    if (has720p) {
-        m_d3dpp.BackBufferWidth  = 1280;
-        m_d3dpp.BackBufferHeight = 720;
-        m_d3dpp.Flags            = D3DPRESENTFLAG_PROGRESSIVE;   // 720p is progressive
-    }
-    else {
-        // 480 path: 640x480; set PROGRESSIVE only if 480p is enabled
-        m_d3dpp.BackBufferWidth  = 640;
-        m_d3dpp.BackBufferHeight = 480;
-        m_d3dpp.Flags            = 0;
-        if (has480p) m_d3dpp.Flags |= D3DPRESENTFLAG_PROGRESSIVE;  // 480p
-    }
+	// Treat anything not NTSC-M as PAL family (PAL-I/M/N). We only need
+	// this to decide the 576i PAL-50 fallback when 480p isn’t enabled.
+	const bool isPAL = (vs != XC_VIDEO_STANDARD_NTSC_M);
 
-    if (hasWS) m_d3dpp.Flags |= D3DPRESENTFLAG_WIDESCREEN;         // 16:9 (anamorphic for 480)
+	// Choose a backbuffer the TV actually supports.
+	// Priority: 720p -> 1080i -> PAL-50 (576i) -> 480 (i/p depending on flags)
+	if (has720p) {
+		m_d3dpp.BackBufferWidth  = 1280;
+		m_d3dpp.BackBufferHeight = 720;
+		m_d3dpp.Flags            = D3DPRESENTFLAG_PROGRESSIVE | D3DPRESENTFLAG_WIDESCREEN; // 720p is always 16:9
+		m_d3dpp.FullScreen_RefreshRateInHz = 60;
+	}
+	else if (has1080i) {
+		m_d3dpp.BackBufferWidth  = 1920;
+		m_d3dpp.BackBufferHeight = 1080;
+		m_d3dpp.Flags            = D3DPRESENTFLAG_INTERLACED  | D3DPRESENTFLAG_WIDESCREEN; // 1080i is always 16:9
+		m_d3dpp.FullScreen_RefreshRateInHz = 60;
+	}
+	else if (isPAL && !has480p) {
+		// PAL-50: 576i
+		m_d3dpp.BackBufferWidth  = 720;
+		m_d3dpp.BackBufferHeight = 576;
+		m_d3dpp.Flags            = D3DPRESENTFLAG_INTERLACED;
+		if (hasWS) m_d3dpp.Flags |= D3DPRESENTFLAG_WIDESCREEN; // 16:9 if user enabled
+		m_d3dpp.FullScreen_RefreshRateInHz = 50;
+	}
+	else {
+		// 480 path (NTSC or PAL-60/480p)
+		m_d3dpp.BackBufferWidth  = 640;
+		m_d3dpp.BackBufferHeight = 480;
+		m_d3dpp.Flags            = 0;
+		if (has480p) m_d3dpp.Flags |= D3DPRESENTFLAG_PROGRESSIVE; // 480p if enabled
+		else          m_d3dpp.Flags |= D3DPRESENTFLAG_INTERLACED;  // otherwise 480i
+		if (hasWS)    m_d3dpp.Flags |= D3DPRESENTFLAG_WIDESCREEN;  // 16:9 anamorphic if enabled
+		m_d3dpp.FullScreen_RefreshRateInHz = 60;                   // NTSC & PAL-60
+	}
 
-    // Common params
-    m_d3dpp.BackBufferFormat           = D3DFMT_X8R8G8B8;
-    m_d3dpp.SwapEffect                 = D3DSWAPEFFECT_DISCARD;
-    m_d3dpp.EnableAutoDepthStencil     = TRUE;
-    m_d3dpp.AutoDepthStencilFormat     = D3DFMT_D24S8;
-    m_d3dpp.FullScreen_RefreshRateInHz = 60; // keep 60; handle PAL-50 elsewhere if you support it
-
-    // -------------------------------------------------------------------------
+	// Common params
+	m_d3dpp.BackBufferFormat       = D3DFMT_X8R8G8B8;
+	m_d3dpp.SwapEffect             = D3DSWAPEFFECT_DISCARD;
+	m_d3dpp.EnableAutoDepthStencil = TRUE;
+	m_d3dpp.AutoDepthStencilFormat = D3DFMT_D24S8;
+	// -------------------------------------------------------------------------
 
     m_mode=MODE_BROWSE;
     m_status[0]=0; m_statusUntilMs=0;
@@ -176,6 +247,8 @@ FileBrowserApp::FileBrowserApp(){
     m_dvdTotalBytes = 0;
     m_dvdHaveStats  = 0;
 }
+
+
 
 
 // ----- draw prims ------------------------------------------------------------
@@ -890,35 +963,19 @@ HRESULT FileBrowserApp::Initialize(){
     if (FAILED(m_font.Create("D:\\Media\\Font.xpr", 0))) {
         m_font.Create("D:\\Media\\CourierNew.xpr", 0);
     }
-    XBInput_CreateGamepads(); MapStandardDrives_Io(); RescanDrives();
-    BuildDriveItems(m_pane[0].items); BuildDriveItems(m_pane[1].items);
 
-    D3DVIEWPORT8 vp; m_pd3dDevice->GetViewport(&vp);
+    XBInput_CreateGamepads();
+    MapStandardDrives_Io();
+    RescanDrives();
+    BuildDriveItems(m_pane[0].items);
+    BuildDriveItems(m_pane[1].items);
 
-    // Layout derived from viewport size.
-    const FLOAT sideMargin = MaxF(24.0f,  vp.Width  * 0.04f);
-    const FLOAT gap        = MaxF(24.0f,  vp.Width  * 0.035f);
-
-    kPaneGap  = gap;
-    kListX_L  = sideMargin;
-
-    const FLOAT totalUsable = (FLOAT)vp.Width - (sideMargin * 2.0f) - gap;
-    kListW = MaxF(260.0f, (totalUsable / 2.0f) - 10.0f);
-
-    kHdrW   = kListW + 30.0f;
-    kHdrY   = MaxF(12.0f, vp.Height * 0.03f);
-    kHdrH   = MaxF(22.0f, vp.Height * 0.04f);
-    kListY  = MaxF(60.0f, kHdrY + kHdrH + 34.0f);
-
-    kLineH  = MaxF(22.0f, vp.Height * 0.036f);
-
-    // Compute visible rows based on remaining height up to a footer band.
-    FLOAT bottomY = (FLOAT)vp.Height - MaxF(48.0f, vp.Height * 0.09f);
-    FLOAT usableH = bottomY - kListY; if (usableH < 0) usableH = 0;
-    m_visible = (int)(usableH / kLineH); if (m_visible < 6) m_visible=6; if (m_visible>30) m_visible=30;
+    // Layout derived from current backbuffer size (works for any resolution)
+    ComputeResponsiveLayout();
 
     return S_OK;
 }
+
 
 // ----- progress overlay API -------------------------------------------------
 // Begin a copy/move progress session (title and first label for marquee).
@@ -1107,6 +1164,9 @@ HRESULT FileBrowserApp::Render(){
     m_pd3dDevice->SetRenderState(D3DRS_SRCBLEND,  D3DBLEND_SRCALPHA);
     m_pd3dDevice->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
 
+    // Recompute layout if resolution changes on the fly (safe & cheap)
+    ComputeResponsiveLayout();
+
     // ---- panes ----
     PaneStyle st;
     st.listW       = kListW;
@@ -1114,92 +1174,97 @@ HRESULT FileBrowserApp::Render(){
     st.lineH       = kLineH;
     st.hdrY        = kHdrY;
     st.hdrH        = kHdrH;
-    st.hdrW        = kHdrW;
+    st.hdrW        = kHdrW;         // header exactly equals pane width
     st.gutterW     = kGutterW;
     st.paddingX    = kPaddingX;
     st.scrollBarW  = kScrollBarW;
     st.visibleRows = m_visible;
 
-    m_renderer.DrawPane(m_font, m_pd3dDevice, kListX_L,                     m_pane[0], m_active==0, st, 0);
-    m_renderer.DrawPane(m_font, m_pd3dDevice, kListX_L + kListW + kPaneGap, m_pane[1], m_active==1, st, 1);
+	// ---- panes ----
+	PaneRenderer::BeginFrameSharedCols();                         // reset per frame
+	m_renderer.PrimeSharedSizeColW(m_font, m_pane[0], st);        // prime from left
+	m_renderer.PrimeSharedSizeColW(m_font, m_pane[1], st);        // prime from right
+
+	// Symmetric base X for panes: [margin] [left] [gap] [right] [margin]
+	const FLOAT leftX  = kListX_L;
+	const FLOAT rightX = kListX_L + kListW + kPaneGap;
+
+	// Draw in order (left then right)
+	m_renderer.DrawPane(m_font, m_pd3dDevice, leftX,  m_pane[0], m_active==0, st, 0);
+	m_renderer.DrawPane(m_font, m_pd3dDevice, rightX, m_pane[1], m_active==1, st, 1);
+
 
     // ---- footer / hints ----
-	D3DVIEWPORT8 vp2; 
-	m_pd3dDevice->GetViewport(&vp2);
+    D3DVIEWPORT8 vp2; m_pd3dDevice->GetViewport(&vp2);
 
-	// Compute a target width similar to the two headers, then clamp to screen
-	const FLOAT desiredW = kHdrW * 2.0f + kPaneGap + 30.0f;
-	const FLOAT margin   = 10.0f;                         // side padding
-	const FLOAT maxW     = (FLOAT)vp2.Width - margin * 2; // clamp to screen
-	const FLOAT footerW  = (desiredW < maxW) ? desiredW : maxW;
+    // Footer matches the combined pane area (two panes + gap), centered.
+    const FLOAT footerMargin = MaxF(10.0f, vp2.Width * 0.01f);
+    const FLOAT footerW      = MinF(kHdrW * 2.0f + kPaneGap, (FLOAT)vp2.Width - footerMargin * 2.0f);
+    const FLOAT footerX      = floorf(((FLOAT)vp2.Width - footerW) * 0.5f);
+    const FLOAT footerY      = (FLOAT)vp2.Height - MaxF(48.0f, vp2.Height * 0.09f);
 
-	// Center the footer band horizontally (pixel-align)
-	const FLOAT footerX  = floorf(((FLOAT)vp2.Width - footerW) * 0.5f);
-	const FLOAT footerY  = (FLOAT)vp2.Height - MaxF(48.0f, vp2.Height * 0.09f);
+    // footer bar
+    DrawRect(footerX, footerY, footerW, 28.0f, 0x802A2A2A);
 
-	// Draw the footer band
-	DrawRect(footerX, footerY, footerW, 28.0f, 0x802A2A2A);
+    // --- (unchanged) footer text building and status toast follow here ---
+    {
+        const Pane& ap   = m_pane[m_active];
+        const Item* cur  = (ap.items.empty()? NULL : &ap.items[ap.sel]);
+        const char* yLab = (cur && !cur->isUpEntry && cur->marked) ? "Unmark" : "Mark";
 
-	const Pane& ap   = m_pane[m_active];
-	const Item* cur  = (ap.items.empty()? NULL : &ap.items[ap.sel]);
-	const char* yLab = (cur && !cur->isUpEntry && cur->marked) ? "Unmark" : "Mark";
+		const bool isLowRes = (vp2.Height < 700); // 480i/p or 576i count as "small"
+		const bool smallFooter = (isLowRes || footerW <= 620.0f);
 
-	// Compact copy on small widths
-	const bool smallFooter = (footerW <= 620.0f);
+        if (m_pane[m_active].mode == 0){
+            const char* hintsVerbose = "D-Pad: Move  |  Left/Right: Switch pane  |  A: Enter  |  X: Menu  |  Black/White: Page";
+            const char* hintsCompact = "DPad:Move | L/R:Pane | A:Enter | X:Menu | Pg:Blk/Wht";
+            const char* base = smallFooter ? hintsCompact : hintsVerbose;
 
-	if (m_pane[m_active].mode == 0){
-		// Drive list hints
-		const char* hintsVerbose = "D-Pad: Move  |  Left/Right: Switch pane  |  A: Enter  |  X: Menu  |  Black/White: Page";
-		const char* hintsCompact = "DPad:Move | L/R:Pane | A:Enter | X:Menu | Pg:Blk/Wht";
-		const char* base = smallFooter ? hintsCompact : hintsVerbose;
+            char fitted[256];
+            LeftEllipsizeToFit(m_font, base, footerW - 10.0f, fitted, sizeof(fitted));
+            DrawAnsiCenteredX(m_font, footerX, footerW, footerY + 4.0f, 0xFFCCCCCC, fitted);
+        } else {
+            const char* curPath = m_pane[m_active].curPath;
+            char       leftLabel[16] = "Free";
+            ULONGLONG  leftVal = 0, rightVal = 0;
+            if (IsDPath(curPath) && m_dvdHaveStats) {
+                strcpy(leftLabel, "Size");
+                leftVal  = m_dvdUsedBytes;
+                rightVal = m_dvdTotalBytes;
+            } else {
+                ULONGLONG fb=0, tb=0; GetDriveFreeTotal(curPath, fb, tb);
+                leftVal  = fb; rightVal = tb;
+            }
 
-		char fitted[256];
-		LeftEllipsizeToFit(m_font, base, footerW - 10.0f, fitted, sizeof(fitted));
-		DrawAnsiCenteredX(m_font, footerX, footerW, footerY + 4.0f, 0xFFCCCCCC, fitted);
-	} else {
-		// Directory: Free/Total (or DVD Size/Total)
-		const char* curPath = m_pane[m_active].curPath;
+            char leftStr[64], rightStr[64];
+            FormatSize(leftVal,  leftStr,  sizeof(leftStr));
+            FormatSize(rightVal, rightStr, sizeof(rightStr));
 
-		char       leftLabel[16] = "Free";
-		ULONGLONG  leftVal = 0, rightVal = 0;
-		if (IsDPath(curPath) && m_dvdHaveStats) {
-			strcpy(leftLabel, "Size");
-			leftVal  = m_dvdUsedBytes;
-			rightVal = m_dvdTotalBytes;
-		} else {
-			ULONGLONG fb=0, tb=0; GetDriveFreeTotal(curPath, fb, tb);
-			leftVal  = fb; rightVal = tb;
-		}
+            char bar[420];
+            if (smallFooter) {
+                _snprintf(bar, sizeof(bar),
+                    "Active:%s | B:Up | %s:%s/%s | X:Menu | Y:%s | Pg:Blk/Wht",
+                    (m_active==0 ? "L" : "R"), leftLabel, leftStr, rightStr, yLab);
+            } else {
+                _snprintf(bar, sizeof(bar),
+                    "Active: %s   |   B: Up   |   %s: %s / Total: %s   |   X: Menu   |   Y: %s   |   Black/White: Page",
+                    (m_active==0 ? "Left" : "Right"), leftLabel, leftStr, rightStr, yLab);
+            }
+            bar[sizeof(bar)-1] = 0;
 
-		char leftStr[64], rightStr[64];
-		FormatSize(leftVal,  leftStr,  sizeof(leftStr));
-		FormatSize(rightVal, rightStr, sizeof(rightStr));
+            char fitted[420];
+            LeftEllipsizeToFit(m_font, bar, footerW - 10.0f, fitted, sizeof(fitted));
+            DrawAnsiCenteredX(m_font, footerX, footerW, footerY + 4.0f, 0xFFCCCCCC, fitted);
+        }
 
-		char bar[420];
-		if (smallFooter) {
-			_snprintf(bar, sizeof(bar),
-				"Active:%s | B:Up | %s:%s/%s | X:Menu | Y:%s | Pg:Blk/Wht",
-				(m_active==0 ? "L" : "R"), leftLabel, leftStr, rightStr, yLab);
-		} else {
-			_snprintf(bar, sizeof(bar),
-				"Active: %s   |   B: Up   |   %s: %s / Total: %s   |   X: Menu   |   Y: %s   |   Black/White: Page",
-				(m_active==0 ? "Left" : "Right"), leftLabel, leftStr, rightStr, yLab);
-		}
-		bar[sizeof(bar)-1] = 0;
-
-		char fitted[420];
-		LeftEllipsizeToFit(m_font, bar, footerW - 10.0f, fitted, sizeof(fitted));
-		DrawAnsiCenteredX(m_font, footerX, footerW, footerY + 4.0f, 0xFFCCCCCC, fitted);
-	}
-
-	// ---- status toast (also centered and fitted) ----
-	DWORD now = GetTickCount();
-	if (now < m_statusUntilMs && m_status[0]){
-		char fitted[256];
-		LeftEllipsizeToFit(m_font, m_status, footerW - 10.0f, fitted, sizeof(fitted));
-		DrawAnsiCenteredX(m_font, footerX, footerW, footerY + 25.0f, 0xFFBBDDEE, fitted);
-	}
-
+        // ---- status toast (also centered and fitted) ----
+        DWORD now = GetTickCount();
+        if (now < m_statusUntilMs && m_status[0]){
+            char fitted[256];
+            LeftEllipsizeToFit(m_font, m_status, footerW - 10.0f, fitted, sizeof(fitted));
+            DrawAnsiCenteredX(m_font, footerX, footerW, footerY + 25.0f, 0xFFBBDDEE, fitted);
+        }
+    }
 
     // ---- overlays ----
     DrawMenu();
@@ -1210,19 +1275,3 @@ HRESULT FileBrowserApp::Render(){
     m_pd3dDevice->Present(NULL,NULL,NULL,NULL);
     return S_OK;
 }
-
-// ---- static layout defaults (overwritten in Initialize) --------------------
-FLOAT FileBrowserApp::kListX_L    = 50.0f;
-FLOAT FileBrowserApp::kListY      = 100.0f;
-FLOAT FileBrowserApp::kListW      = 540.0f;
-FLOAT FileBrowserApp::kLineH      = 26.0f;
-
-FLOAT FileBrowserApp::kHdrX_L     = 35.0f;
-FLOAT FileBrowserApp::kHdrY       = 22.0f;
-FLOAT FileBrowserApp::kHdrW       = 570.0f;
-FLOAT FileBrowserApp::kHdrH       = 28.0f;
-
-FLOAT FileBrowserApp::kGutterW    = 18.0f;
-FLOAT FileBrowserApp::kPaddingX   = 6.0f;
-FLOAT FileBrowserApp::kScrollBarW = 3.0f;
-FLOAT FileBrowserApp::kPaneGap    = 60.0f;

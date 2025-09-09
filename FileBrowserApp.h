@@ -63,11 +63,8 @@ public:
     virtual HRESULT FrameMove();  // input + periodic drive rescan
     virtual HRESULT Render();     // draw panes, footer, overlays
 
-    // --- Static layout (set in Initialize; defaults in .cpp) ----------------
-    static FLOAT kListX_L, kListY, kListW, kLineH;
-    static FLOAT kHdrX_L,  kHdrY,  kHdrW,  kHdrH;
-    static FLOAT kGutterW, kPaddingX, kScrollBarW;
-    static FLOAT kPaneGap;
+    // Recompute responsive layout using the current D3D viewport.
+    void ComputeResponsiveLayout();
 
     // --- Progress HUD API ---------------------------------------------------
     // Show the progress overlay and initialize counters/labels.
@@ -176,6 +173,22 @@ private:
 	ULONGLONG m_dvdUsedBytes;   // no in-class init here
 	ULONGLONG m_dvdTotalBytes;  // "
 	bool      m_dvdHaveStats;
+
+    // -------------------------------------------------------------------------
+    // Responsive layout state (computed in ComputeResponsiveLayout()).
+    // These replace the old static k* constants so we can adapt to any
+    // viewport size/aspect without #defines or hardcoded coordinates.
+    // -------------------------------------------------------------------------
+    FLOAT kPaneGap;        // gap between the two panes
+    FLOAT kListX_L;        // left pane X
+    FLOAT kListW;          // pane width
+
+    FLOAT kHdrY,  kHdrH, kHdrW; // header band geometry per pane
+    FLOAT kListY, kLineH;       // list top and per-row height
+
+    FLOAT kGutterW;       // icon gutter width
+    FLOAT kPaddingX;      // left/right text padding inside pane
+    FLOAT kScrollBarW;    // scrollbar track width
 };
 
 #endif // FILEBROWSERAPP_H
