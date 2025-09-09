@@ -4,6 +4,7 @@
 	Version="7.10"
 	Name="Daemon-X"
 	ProjectGUID="{FACA2AC8-C180-47B6-8692-86E7C200A599}"
+	RootNamespace="Daemon-X"
 	Keyword="XboxProj">
 	<Platforms>
 		<Platform
@@ -211,7 +212,9 @@
 				Name="XboxImageTool"
 				StackSize="65536"
 				FormatUD="TRUE"
-				TitleID="0xDAE420"/>
+				TitleID="0xDAE420"
+				TitleName="Daemon-X"
+				TitleImage="$(ProjectDir)Daemon-X.xpr"/>
 		</Configuration>
 		<Configuration
 			Name="Release_LTCG|Xbox"
