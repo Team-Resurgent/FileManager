@@ -384,12 +384,16 @@ void PaneRenderer::DrawPane(
     DrawRect(dev, baseX,    colHdrY + colHdrH,  st.listW, 1.0f, 0x80444444);
     DrawRect(dev, sizeColX, colHdrY + 2.0f,     1.0f,     colHdrH - 4.0f, 0x40444444);
 
-    // ----- list background -----
-    const FLOAT listTop = colHdrY + colHdrH;
-    const FLOAT listH   = st.lineH * st.visibleRows;
-    DrawRect(dev, baseX, listTop, st.listW, listH, 0x30101010);
+    // ----- list background + nudge (push first row down slightly) ------------
+    const FLOAT listBgTop = colHdrY + colHdrH;
+    const FLOAT kFirstRowNudge = PaneRenderer::MaxF(2.0f, st.lineH * 0.30f); // ~3px at 480p, scales up
+    const FLOAT listTop   = Snap(listBgTop + kFirstRowNudge);                 // rows start here
+    const FLOAT listH     = st.lineH * st.visibleRows;
 
-    // alternating stripes
+    // Fill background including the small gap introduced by the nudge
+    DrawRect(dev, baseX, listBgTop, st.listW, kFirstRowNudge + listH, 0x30101010);
+
+    // alternating stripes (start at first row, not at underline)
     int end = p.scroll + st.visibleRows; if (end > (int)p.items.size()) end = (int)p.items.size();
     int rowIndex = 0;
     for (int i = p.scroll; i < end; ++i, ++rowIndex) {
@@ -454,7 +458,7 @@ void PaneRenderer::DrawPane(
     // ----- scrollbar -----
     if ((int)p.items.size() > st.visibleRows) {
         const FLOAT trackX = baseX + st.listW - st.scrollBarW;
-        const FLOAT trackY = listTop;
+        const FLOAT trackY = listTop;                 // align with first row after nudge
         const FLOAT trackH = st.visibleRows * st.lineH;
 
         DrawRect(dev, trackX, trackY, st.scrollBarW, trackH, 0x40282828);
@@ -467,3 +471,4 @@ void PaneRenderer::DrawPane(
         DrawRect(dev, trackX, thumbY, st.scrollBarW, thumbH, 0x80C0C0C0);
     }
 }
+

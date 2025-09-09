@@ -36,6 +36,107 @@ namespace {
         font.DrawText(x,y,color,wbuf,0,0.0f);
     }
 
+	// ---- character-step marquee (same tuning as panes/OSK) ---------------------
+static const DWORD kProgInitPauseMs = 900;
+static const DWORD kProgStepMs      = 150;
+static const DWORD kProgEndPauseMs  = 1200;
+static const int   kProgStepChars   = 1;
+
+struct ProgMarquee {
+    FLOAT px;         // start index (characters)
+    FLOAT fitWLock;   // lock width for stable end calc
+    DWORD nextTick;   // next update tick
+    DWORD resetPause; // nonzero while pausing at end
+    char  last[768];  // last string drawn (for reset-on-change)
+    ProgMarquee() : px(0.f), fitWLock(0.f), nextTick(0), resetPause(0) { last[0]=0; }
+};
+
+// Draw one line at (x,y) clipped to maxW using a character-step marquee.
+static void DrawLabelFittedOrMarquee(CXBFont& font,
+                                     FLOAT x, FLOAT y, FLOAT maxW,
+                                     DWORD color, const char* text,
+                                     ProgMarquee& M)
+{
+    if (!text) text = "";
+
+    // right guard + tolerance like OSK
+    const FLOAT kRightGuard = 1.5f;
+    const FLOAT kTol        = 2.0f;
+
+    const FLOAT fitW_now = (maxW > kRightGuard) ? (maxW - kRightGuard) : 0.0f;
+
+    // Measure full once
+    WCHAR wfull[768]; MultiByteToWideChar(CP_ACP, 0, text, -1, wfull, 768);
+    FLOAT fullW=0, fullH=0; font.GetTextExtent(wfull, &fullW, &fullH);
+
+    // If it fits, draw + reset
+    if (fullW <= fitW_now + kTol){
+        font.DrawText((FLOAT)((int)(x+0.5f)), (FLOAT)((int)(y+0.5f)), color, wfull, 0, 0.0f);
+        M = ProgMarquee();
+        return;
+    }
+
+    // Reset if label changed
+    if (_stricmp(M.last, text) != 0){
+        _snprintf(M.last, sizeof(M.last), "%s", text); M.last[sizeof(M.last)-1]=0;
+        M.px = 0.0f; M.fitWLock = 0.0f; M.resetPause = 0; M.nextTick = GetTickCount() + kProgInitPauseMs;
+    }
+
+    const DWORD now = GetTickCount();
+    if (M.fitWLock <= 0.0f) M.fitWLock = fitW_now;
+    const FLOAT fitW = (FLOAT)((int)(M.fitWLock + 0.5f));
+
+    const char* s = text; const int len = (int)strlen(s);
+
+    // earliest start where the whole tail fits
+    int lo = 0, hi = len;
+    while (lo < hi){
+        const int mid = (lo + hi) / 2;
+        WCHAR wtmp[768]; MultiByteToWideChar(CP_ACP, 0, s + mid, -1, wtmp, 768);
+        FLOAT tw=0, th=0; font.GetTextExtent(wtmp, &tw, &th);
+        if (tw <= fitW + kTol) hi = mid; else lo = mid + 1;
+    }
+    const int lastStart = (lo > len) ? len : lo;
+
+    int startIdx = (int)M.px;
+    if (startIdx < 0) startIdx = 0;
+    if (startIdx > lastStart) startIdx = lastStart;
+
+    // longest substring from start that fits
+    const char* startPtr = s + startIdx;
+    int lo2 = 0, hi2 = (int)strlen(startPtr);
+    while (lo2 < hi2){
+        const int mid = (lo2 + hi2 + 1) / 2;
+        char tmp[768]; _snprintf(tmp, sizeof(tmp), "%.*s", mid, startPtr);
+        WCHAR wtmp[768]; MultiByteToWideChar(CP_ACP, 0, tmp, -1, wtmp, 768);
+        FLOAT tw=0, th=0; font.GetTextExtent(wtmp, &tw, &th);
+        if (tw <= fitW + kTol) lo2 = mid; else hi2 = mid - 1;
+    }
+
+    char vis[768]; _snprintf(vis, sizeof(vis), "%.*s", lo2, startPtr); vis[sizeof(vis)-1]=0;
+    WCHAR wvis[768]; MultiByteToWideChar(CP_ACP, 0, vis, -1, wvis, 768);
+    font.DrawText((FLOAT)((int)(x+0.5f)), (FLOAT)((int)(y+0.5f)), color, wvis, 0, 0.0f);
+
+    // step/pause/reset
+    if (now >= M.nextTick){
+        if (M.resetPause){
+            M.px        = 0.0f;
+            M.resetPause= 0;
+            M.nextTick  = now + kProgInitPauseMs;
+        } else {
+            if (startIdx >= lastStart){
+                M.px        = (FLOAT)lastStart;
+                M.resetPause= now + kProgEndPauseMs;
+                M.nextTick  = M.resetPause;
+            } else {
+                M.px       = (FLOAT)(startIdx + kProgStepChars);
+                M.nextTick = now + kProgStepMs;
+            }
+        }
+    }
+}
+
+
     // Center a one-line ANSI string horizontally in a span.
     inline void DrawAnsiCenteredX(CXBFont& font, FLOAT left, FLOAT width, FLOAT y, DWORD color, const char* text){
         WCHAR wbuf[512];
@@ -120,6 +221,7 @@ namespace {
 		if (len >= cap) len = cap - 1;
 		if (cap) { memcpy(out, start, len); out[len] = 0; }
 	}
+
 
 } // anonymous namespace
 
@@ -1023,7 +1125,7 @@ void FileBrowserApp::DrawProgressOverlay(){
 
     D3DVIEWPORT8 vp; m_pd3dDevice->GetViewport(&vp);
 
-    // Ensure the filename line has room for about 42 glyphs at current font size.
+    // Ensure filename line has room for about 42 glyphs at current font size
     char fortyTwo[64]; for (int i=0;i<42;++i) fortyTwo[i]='W'; fortyTwo[42]=0;
     FLOAT fileW=0, fileH=0; MeasureTextWH(m_font, fortyTwo, fileW, fileH);
 
@@ -1031,14 +1133,14 @@ void FileBrowserApp::DrawProgressOverlay(){
     FLOAT w = MaxF(MaxF(420.0f, vp.Width * 0.50f), fileW + margin*2.0f);
     if (w > vp.Width - margin*2.0f) w = vp.Width - margin*2.0f;
 
-    const FLOAT h = 116.0f; // give bar and percent some room under text
+    const FLOAT h = 116.0f;
     const FLOAT x = Snap((vp.Width  - w)*0.5f);
     const FLOAT y = Snap((vp.Height - h)*0.5f);
 
     DrawRect(x-6, y-6, w+12, h+12, 0xA0101010);
     DrawRect(x,   y,   w,    h,    0xE0222222);
 
-    // layout lines within the panel
+    // layout lines
     const FLOAT titleY  = y + 10.0f;
     const FLOAT folderY = titleY + 24.0f;
     const FLOAT fileY   = folderY + 22.0f;
@@ -1047,96 +1149,43 @@ void FileBrowserApp::DrawProgressOverlay(){
     const FLOAT barX    = x + margin;
     const FLOAT barW    = w - margin*2.0f;
 
-    // title text
+    // title
     DrawAnsi(m_font, x + margin, titleY, 0xFFFFFFFF, m_prog.title[0] ? m_prog.title : "Working...");
 
-    // hotkey hint on the right
+    // hint (right)
     {
         const char* hint = "B: Cancel";
         FLOAT hw=0, hh=0; MeasureTextWH(m_font, hint, hw, hh);
         DrawAnsi(m_font, x + w - margin - hw, titleY, 0xFFCCCCCC, hint);
     }
 
-    // Split current label into folder and file components.
+    // Split current label into folder + file parts
     const char* label = m_prog.current;
     const char* slash = label ? strrchr(label, '\\') : NULL;
 
     char folder[512] = {0};
     char file  [256] = {0};
-
     if (slash){
-        size_t n = (size_t)(slash - label + 1); // include trailing '\'
+        size_t n = (size_t)(slash - label + 1);
         if (n >= sizeof(folder)) n = sizeof(folder)-1;
         memcpy(folder, label, n); folder[n] = 0;
         _snprintf(file, sizeof(file), "%s", slash + 1); file[sizeof(file)-1]=0;
     } else {
+        _snprintf(file, sizeof(file), "%s", label ? label : ""); file[sizeof(file)-1]=0;
         folder[0] = 0;
-        _snprintf(file, sizeof(file), "%s", label ? label : "");
-        file[sizeof(file)-1]=0;
     }
 
-    // Folder path marquee: scrolls long paths horizontally instead of cutting.
-    {
-        static char  s_lastFolder[512] = {0};
-        static DWORD s_nextTick = 0;
-        static FLOAT s_px = 0.0f;
-        static int   s_dir = +1; // +1 forward, -1 backward
+    // --- character-step marquees (like panes/OSK) ----------------------------
+    static ProgMarquee s_marqFolder;
+    static ProgMarquee s_marqFile;
 
-        // Measure the full folder width.
-        WCHAR wfull[512]; MbToW(folder, wfull, 512);
-        FLOAT fullW=0, fullH=0; m_font.GetTextExtent(wfull, &fullW, &fullH);
+    // If a new operation just started, clear state so we get the initial pause.
+    if (m_prog.done == 0) { s_marqFolder = ProgMarquee(); s_marqFile = ProgMarquee(); }
 
-        const FLOAT drawX = x + margin;
-        const DWORD now   = GetTickCount();
+    DrawLabelFittedOrMarquee(m_font, x + margin, folderY, barW, 0xFF5EA4FF, folder, s_marqFolder);
+    DrawLabelFittedOrMarquee(m_font, x + margin, fileY,   barW, 0xFF89D07E, file,   s_marqFile);
 
-        // Reset scroll when operation restarts or path changes.
-        if (m_prog.done == 0 || _stricmp(s_lastFolder, folder) != 0){
-            _snprintf(s_lastFolder, sizeof(s_lastFolder), "%s", folder);
-            s_px      = 0.0f;
-            s_dir     = +1;
-            s_nextTick= now + 600; // initial pause
-        }
-
-        if (fullW <= barW){
-            // Fits: draw as-is
-            DrawAnsi(m_font, drawX, folderY, 0xFF5EA4FF, folder);
-        }else{
-            // Scroll back and forth with pauses at both ends.
-            const DWORD kStepMs     = 25;
-            const FLOAT kStepPx     = 2.0f;
-            const DWORD kInitPause  = 600;
-            const DWORD kEndPause   = 800;
-            const FLOAT maxScroll   = fullW - barW;
-
-            if (now >= s_nextTick){
-                s_px += (s_dir > 0 ? kStepPx : -kStepPx);
-                if (s_px <= 0.0f){ s_px = 0.0f; s_dir = +1; s_nextTick = now + kInitPause; }
-                else if (s_px >= maxScroll){ s_px = maxScroll; s_dir = -1; s_nextTick = now + kEndPause; }
-                else { s_nextTick = now + kStepMs; }
-            }
-
-            // Build visible substring at the current scroll offset.
-            FLOAT skipped=0.0f;
-            const char* start = SkipToPixelOffset(m_font, folder, s_px, skipped);
-
-            char vis[512]; vis[0]=0; int n=0;
-            WCHAR wtmp[512]; FLOAT tw=0, th=0;
-            const char* p = start;
-            while (*p && n < (int)sizeof(vis)-2){
-                vis[n++] = *p; vis[n] = 0;
-                MbToW(vis, wtmp, 512); m_font.GetTextExtent(wtmp, &tw, &th);
-                if (tw > barW){ vis[--n] = 0; break; }
-                ++p;
-            }
-
-            DrawAnsi(m_font, drawX, folderY, 0xFF5EA4FF, vis);
-        }
-    }
-
-    // Filename (kept as-is; width budget handled by panel size above).
-    DrawAnsi(m_font, x + margin, fileY, 0xFF89D07E, file);
-
-    // Progress percentage (0..100) and fill bar.
+    // progress percent and bar
     FLOAT pct = 0.0f;
     if (m_prog.total > 0){
         pct = (FLOAT)((double)m_prog.done / (double)m_prog.total);
@@ -1146,13 +1195,13 @@ void FileBrowserApp::DrawProgressOverlay(){
     DrawRect(barX, barY, barW,       barH, 0xFF0E0E0E);
     DrawRect(barX, barY, barW * pct, barH, 0x90FFFF00);
 
-    // Right-aligned % label centered on the bar vertically.
     char t[32]; _snprintf(t, sizeof(t), "%u%%", (unsigned int)(pct*100.0f + 0.5f)); t[sizeof(t)-1]=0;
     FLOAT tw=0, th=0; MeasureTextWH(m_font, t, tw, th);
     const FLOAT tx = Snap(barX + barW - tw);
     const FLOAT ty = Snap(barY + (barH - th) * 0.5f);
     DrawAnsi(m_font, tx, ty, 0xFFEEEEEE, t);
 }
+
 
 // ----- main render ----------------------------------------------------------
 // Draw both panes, footer and hints, transient status, and any overlays.

@@ -18,48 +18,26 @@
 // ---------- local draw/measure helpers for the header path (marquee) ----------
 static inline FLOAT KB_Snap(FLOAT v){ return (FLOAT)((int)(v + 0.5f)); }
 
-static void KB_MbToW(const char* s, WCHAR* w, int capW){
-    MultiByteToWideChar(CP_ACP, 0, s ? s : "", -1, w, capW);
-}
-static void KB_MeasureWH(CXBFont& font, const char* s, FLOAT& W, FLOAT& H){
-    WCHAR wbuf[512]; KB_MbToW(s, wbuf, 512); font.GetTextExtent(wbuf, &W, &H);
-}
-static FLOAT KB_MeasureCharW(CXBFont& font, char ch){
-    WCHAR w[2] = { (WCHAR)(unsigned char)ch, 0 };
-    FLOAT wpx=0, hpx=0; font.GetTextExtent(w, &wpx, &hpx);
-    if (wpx <= 0.0f){ WCHAR sp[2] = { L' ', 0 }; font.GetTextExtent(sp, &wpx, &hpx); if (wpx<=0.0f) wpx=8.0f; }
-    return wpx;
-}
-// Walk forward until pixel offset 'px' is reached; returns pointer into s and total skipped width
-static const char* KB_SkipToPixelOffset(CXBFont& font, const char* s, FLOAT px, FLOAT& skippedW){
-    skippedW = 0.0f; if (!s || px <= 0) return s ? s : "";
-    const char* p = s; WCHAR wtmp[256]; FLOAT tw=0, th=0;
-    while (*p){
-        int len = (int)(p - s + 1); if (len > 255) len = 255;
-        char tmp[256]; _snprintf(tmp, sizeof(tmp), "%.*s", len, s);
-        KB_MbToW(tmp, wtmp, 256); font.GetTextExtent(wtmp, &tw, &th);
-        if (tw >= px) break; ++p;
-    }
-    skippedW = tw; return p;
-}
 
 // ------------------ Marquee for the path area ------------------
 struct KB_Marquee {
-    FLOAT px;         // current scroll offset in pixels
+    FLOAT px;         // current start index (in CHARACTERS, not pixels)
+    FLOAT fitWLock;   // lock of visible width for stable end calc
     DWORD nextTick;   // next update time
     DWORD resetPause; // nonzero while pausing at end
-    char  last[512];  // last path used (to reset when it changes)
-    KB_Marquee() : px(0.0f), nextTick(0), resetPause(0) { last[0] = 0; }
+    char  last[512];  // last path used (for reset-on-change)
+    KB_Marquee() : px(0.0f), fitWLock(0.0f), nextTick(0), resetPause(0) { last[0] = 0; }
 };
 static KB_Marquee g_kbMarq;
 
 
+
 // Draw the header path centered vertically in a band [x,y,w,h].
-// If too long, marquee scrolls to (fullW - maxW) + width(one extra char) before restart.
-// Draw: fixed "In:" label + scrolling path inside the remaining area.
-// VC7.1-friendly (no lambdas/auto). Mirrors PaneRenderer’s marquee (+1 glyph overshoot).
-static void KB_DrawHeaderPath_FixedLabel(CXBFont& font, FLOAT x, FLOAT y, FLOAT w, FLOAT h,
-                                         DWORD color, const char* parentPath)
+// Fixed "In:" label + path. When the path is too long: character-step marquee
+// with initial/end pauses (mirrors PaneRenderer).
+static void KB_DrawHeaderPath_FixedLabel(
+    CXBFont& font, FLOAT x, FLOAT y, FLOAT w, FLOAT h,
+    DWORD color, const char* parentPath)
 {
     if (!parentPath) parentPath = "";
 
@@ -67,11 +45,16 @@ static void KB_DrawHeaderPath_FixedLabel(CXBFont& font, FLOAT x, FLOAT y, FLOAT 
     const FLOAT leftPad     = 6.0f;
     const FLOAT rightPad    = 6.0f;
     const FLOAT gapPx       = 4.0f;     // space between "In:" and the path
-    const FLOAT kTol        = 2.0f;     // small safety tolerance (same as panes)
-    const FLOAT kBiasDown   = 1.0f;     // tiny downward bias (like panes)
-    const FLOAT kRightGuard = 1.5f;     // shrink fit width a hair to avoid clipping
+    const FLOAT kTol        = 2.0f;     // measurement slack
+    const FLOAT kBiasDown   = 1.0f;     // tiny downward bias
+    const FLOAT kRightGuard = 1.5f;     // leave a hair on the right
 
-    // Full band where we draw label + path
+    const DWORD kInitPauseMs = 900;
+    const DWORD kStepMs      = 150;
+    const DWORD kEndPauseMs  = 1200;
+    const int   kStepChars   = 1;
+
+    // Full band for label + path
     const FLOAT bandX = x + leftPad;
     const FLOAT bandW = (w > leftPad + rightPad) ? (w - leftPad - rightPad) : 0.0f;
     if (bandW <= 0.0f) return;
@@ -91,87 +74,85 @@ static void KB_DrawHeaderPath_FixedLabel(CXBFont& font, FLOAT x, FLOAT y, FLOAT 
     FLOAT       pathW = bandW - inW - gapPx;
     if (pathW <= 0.0f) return;
 
-    // Tiny right guard to prevent the last glyph from kissing the edge
-    const FLOAT fitW = (pathW > kRightGuard) ? (pathW - kRightGuard) : 0.0f;
+    const FLOAT fitW_now = (pathW > kRightGuard) ? (pathW - kRightGuard) : 0.0f;
 
-    // Measure full path
+    // Measure full path once
     WCHAR wPath[1024];
     MultiByteToWideChar(CP_ACP, 0, parentPath, -1, wPath, 1024);
     FLOAT fullW=0, fullH=0; font.GetTextExtent(wPath, &fullW, &fullH);
-
     const FLOAT ty = KB_Snap(y + (h - fullH) * 0.5f + kBiasDown);
 
-    // If it fits (or nearly fits), draw and reset marquee
-    if (fullW <= fitW + kTol){
+    // If it fits (or nearly fits), draw and reset
+    if (fullW <= fitW_now + kTol){
         font.DrawText(KB_Snap(pathX), ty, color, wPath, 0, 0.0f);
-        g_kbMarq.px = 0.0f; g_kbMarq.nextTick = 0; g_kbMarq.resetPause = 0;
+        g_kbMarq = KB_Marquee(); // zero it
         return;
     }
 
     // Reset marquee when text changes
-    static char s_prevPath[1024] = {0};
-    if (_stricmp(s_prevPath, parentPath) != 0){
-        _snprintf(s_prevPath, sizeof(s_prevPath), "%s", parentPath);
-        s_prevPath[sizeof(s_prevPath)-1] = 0;
-        g_kbMarq.px = 0.0f; g_kbMarq.resetPause = 0; g_kbMarq.nextTick = GetTickCount() + 600;
+    if (_stricmp(g_kbMarq.last, parentPath) != 0){
+        _snprintf(g_kbMarq.last, sizeof(g_kbMarq.last), "%s", parentPath);
+        g_kbMarq.last[sizeof(g_kbMarq.last)-1] = 0;
+        g_kbMarq.px = 0.0f; g_kbMarq.fitWLock = 0.0f; g_kbMarq.resetPause = 0; g_kbMarq.nextTick = GetTickCount() + kInitPauseMs;
     }
 
-    // --- marquee timing (mirrors pane header) ---
-    const DWORD now        = GetTickCount();
-    const DWORD kInitPause = 600;
-    const DWORD kStepMs    = 25;
-    const DWORD kEndPause  = 800;
-    const FLOAT kStepPx    = 2.0f;
+    const DWORD now = GetTickCount();
+    if (g_kbMarq.fitWLock <= 0.0f) g_kbMarq.fitWLock = fitW_now;
+    const FLOAT fitW = (FLOAT)((int)(g_kbMarq.fitWLock + 0.5f)); // snap compare width
 
-    // Overshoot by one glyph width (space) + 1px (like pane code)
-    FLOAT spaceW=0, sh=0;
-    {
-        WCHAR gw[2] = { L' ', 0 };
-        font.GetTextExtent(gw, &spaceW, &sh);
-        if (spaceW <= 0.0f) spaceW = 8.0f;
+    const char* s   = parentPath;
+    const int   len = (int)strlen(s);
+
+    // Find earliest start index where the whole tail fits (binary search)
+    int lo = 0, hi = len;
+    while (lo < hi){
+        const int mid = (lo + hi) / 2;
+        WCHAR wtmp[1024]; MultiByteToWideChar(CP_ACP, 0, s + mid, -1, wtmp, 1024);
+        FLOAT tw=0, th=0; font.GetTextExtent(wtmp, &tw, &th);
+        if (tw <= fitW + kTol) hi = mid; else lo = mid + 1;
     }
-    const FLOAT extraPx   = spaceW + 1.0f;
-    const FLOAT maxScroll = (fullW > fitW) ? ((fullW - fitW) + extraPx) : 0.0f;
+    const int lastStart = (lo > len) ? len : lo;
 
-    if (g_kbMarq.nextTick == 0){
-        g_kbMarq.px = 0.0f; g_kbMarq.resetPause = 0; g_kbMarq.nextTick = now + kInitPause;
-    } else if (now >= g_kbMarq.nextTick){
+    // Current start index (stored as float)
+    int startIdx = (int)g_kbMarq.px;
+    if (startIdx < 0) startIdx = 0;
+    if (startIdx > lastStart) startIdx = lastStart;
+
+    // Longest substring from s+startIdx that fits (binary search)
+    const char* startPtr = s + startIdx;
+    const int remaining  = len - startIdx;
+    int lo2 = 0, hi2 = remaining;
+    while (lo2 < hi2){
+        const int mid = (lo2 + hi2 + 1) / 2;
+        char tmp[1024]; _snprintf(tmp, sizeof(tmp), "%.*s", mid, startPtr);
+        WCHAR wtmp[1024]; MultiByteToWideChar(CP_ACP, 0, tmp, -1, wtmp, 1024);
+        FLOAT tw=0, th=0; font.GetTextExtent(wtmp, &tw, &th);
+        if (tw <= fitW + kTol) lo2 = mid; else hi2 = mid - 1;
+    }
+
+    // Draw visible slice
+    char vis[1024]; _snprintf(vis, sizeof(vis), "%.*s", lo2, startPtr); vis[sizeof(vis)-1]=0;
+    WCHAR wvis[1024]; MultiByteToWideChar(CP_ACP, 0, vis, -1, wvis, 1024);
+    font.DrawText(KB_Snap(pathX), ty, color, wvis, 0, 0.0f);
+
+    // Step/pause/reset (exactly like PaneRenderer)
+    if (now >= g_kbMarq.nextTick){
         if (g_kbMarq.resetPause){
-            g_kbMarq.px = 0.0f; g_kbMarq.resetPause = 0; g_kbMarq.nextTick = now + kInitPause;
+            g_kbMarq.px        = 0.0f;
+            g_kbMarq.resetPause= 0;
+            g_kbMarq.nextTick  = now + kInitPauseMs;
         } else {
-            g_kbMarq.px += kStepPx;
-            if (g_kbMarq.px >= maxScroll){
-                g_kbMarq.px = maxScroll;
-                g_kbMarq.resetPause = now + kEndPause;
-                g_kbMarq.nextTick   = g_kbMarq.resetPause;
+            if (startIdx >= lastStart){
+                g_kbMarq.px        = (FLOAT)lastStart;
+                g_kbMarq.resetPause= now + kEndPauseMs;
+                g_kbMarq.nextTick  = g_kbMarq.resetPause;
             } else {
+                g_kbMarq.px       = (FLOAT)(startIdx + kStepChars);
                 g_kbMarq.nextTick = now + kStepMs;
             }
         }
     }
-
-    // Slice start at current pixel offset (use your existing KB_SkipToPixelOffset)
-    FLOAT skipped = 0.0f;
-    const char* start = KB_SkipToPixelOffset(font, parentPath, g_kbMarq.px, skipped);
-
-    // Binary-search longest prefix from 'start' that fits (same as panes)
-    const int remaining = (int)strlen(start);
-    int lo = 0, hi = remaining;
-    WCHAR wtmp[1024]; FLOAT tw=0, th=0;
-    while (lo < hi){
-        const int mid = (lo + hi + 1) / 2;
-        char tmp[1024]; _snprintf(tmp, sizeof(tmp), "%.*s", mid, start);
-        MultiByteToWideChar(CP_ACP, 0, tmp, -1, wtmp, 1024);
-        font.GetTextExtent(wtmp, &tw, &th);
-        if (tw <= fitW + kTol) lo = mid; else hi = mid - 1;
-    }
-
-    char vis[1024]; _snprintf(vis, sizeof(vis), "%.*s", lo, start); vis[sizeof(vis)-1]=0;
-    MultiByteToWideChar(CP_ACP, 0, vis, -1, wtmp, 1024);
-    font.DrawText(KB_Snap(pathX), ty, color, wtmp, 0, 0.0f);
 }
-
-
 
 
 // ------------------ Local keyboard layouts ------------------
@@ -410,26 +391,45 @@ FLOAT OnScreenKeyboard::MeasureTextW(CXBFont& font, const char* s){
 void OnScreenKeyboard::Draw(CXBFont& font, LPDIRECT3DDEVICE8 dev, FLOAT lineH){
     if (!m_active) return;
 
-    D3DVIEWPORT8 vp; dev->GetViewport(&vp);
+    D3DVIEWPORT8 vp; 
+    dev->GetViewport(&vp);
 
-    // Panel geometry (scales with viewport; keeps minimum sizes).
-    const FLOAT panelW = MaxF(520.0f, vp.Width * 0.55f);
-    const FLOAT panelH = MaxF(320.0f, vp.Height*0.52f); // a bit taller to fit 5 rows
-    const FLOAT x = Snap((vp.Width  - panelW)*0.55f);
-    const FLOAT y = Snap((vp.Height - panelH)*0.5f);
+    // --- layout constants used for both sizing and drawing ---
+    const FLOAT headerH       = 32.0f;      // title band
+    const FLOAT afterLinePad  = 10.0f;      // gap under divider
+    const FLOAT labelToBoxPad = 12.0f;      // gap to input box
+    const FLOAT boxH          = 30.0f;      // input box height
+    const FLOAT gridTopGap    = 16.0f;      // gap before key grid
+    const FLOAT gapY          = 4.0f;       // vertical gap between rows
+    const FLOAT gapX          = 6.0f;       // horizontal gap between keys
+    const FLOAT infoBandH     = (lineH > 22.0f ? lineH : 22.0f);
+    const FLOAT cellH         = lineH + 6.0f;   // key cell height
+    const FLOAT footerH       = 26.0f;          // room for footer hints
+
+    const int   charRows      = m_symbols ? 5 : 4;
+
+    // --- panel geometry (auto-height; grow to fit content, then clamp) ---
+    const FLOAT panelW = MaxF(520.0f, vp.Width  * 0.55f);
+
+    const FLOAT contentNeededH =
+        headerH + 1.0f /*divider*/ + afterLinePad + infoBandH + labelToBoxPad + boxH +
+        gridTopGap + (charRows * (cellH + gapY)) + cellH /*bottom row*/ + footerH;
+
+    FLOAT panelH = MaxF(320.0f, vp.Height * 0.52f);
+    if (panelH < contentNeededH) panelH = contentNeededH;
+    const FLOAT maxH = vp.Height - 20.0f; // breathing room so frame fits
+    if (panelH > maxH) panelH = maxH;
+
+    const FLOAT x = KB_Snap((vp.Width  - panelW) * 0.55f);
+    const FLOAT y = KB_Snap((vp.Height - panelH) * 0.5f);
 
     // frame
     DrawRect(dev, x-8, y-8, panelW+16, panelH+16, 0xA0101010);
-    DrawRect(dev, x, y, panelW, panelH, 0xE0222222);
+    DrawRect(dev, x,   y,   panelW,    panelH,    0xE0222222);
 
-    // --- header layout ---
-    const FLOAT headerH       = 32.0f;  // title band height
-    const FLOAT afterLinePad  = 10.0f;  // gap under divider
-    const FLOAT labelToBoxPad = 12.0f;  // gap between label and input box
-
-    // Title (left) + length indicator (right). Length goes amber/red near limit.
+    // --- header ---
     FLOAT titleW, titleH; MeasureTextWH(font, "Rename", titleW, titleH);
-    const FLOAT titleY = Snap(y + (headerH - titleH) * 0.5f);
+    const FLOAT titleY = KB_Snap(y + (headerH - titleH) * 0.5f);
     DrawAnsi(font, x + 12, titleY, 0xFFFFFFFF, "Rename");
 
     {
@@ -443,21 +443,20 @@ void OnScreenKeyboard::Draw(CXBFont& font, LPDIRECT3DDEVICE8 dev, FLOAT lineH){
         else if (len >= kFatxMaxName-4) cntCol = 0xFFEED060;
 
         FLOAT cntW = MeasureTextW(font, cnt);
-        DrawAnsi(font, Snap(x + panelW - 12.0f - cntW), titleY, cntCol, cnt);
+        DrawAnsi(font, KB_Snap(x + panelW - 12.0f - cntW), titleY, cntCol, cnt);
     }
 
     // Divider under header
     DrawRect(dev, x, y + headerH, panelW, 1.0f, 0x60FFFFFF);
 
     // ----- Path band ("In: <parent>") with safe-fit + end-stop marquee -----
-    const FLOAT infoY      = Snap(y + headerH + afterLinePad);
-    const FLOAT infoBandH  = (lineH > 22.0f ? lineH : 22.0f);     // stable band height
+    const FLOAT infoY      = KB_Snap(y + headerH + afterLinePad);
     const FLOAT infoBandW  = panelW - 24.0f;                      // x+12 .. x+panelW-12
-    KB_DrawHeaderPath_FixedLabel(font, x + 12.0f, infoY, infoBandW, infoBandH, 0xFFCCCCCC, m_parent);
+    KB_DrawHeaderPath_FixedLabel(font, x + 12.0f, infoY, infoBandW, infoBandH,
+                                 0xFFCCCCCC, m_parent);
 
     // Input box
-    const FLOAT boxY = Snap(infoY + infoBandH + labelToBoxPad);
-    const FLOAT boxH = 30.0f;
+    const FLOAT boxY = KB_Snap(infoY + infoBandH + labelToBoxPad);
     DrawRect(dev, x+12, boxY, panelW-24, boxH, 0xFF0E0E0E);
 
     // Current name text
@@ -465,17 +464,14 @@ void OnScreenKeyboard::Draw(CXBFont& font, LPDIRECT3DDEVICE8 dev, FLOAT lineH){
 
     // Caret at current insertion point
     char tmp = m_buf[m_cursor]; m_buf[m_cursor]=0;
-    FLOAT caretX = Snap(x+18 + MeasureTextW(font, m_buf));
+    FLOAT caretX = KB_Snap(x+18 + MeasureTextW(font, m_buf));
     m_buf[m_cursor]=tmp;
     DrawRect(dev, caretX, boxY+4, 2.0f, boxH-8.0f, 0x90FFFF00);
 
     // Grid layout (side column + key grid)
     const FLOAT padX     = 12.0f;
     const FLOAT contentW = panelW - 2.0f*padX;
-    const FLOAT cellH    = lineH + 6.0f;
-    const FLOAT gridTop  = Snap(boxY + boxH + 16.0f);
-    const FLOAT gapX     = 6.0f;
-    const FLOAT gapY     = 4.0f;
+    const FLOAT gridTop  = KB_Snap(boxY + boxH + gridTopGap);
 
     // Side column width uses ~2 of 12 columns
     const FLOAT colW12_full = contentW / 12.0f;
@@ -492,9 +488,8 @@ void OnScreenKeyboard::Draw(CXBFont& font, LPDIRECT3DDEVICE8 dev, FLOAT lineH){
     for (int r=0;r<4;++r){
         const FLOAT sx = x + padX;
         const FLOAT sw = sideW;
-        const FLOAT sy = Snap(gridTop + r*(cellH + gapY));
+        const FLOAT sy = KB_Snap(gridTop + r*(cellH + gapY));
 
-        // In Symbols layout, Shift/Caps are disabled
         const bool disabled = (m_symbols && (r == 1 || r == 2));
         const bool sel      = (!disabled && m_sideFocus && m_sideRow == r);
 
@@ -502,8 +497,8 @@ void OnScreenKeyboard::Draw(CXBFont& font, LPDIRECT3DDEVICE8 dev, FLOAT lineH){
         DrawRect(dev, sx, sy, sw, cellH, bg);
 
         FLOAT tw, th; MeasureTextWH(font, sideLbl[r], tw, th);
-        const FLOAT tx = Snap(sx + (sw - tw) * 0.5f);
-        const FLOAT ty = Snap(sy + (cellH - th) * 0.5f);
+        const FLOAT tx = KB_Snap(sx + (sw - tw) * 0.5f);
+        const FLOAT ty = KB_Snap(sy + (cellH - th) * 0.5f);
 
         DWORD textCol = disabled ? 0xFF7A7A7A : 0xFFE0E0E0;
         DrawAnsi(font, tx, ty, textCol, sideLbl[r]);
@@ -514,14 +509,10 @@ void OnScreenKeyboard::Draw(CXBFont& font, LPDIRECT3DDEVICE8 dev, FLOAT lineH){
 
     char symRows[5][16];
     int  symCols[5];
-    if (m_symbols) {
-        BuildSymbolRowsNormalized(symRows, symCols);
-    }
-
-    const int charRows = m_symbols ? 5 : 4;
+    if (m_symbols) BuildSymbolRowsNormalized(symRows, symCols);
 
     for (int row = 0; row < charRows; ++row) {
-        const FLOAT rowY = Snap(gridTop + row * (cellH + gapY));
+        const FLOAT rowY = KB_Snap(gridTop + row * (cellH + gapY));
 
         const char* visChars;
         int cols;
@@ -543,8 +534,8 @@ void OnScreenKeyboard::Draw(CXBFont& font, LPDIRECT3DDEVICE8 dev, FLOAT lineH){
         const FLOAT colW = (cols > 0) ? (keysW / (FLOAT)cols) : keysW;
 
         for (int col = 0; col < cols; ++col) {
-            const FLOAT x0 = Snap(keysX + col * colW);
-            const FLOAT x1 = Snap(keysX + (col + 1) * colW);
+            const FLOAT x0 = KB_Snap(keysX + col * colW);
+            const FLOAT x1 = KB_Snap(keysX + (col + 1) * colW);
             const FLOAT drawX = x0 + gapX * 0.5f;
             const FLOAT drawW = (x1 - x0) - gapX;
             const bool  sel   = (!m_sideFocus && m_row == row && m_col == col);
@@ -561,36 +552,54 @@ void OnScreenKeyboard::Draw(CXBFont& font, LPDIRECT3DDEVICE8 dev, FLOAT lineH){
 
             char s[2] = { c, 0 };
             FLOAT tw, th; MeasureTextWH(font, s, tw, th);
-            DrawAnsi(font, Snap(drawX + (drawW - tw) * 0.5f),
-                           Snap(rowY  + (cellH - th) * 0.5f), 0xFFE0E0E0, s);
+            DrawAnsi(font, KB_Snap(drawX + (drawW - tw) * 0.5f),
+                           KB_Snap(rowY  + (cellH - th) * 0.5f), 0xFFE0E0E0, s);
         }
     }
 
-    // ---- bottom row: Backspace | Space ----
-    const FLOAT bottomY = Snap(gridTop + charRows*(cellH + gapY));
-    {
-        const FLOAT bw = keysW * 0.33f;
-        const FLOAT bx = keysX;
-        const bool sel = (!m_sideFocus && m_row==(charRows) && m_col==0);
-        DrawRect(dev, bx, bottomY, bw, cellH, sel ? 0x60FFFF00 : 0x30202020);
+    // ---- bottom row: Backspace | Space (use same grid math as other rows) ----
+	const FLOAT bottomY = KB_Snap(gridTop + charRows * (cellH + gapY));
+	{
+		const int   colsB  = 2;
+		const FLOAT colWB  = keysW / (FLOAT)colsB;
 
-        FLOAT tw, th; MeasureTextWH(font, "Backspace", tw, th);
-        DrawAnsi(font, Snap(bx + (bw - tw) * 0.5f), Snap(bottomY + (cellH - th) * 0.5f), 0xFFE0E0E0, "Backspace (X)");
-    }
-    {
-        const FLOAT sw = keysW * 0.64f;
-        const FLOAT sx2 = keysX + keysW - sw;
-        const bool sel = (!m_sideFocus && m_row==(charRows) && m_col==1);
-        DrawRect(dev, sx2, bottomY, sw, cellH, sel ? 0x60FFFF00 : 0x30202020);
+		// snapped cell edges (exactly like x0/x1 in normal rows)
+		const FLOAT e0 = KB_Snap(keysX + 0 * colWB);
+		const FLOAT e1 = KB_Snap(keysX + 1 * colWB);
+		const FLOAT e2 = KB_Snap(keysX + 2 * colWB);
 
-        FLOAT tw, th; MeasureTextWH(font, "Space", tw, th);
-        DrawAnsi(font, Snap(sx2 + (sw - tw) * 0.5f), Snap(bottomY + (cellH - th) * 0.5f), 0xFFE0E0E0, "Space (Y)");
-    }
+		// Backspace cell
+		const FLOAT bx = e0 + gapX * 0.5f;
+		const FLOAT bw = (e1 - e0) - gapX;
+		const bool  selBack = (!m_sideFocus && m_row == charRows && m_col == 0);
+		DrawRect(dev, bx, bottomY, bw, cellH, selBack ? 0x60FFFF00 : 0x30202020);
+
+		FLOAT tw, th; MeasureTextWH(font, "Backspace", tw, th);
+		DrawAnsi(font,
+				KB_Snap(bx + (bw - tw) * 0.5f),
+				KB_Snap(bottomY + (cellH - th) * 0.5f),
+				0xFFE0E0E0, "Backspace (X)");
+
+		// Space cell
+		const FLOAT sx = e1 + gapX * 0.5f;
+		const FLOAT sw = (e2 - e1) - gapX;
+		const bool  selSpace = (!m_sideFocus && m_row == charRows && m_col == 1);
+		DrawRect(dev, sx, bottomY, sw, cellH, selSpace ? 0x60FFFF00 : 0x30202020);
+
+		MeasureTextWH(font, "Space", tw, th);
+		DrawAnsi(font,
+				KB_Snap(sx + (sw - tw) * 0.5f),
+				KB_Snap(bottomY + (cellH - th) * 0.5f),
+				0xFFE0E0E0, "Space (Y)");
+	}
+
+
+
 
     // Footer hints (centered)
     const char* hints = "A: Select   B: Cancel   Start: Done   LT/RT Move Cursor";
     FLOAT hintsW = MeasureTextW(font, hints);
-    FLOAT hintsX = Snap(x + (panelW - hintsW) * 0.5f);
+    FLOAT hintsX = KB_Snap(x + (panelW - hintsW) * 0.5f);
     DrawAnsi(font, hintsX, y + panelH - 25, 0xFFBBBBBB, hints);
 }
 
