@@ -34,7 +34,14 @@ namespace {
         WCHAR wbuf[512];
         MultiByteToWideChar(CP_ACP,0,text,-1,wbuf,512);
         font.DrawText(x,y,color,wbuf,0,0.0f);
-    }
+	}
+
+
+	// Footer geometry used everywhere
+	inline FLOAT FooterBandPx(FLOAT screenH)   { return MaxF(48.0f, screenH * 0.09f); }
+	// Always keep a little gap above the footer so rows don't "kiss" it.
+	inline FLOAT FooterSpacerPx(FLOAT screenH) { return MaxF(6.0f,  screenH * 0.012f); }
+		
 
 	// ---- character-step marquee (same tuning as panes/OSK) ---------------------
 static const DWORD kProgInitPauseMs = 900;
@@ -236,44 +243,49 @@ void FileBrowserApp::ComputeResponsiveLayout()
 {
     D3DVIEWPORT8 vp; m_pd3dDevice->GetViewport(&vp);
 
-    // Outer margins + gap scale with resolution (but have sensible floors)
-    const FLOAT margin = MaxF(24.0f,  vp.Width  * 0.04f);   // screen edge padding
-    const FLOAT gap    = MaxF(24.0f,  vp.Width  * 0.035f);  // space between panes
-
-    // Two equal panes + one gap + two margins must fit the screen width
+    // ---- outer geometry ----
+    const FLOAT margin = MaxF(24.0f,  vp.Width  * 0.04f);
+    const FLOAT gap    = MaxF(24.0f,  vp.Width  * 0.035f);
     const FLOAT paneW  = MaxF(260.0f, (vp.Width - (margin * 2.0f) - gap) * 0.5f);
 
-    // Positions
     kPaneGap  = gap;
-    kListX_L  = margin;                 // left pane X
-    kListW    = paneW;                  // width for both panes
+    kListX_L  = margin;
+    kListW    = paneW;
 
-    // Header fully matches each pane's width and sits above the list
-    kHdrW     = kListW;                 // <— header exactly equals pane
+    // header band
+    kHdrW     = kListW;
     kHdrY     = MaxF(12.0f, vp.Height * 0.03f);
     kHdrH     = MaxF(22.0f, vp.Height * 0.04f);
 
-    // List top is below the header band
-    const FLOAT headerGap = MaxF(6.0f, kHdrH * 0.35f);
-    kListY    = kHdrY + kHdrH + headerGap;
-
-    // Row height scales with resolution
+    // row height
     kLineH    = MaxF(22.0f, vp.Height * 0.036f);
 
-    // Fixed micro-metrics (feel free to tweak)
+    // keep kListY as the "pane body top" (what the rest of the code expects)
+    const FLOAT headerGap = MaxF(6.0f, kHdrH * 0.35f);
+    kListY = kHdrY + kHdrH + headerGap;
+
+    // ---- visible rows (match PaneRenderer::DrawPane vertical math) ----
+    // DrawPane uses: listTop = (kListY) + colHdrH
+    const FLOAT colHdrH = MaxF(22.0f, kLineH);
+    const FLOAT listTopInRenderer = kListY + colHdrH;
+
+    // leave room for the footer band + a small spacer at every resolution
+    const FLOAT footerBand   = MaxF(48.0f, vp.Height * 0.09f);
+    const FLOAT footerSpacer = MaxF(6.0f,  vp.Height * 0.012f);
+    const FLOAT bottomY      = (FLOAT)vp.Height - footerBand - footerSpacer;
+
+    FLOAT usableH = bottomY - listTopInRenderer;
+    if (usableH < 0) usableH = 0;
+
+    m_visible = (int)(usableH / kLineH);
+    if (m_visible < 6)  m_visible = 6;
+    if (m_visible > 30) m_visible = 30;
+
+    // fixed micro-metrics
     kGutterW    = 18.0f;
     kPaddingX   = 6.0f;
     kScrollBarW = 3.0f;
-
-    // Visible rows (leave room for footer)
-    const FLOAT footerBand = MaxF(48.0f, vp.Height * 0.09f);
-    const FLOAT bottomY    = (FLOAT)vp.Height - footerBand;
-    FLOAT usableH          = bottomY - kListY; if (usableH < 0) usableH = 0;
-    m_visible              = (int)(usableH / kLineH);
-    if (m_visible < 6)  m_visible = 6;
-    if (m_visible > 30) m_visible = 30;
 }
-
 
 
 // ----------------------------------------------------------------------------
@@ -1202,7 +1214,6 @@ void FileBrowserApp::DrawProgressOverlay(){
     DrawAnsi(m_font, tx, ty, 0xFFEEEEEE, t);
 }
 
-
 // ----- main render ----------------------------------------------------------
 // Draw both panes, footer and hints, transient status, and any overlays.
 HRESULT FileBrowserApp::Render(){
@@ -1247,10 +1258,11 @@ HRESULT FileBrowserApp::Render(){
     D3DVIEWPORT8 vp2; m_pd3dDevice->GetViewport(&vp2);
 
     // Footer matches the combined pane area (two panes + gap), centered.
-    const FLOAT footerMargin = MaxF(10.0f, vp2.Width * 0.01f);
-    const FLOAT footerW      = MinF(kHdrW * 2.0f + kPaneGap, (FLOAT)vp2.Width - footerMargin * 2.0f);
-    const FLOAT footerX      = floorf(((FLOAT)vp2.Width - footerW) * 0.5f);
-    const FLOAT footerY      = (FLOAT)vp2.Height - MaxF(48.0f, vp2.Height * 0.09f);
+	const FLOAT footerMargin = MaxF(10.0f, vp2.Width * 0.01f);
+	const FLOAT footerW      = MinF(kHdrW * 2.0f + kPaneGap, (FLOAT)vp2.Width - footerMargin * 2.0f);
+	const FLOAT footerX      = floorf(((FLOAT)vp2.Width - footerW) * 0.5f);
+	const FLOAT footerY      = (FLOAT)vp2.Height - FooterBandPx((FLOAT)vp2.Height);  // <-- unified
+
 
     // footer bar
     DrawRect(footerX, footerY, footerW, 28.0f, 0x802A2A2A);
