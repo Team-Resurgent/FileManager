@@ -49,6 +49,14 @@ static const DWORD kProgStepMs      = 150;
 static const DWORD kProgEndPauseMs  = 1200;
 static const int   kProgStepChars   = 1;
 
+// Bigger side insets on SD to avoid CRT overscan clipping.
+inline FLOAT SafeMarginX(FLOAT screenW, FLOAT screenH){
+    const bool isSD = (screenH <= 600.0f);       // 480/576
+    const FLOAT pct = isSD ? 0.065f : 0.03f;      // 5% each side on SD, 3% on HD
+    return MaxF(24.0f, screenW * pct);           // never smaller than 24px
+}
+
+
 struct ProgMarquee {
     FLOAT px;         // start index (characters)
     FLOAT fitWLock;   // lock width for stable end calc
@@ -244,9 +252,9 @@ void FileBrowserApp::ComputeResponsiveLayout()
     D3DVIEWPORT8 vp; m_pd3dDevice->GetViewport(&vp);
 
     // ---- outer geometry ----
-    const FLOAT margin = MaxF(24.0f,  vp.Width  * 0.04f);
-    const FLOAT gap    = MaxF(24.0f,  vp.Width  * 0.035f);
-    const FLOAT paneW  = MaxF(260.0f, (vp.Width - (margin * 2.0f) - gap) * 0.5f);
+    const FLOAT margin = SafeMarginX((FLOAT)vp.Width, (FLOAT)vp.Height);
+	const FLOAT gap    = MaxF(24.0f,  vp.Width * 0.035f);
+	const FLOAT paneW  = MaxF(260.0f, (vp.Width - (margin * 2.0f) - gap) * 0.5f);
 
     kPaneGap  = gap;
     kListX_L  = margin;
@@ -518,17 +526,31 @@ void FileBrowserApp::BuildContextMenu(){
 void FileBrowserApp::OpenMenu(){
     BuildContextMenu();
 
-    const FLOAT menuW = 340.0f;
-    const FLOAT rowH  = kLineH + 6.0f;
+    D3DVIEWPORT8 vp; m_pd3dDevice->GetViewport(&vp);
 
-    // Center the popup over the active pane.
+    const FLOAT rowH      = kLineH + 6.0f;
+    const FLOAT desiredW  = 340.0f;                          // usual width
+    const FLOAT safeInset = SafeMarginX((FLOAT)vp.Width, (FLOAT)vp.Height);
+
+    // Max width we can draw while keeping the frame fully inside the safe band
+    const FLOAT maxWInsideSafe = (FLOAT)vp.Width - safeInset*2.0f - 12.0f; // -12 for the outer frame
+    const FLOAT menuW          = MaxF(220.0f, MinF(desiredW, MinF(kListW, maxWInsideSafe)));
+
+    // Center over the active pane first...
     const FLOAT paneX = (m_active==0) ? kListX_L : (kListX_L + kListW + kPaneGap);
-    const FLOAT x = paneX + (kListW - menuW)*0.5f;
+    FLOAT x = paneX + (kListW - menuW)*0.5f;
+
+    // ...then clamp so it never goes past the safe area
+    if (x < safeInset) x = safeInset;
+    if (x + menuW > (FLOAT)vp.Width - safeInset) x = (FLOAT)vp.Width - safeInset - menuW;
+
+    // A bit below the list header (vertical fit is fine; menu is much shorter than the pane)
     const FLOAT y = kListY + 20.0f;
 
     m_ctx.OpenAt(x, y, menuW, rowH);
-    m_mode=MODE_MENU;
+    m_mode = MODE_MENU;
 }
+
 void FileBrowserApp::CloseMenu(){
     m_ctx.Close();
     if (m_mode==MODE_MENU) m_mode=MODE_BROWSE;
@@ -1258,7 +1280,7 @@ HRESULT FileBrowserApp::Render(){
     D3DVIEWPORT8 vp2; m_pd3dDevice->GetViewport(&vp2);
 
     // Footer matches the combined pane area (two panes + gap), centered.
-	const FLOAT footerMargin = MaxF(10.0f, vp2.Width * 0.01f);
+	const FLOAT footerMargin = SafeMarginX((FLOAT)vp2.Width, (FLOAT)vp2.Height);
 	const FLOAT footerW      = MinF(kHdrW * 2.0f + kPaneGap, (FLOAT)vp2.Width - footerMargin * 2.0f);
 	const FLOAT footerX      = floorf(((FLOAT)vp2.Width - footerW) * 0.5f);
 	const FLOAT footerY      = (FLOAT)vp2.Height - FooterBandPx((FLOAT)vp2.Height);  // <-- unified
