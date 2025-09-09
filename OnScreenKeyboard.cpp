@@ -482,8 +482,8 @@ void OnScreenKeyboard::Draw(CXBFont& font, LPDIRECT3DDEVICE8 dev, FLOAT lineH){
     const char* sideLbl[4] = {
         "Done",
         m_shiftOnce ? "Shift*" : "Shift",
-        m_lower ? "Caps (L3)" : "Caps (L3)*",
-        m_symbols ? "ABC (R3)" : "Symbols (R3)"
+        m_lower ? "Caps (LS)" : "Caps (LS)*",
+        m_symbols ? "ABC (RS)" : "Symbols (RS)"
     };
     for (int r=0;r<4;++r){
         const FLOAT sx = x + padX;

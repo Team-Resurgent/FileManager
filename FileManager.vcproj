@@ -2,7 +2,7 @@
 <VisualStudioProject
 	ProjectType="Visual C++"
 	Version="7.10"
-	Name="FileManager"
+	Name="Daemon-X"
 	ProjectGUID="{FACA2AC8-C180-47B6-8692-86E7C200A599}"
 	Keyword="XboxProj">
 	<Platforms>
@@ -210,7 +210,8 @@
 			<Tool
 				Name="XboxImageTool"
 				StackSize="65536"
-				FormatUD="TRUE"/>
+				FormatUD="TRUE"
+				TitleID="0xDAE420"/>
 		</Configuration>
 		<Configuration
 			Name="Release_LTCG|Xbox"
