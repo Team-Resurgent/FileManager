@@ -1186,12 +1186,24 @@ void FileBrowserApp::DrawProgressOverlay(){
     // title
     DrawAnsi(m_font, x + margin, titleY, 0xFFFFFFFF, m_prog.title[0] ? m_prog.title : "Working...");
 
-    // hint (right)
-    {
-        const char* hint = "B: Cancel";
-        FLOAT hw=0, hh=0; MeasureTextWH(m_font, hint, hw, hh);
-        DrawAnsi(m_font, x + w - margin - hw, titleY, 0xFFCCCCCC, hint);
-    }
+    // hint (right) — red "B:" + gray "Cancel"
+	{
+		const char* pre = "B:";
+		const char* gap = " ";
+		const char* suf = "Cancel";
+
+		FLOAT pw, ph, gw, gh, sw, sh;
+		MeasureTextWH(m_font, pre, pw, ph);
+		MeasureTextWH(m_font, gap, gw, gh);
+		MeasureTextWH(m_font, suf, sw, sh);
+
+		const FLOAT totalW = pw + gw + sw;
+		const FLOAT startX = x + w - margin - totalW;
+
+		DrawAnsi(m_font, startX,            titleY, 0xFFFF4040, pre);  // red
+		DrawAnsi(m_font, startX + pw,       titleY, 0xFFCCCCCC, gap);  // space
+		DrawAnsi(m_font, startX + pw + gw,  titleY, 0xFFCCCCCC, suf);  // gray
+	}
 
     // Split current label into folder + file parts
     const char* label = m_prog.current;

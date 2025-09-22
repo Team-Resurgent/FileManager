@@ -56,7 +56,11 @@
 				Name="XboxImageTool"
 				StackSize="65536"
 				IncludeDebugInfo="TRUE"
-				NoLibWarn="TRUE"/>
+				NoLibWarn="TRUE"
+				TitleID="0xDAE420"
+				TitleName="Daemon-X"
+				TitleImage="$(ProjectDir)Daemon-X.xpr"
+				SaveGameImage="$(ProjectDir)Daemon-X.xpr"/>
 		</Configuration>
 		<Configuration
 			Name="Profile|Xbox"
@@ -214,7 +218,8 @@
 				FormatUD="TRUE"
 				TitleID="0xDAE420"
 				TitleName="Daemon-X"
-				TitleImage="$(ProjectDir)Daemon-X.xpr"/>
+				TitleImage="$(ProjectDir)Daemon-X.xpr"
+				SaveGameImage="$(ProjectDir)Daemon-X.xpr"/>
 		</Configuration>
 		<Configuration
 			Name="Release_LTCG|Xbox"
