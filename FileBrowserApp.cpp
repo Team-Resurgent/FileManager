@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <stdio.h> // _snprintf
 #include <xgraphics.h> 
+#include "font_xpr.h"
+#include "DebugPrint.h"
 /*
 ===============================================================================
  FileBrowserApp
@@ -35,6 +37,18 @@ namespace {
         MultiByteToWideChar(CP_ACP,0,text,-1,wbuf,512);
         font.DrawText(x,y,color,wbuf,0,0.0f);
 	}
+
+static bool FileExistsA(const char* path){
+    DWORD a = GetFileAttributesA(path);
+    return (a != INVALID_FILE_ATTRIBUTES) && !(a & FILE_ATTRIBUTE_DIRECTORY);
+}
+static bool WriteAllA(const char* path, const void* data, DWORD size){
+    HANDLE h = CreateFileA(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h == INVALID_HANDLE_VALUE) return false;
+    DWORD wrote = 0; BOOL ok = WriteFile(h, data, size, &wrote, NULL); CloseHandle(h);
+    return ok && wrote == size;
+}
+
 
 
 	// Footer geometry used everywhere
@@ -1095,9 +1109,62 @@ void FileBrowserApp::UpOne(Pane& p){
 
 // ----- Initialize / Render --------------------------------------------------
 // Create font, input, initial drive mapping, and compute responsive layout.
+// ----------------------------------------------------------------------------
 HRESULT FileBrowserApp::Initialize(){
-    if (FAILED(m_font.Create("D:\\Media\\Font.xpr", 0))) {
-        m_font.Create("D:\\Media\\CourierNew.xpr", 0);
+    const char* userFont  = "D:\\Media\\Font.xpr";
+    const char* titleFont = "T:\\Daemon-X_Font.xpr"; // title-scoped cache
+    bool fontOk = false;
+
+    XBUtil_DebugPrint("Init: starting FileBrowserApp::Initialize");
+
+    // 1) User-supplied override on D:
+    if (FileExistsA(userFont)) {
+        XBUtil_DebugPrint("Init: User font found at %s", userFont);
+        HRESULT hr = m_font.Create(userFont, 0);
+        XBUtil_DebugPrint("Init: m_font.Create(user) -> 0x%08lX", hr);
+        fontOk = SUCCEEDED(hr);
+    } else {
+        XBUtil_DebugPrint("Init: No user font at %s", userFont);
+    }
+
+    // 2) Otherwise, try cached copy on T:\ first (no rewrite if it already exists)
+    if (!fontOk) {
+        if (FileExistsA(titleFont)) {
+            XBUtil_DebugPrint("Init: found cached font at %s, loading", titleFont);
+            HRESULT hr = m_font.Create(titleFont, 0);
+            XBUtil_DebugPrint("Init: m_font.Create(cached) -> 0x%08lX", hr);
+            fontOk = SUCCEEDED(hr);
+
+            // If cached file is bad/corrupt, rewrite it from the embedded bytes.
+            if (!fontOk) {
+                XBUtil_DebugPrint("Init: Cached font load failed, rewriting from embedded (%lu bytes)",
+                                  (unsigned long)g_FontXprSize);
+                const BOOL wrote = WriteAllA(titleFont, g_FontXpr, (size_t)g_FontXprSize);
+                XBUtil_DebugPrint("Init: WriteAllA('%s') -> %s", titleFont, wrote ? "OK" : "FAIL");
+                if (wrote) {
+                    HRESULT hr2 = m_font.Create(titleFont, 0);
+                    XBUtil_DebugPrint("Init: m_font.Create(rewritten) -> 0x%08lX", hr2);
+                    fontOk = SUCCEEDED(hr2);
+                }
+            }
+        } else {
+            // 3) No cached file: write embedded once and load it
+            XBUtil_DebugPrint("Init: No cached font; writing embedded to %s (%lu bytes)",
+                              titleFont, (unsigned long)g_FontXprSize);
+            const BOOL wrote = WriteAllA(titleFont, g_FontXpr, (size_t)g_FontXprSize);
+            XBUtil_DebugPrint("Init: WriteAllA('%s') -> %s", titleFont, wrote ? "OK" : "FAIL");
+            if (wrote) {
+                HRESULT hr = m_font.Create(titleFont, 0);
+                XBUtil_DebugPrint("Init: m_font.Create(embedded) -> 0x%08lX", hr);
+                fontOk = SUCCEEDED(hr);
+            }
+        }
+    }
+
+    if (!fontOk) {
+        XBUtil_DebugPrint("Init: WARNING - All font loads failed; text may not render");
+    } else {
+        XBUtil_DebugPrint("Init: Font loaded successfully");
     }
 
     XBInput_CreateGamepads();
@@ -1108,10 +1175,10 @@ HRESULT FileBrowserApp::Initialize(){
 
     // Layout derived from current backbuffer size (works for any resolution)
     ComputeResponsiveLayout();
+    XBUtil_DebugPrint("Init: Layout computed");
 
     return S_OK;
 }
-
 
 // ----- progress overlay API -------------------------------------------------
 // Begin a copy/move progress session (title and first label for marquee).

@@ -286,7 +286,13 @@
 				RelativePath=".\ContextMenu.cpp">
 			</File>
 			<File
+				RelativePath=".\DebugPrint.cpp">
+			</File>
+			<File
 				RelativePath=".\FileBrowserApp.cpp">
+			</File>
+			<File
+				RelativePath=".\font_xpr.c">
 			</File>
 			<File
 				RelativePath=".\FsUtil.cpp">
@@ -315,7 +321,13 @@
 				RelativePath=".\ContextMenu.h">
 			</File>
 			<File
+				RelativePath=".\DebugPrint.h">
+			</File>
+			<File
 				RelativePath=".\FileBrowserApp.h">
+			</File>
+			<File
+				RelativePath=".\font_xpr.h">
 			</File>
 			<File
 				RelativePath=".\FsUtil.h">
