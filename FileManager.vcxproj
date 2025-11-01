@@ -1,0 +1,181 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|Win32">
+      <Configuration>Debug</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Win32">
+      <Configuration>Release</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>16.0</VCProjectVersion>
+    <Keyword>Win32Proj</Keyword>
+    <ProjectGuid>{dbec796f-5239-4037-b583-b3c402fd9a2e}</ProjectGuid>
+    <RootNamespace>FileManager</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <ProjectName>FileManager</ProjectName>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="Shared">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <IncludePath>$(VC_IncludePath);$(RXDK_LIBS)include</IncludePath>
+    <ExternalIncludePath>$(RXDK_LIBS)include</ExternalIncludePath>
+    <LibraryWPath />
+    <SourcePath />
+    <ExcludePath>$(CommonExcludePath);$(VC_ExecutablePath_x86);$(RXDK_LIBS)lib</ExcludePath>
+    <ReferencePath>$(RXDK_LIBS)lib</ReferencePath>
+    <LibraryPath>$(RXDK_LIBS)lib</LibraryPath>
+    <OutDir>$(ProjectDir)$(Configuration)\</OutDir>
+    <LinkIncremental>false</LinkIncremental>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <IncludePath>$(VC_IncludePath);$(RXDK_LIBS)include</IncludePath>
+    <ExternalIncludePath>$(RXDK_LIBS)include</ExternalIncludePath>
+    <LibraryWPath />
+    <SourcePath />
+    <ExcludePath>$(CommonExcludePath);$(VC_ExecutablePath_x86);$(RXDK_LIBS)lib</ExcludePath>
+    <ReferencePath>$(RXDK_LIBS)lib</ReferencePath>
+    <LibraryPath>$(RXDK_LIBS)lib</LibraryPath>
+    <OutDir>$(ProjectDir)$(Configuration)\</OutDir>
+    <LinkIncremental>false</LinkIncremental>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>false</SDLCheck>
+      <PreprocessorDefinitions>XBOX;_XBOX;_DEBUG;NDEBUG;_NO_CRT_STDIO_INLINE;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>false</ConformanceMode>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <AdditionalIncludeDirectories>C:\Program Files %28x86%29\Microsoft Xbox SDK\Samples\Xbox\Common\Include;.;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <BufferSecurityCheck>false</BufferSecurityCheck>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <AdditionalOptions>/arch:SSE %(AdditionalOptions)</AdditionalOptions>
+      <SupportJustMyCode>false</SupportJustMyCode>
+      <ControlFlowGuard>false</ControlFlowGuard>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalDependencies>xboxkrnl.lib;libcmtd.lib;xapilibd.lib;d3d8d.lib;d3dx8d.lib;xgraphicsd.lib</AdditionalDependencies>
+      <IgnoreAllDefaultLibraries>true</IgnoreAllDefaultLibraries>
+      <BaseAddress>
+      </BaseAddress>
+      <IgnoreSpecificDefaultLibraries>
+      </IgnoreSpecificDefaultLibraries>
+      <GenerateMapFile>true</GenerateMapFile>
+      <FixedBaseAddress>false</FixedBaseAddress>
+      <ImageHasSafeExceptionHandlers>false</ImageHasSafeExceptionHandlers>
+    </Link>
+    <PostBuildEvent>
+      <Message>Creating Xbox Image...</Message>
+      <Command>"$(RXDK_LIBS)bin\patchSubsystem.exe" -i="$(OutDir)$(TargetFileName)" -s=0x000E
+"$(RXDK_LIBS)bin\imagebld.exe" /in:"$(OutDir)$(TargetFileName)" /out:"$(OutDir)$(TargetName).xbe" /nologo /stack:65536 /debug /nolibwarn
+MKDIR "$(OutDir)Build\$(ProjectName)"
+COPY /Y "$(OutDir)$(TargetName).xbe" "$(OutDir)Build\$(ProjectName)\default.xbe"
+XCOPY /I /E /S /Y /F "$(ProjectDir)Media\*" "$(OutDir)Build\$(ProjectName)"
+MKDIR "$(OutDir)XISO"
+"$(RXDK_LIBS)bin\xdvdfs.exe" pack "$(OutDir)Build\$(ProjectName)" "$(OutDir)XISO\$(ProjectName).iso"</Command>
+    </PostBuildEvent>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>false</SDLCheck>
+      <PreprocessorDefinitions>XBOX;_XBOX;NDEBUG;_NO_CRT_STDIO_INLINE;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>false</ConformanceMode>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <AdditionalIncludeDirectories>C:\Program Files %28x86%29\Microsoft Xbox SDK\Samples\Xbox\Common\Include;.;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <BufferSecurityCheck>false</BufferSecurityCheck>
+      <ExceptionHandling>false</ExceptionHandling>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <AdditionalOptions>/arch:SSE /Zc:sizedDealloc-
+ %(AdditionalOptions)</AdditionalOptions>
+      <ControlFlowGuard>false</ControlFlowGuard>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <CompileAs>CompileAsCpp</CompileAs>
+      <WholeProgramOptimization>false</WholeProgramOptimization>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalDependencies>xboxkrnl.lib;libcpmt.lib;xgraphics.lib;xapilib.lib;d3d8.lib;d3d8i.lib;d3dx8.lib;libcmt.lib;dsound.lib;dmusici.lib;xactengi.lib;xsndtrk.lib;xvoice.lib;xonlines.lib;xbdm.lib;xperf.lib</AdditionalDependencies>
+      <IgnoreAllDefaultLibraries>false</IgnoreAllDefaultLibraries>
+      <BaseAddress>
+      </BaseAddress>
+      <IgnoreSpecificDefaultLibraries>
+      </IgnoreSpecificDefaultLibraries>
+      <GenerateMapFile>true</GenerateMapFile>
+      <FixedBaseAddress>false</FixedBaseAddress>
+      <ImageHasSafeExceptionHandlers>false</ImageHasSafeExceptionHandlers>
+    </Link>
+    <PostBuildEvent>
+      <Message>Creating Xbox Image...</Message>
+      <Command>"$(RXDK_LIBS)bin\patchSubsystem.exe" -i="$(OutDir)$(TargetFileName)" -s=0x000E
+"$(RXDK_LIBS)bin\imagebld.exe" /in:"$(OutDir)$(TargetFileName)" /out:"$(OutDir)$(TargetName).xbe" /nologo /stack:65536 /debug /nolibwarn
+MKDIR "$(OutDir)Build\$(ProjectName)"
+COPY /Y "$(OutDir)$(TargetName).xbe" "$(OutDir)Build\$(ProjectName)\default.xbe"
+XCOPY /I /E /S /Y /F "$(ProjectDir)Media\*" "$(OutDir)Build\$(ProjectName)"
+MKDIR "$(OutDir)XISO"
+"$(RXDK_LIBS)bin\xdvdfs.exe" pack "$(OutDir)Build\$(ProjectName)" "$(OutDir)XISO\$(ProjectName).iso"</Command>
+    </PostBuildEvent>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="C:\Program Files (x86)\Microsoft Xbox SDK\Samples\Xbox\Common\Src\sjis2unicode.cpp" />
+    <ClCompile Include="C:\Program Files (x86)\Microsoft Xbox SDK\Samples\Xbox\Common\Src\xbapp.cpp" />
+    <ClCompile Include="C:\Program Files (x86)\Microsoft Xbox SDK\Samples\Xbox\Common\Src\xbfont.cpp" />
+    <ClCompile Include="C:\Program Files (x86)\Microsoft Xbox SDK\Samples\Xbox\Common\Src\xbinput.cpp" />
+    <ClCompile Include="C:\Program Files (x86)\Microsoft Xbox SDK\Samples\Xbox\Common\Src\xbresource.cpp" />
+    <ClCompile Include="C:\Program Files (x86)\Microsoft Xbox SDK\Samples\Xbox\Common\Src\xbutil.cpp" />
+    <ClCompile Include="crt_stubs.cpp" />
+    <ClCompile Include="FileManager.cpp" />
+    <ClCompile Include="xbfunctions.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <Text Include="Media\Copy Assets Here.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="intrin0.inl.h" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+  <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
+    <PropertyGroup>
+      <ErrorText>This project requires Team Resurgent's XDK Libs installed on this computer. Search for them on http://www.theusualplaces.co.uk.</ErrorText>
+    </PropertyGroup>
+    <Error Condition="!Exists($(RXDK_LIBS))" Text="$([System.String]::Format('$(ErrorText)'))" />
+  </Target>
+</Project>

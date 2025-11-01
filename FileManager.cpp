@@ -3,22 +3,34 @@
 // Dual-pane GUI with auto layout, context menu, basic file ops, and rename OSD
 //------------------------------------------------------------------------------
 
-#include "stdafx.h"          // Remove if you disabled PCH
+#include <intrin0.inl.h>
 #include <xtl.h>
-#include <wchar.h>
 #include <vector>
 #include <algorithm>
-#include <stdarg.h>
-
 #include "XBApp.h"
 #include "XBFont.h"
 #include "XBInput.h"
 
-extern "C" {
+extern "C" 
+{
 	typedef struct _STRING { USHORT Length; USHORT MaximumLength; PCHAR Buffer; } STRING, *PSTRING;
 	LONG __stdcall IoCreateSymbolicLink(PSTRING SymbolicLinkName, PSTRING DeviceName);
 	LONG __stdcall IoDeleteSymbolicLink(PSTRING SymbolicLinkName);
+	EXCEPTION_DISPOSITION __cdecl _except_handler4(_EXCEPTION_RECORD* ExceptionRecord, void* EstablisherFrame, _CONTEXT* ContextRecord, PVOID DispatcherContext)
+	{
+		return ExceptionContinueExecution;
+	}
+	__declspec(naked) long _ftol2_sse(void) {
+		__asm {
+			sub     esp, 8
+			fistp   qword ptr[esp]
+			mov     eax, [esp]
+			add     esp, 8
+			ret
+		}
+	}
 }
+
 //#pragma comment(lib, "xboxkrnl.lib")
 
 #ifndef INVALID_FILE_ATTRIBUTES
@@ -32,9 +44,6 @@ static const char s_kb_r2[] = "YZ0123456789";     // 12
 static const char s_kb_r3[] = "-_.()[]{}+&";      // 12 (punctuation row)
 static const int  s_kb_cols[5] = {12,12,12,12,5}; // last row: Back, Space, Aa, OK, Cancel
 
-// small helpers (avoid <algorithm> max macro surprises in VS2003)
-static inline FLOAT MaxF(FLOAT a, FLOAT b){ return (a>b)?a:b; }
-static inline int   MaxI(int a, int b){ return (a>b)?a:b; }
 static inline FLOAT Snap(FLOAT v){ return (FLOAT)((int)(v + 0.5f)); } // integer pixel snap
 
 static const char* kRoots[] = { "C:\\", "D:\\", "E:\\", "F:\\", "G:\\", "X:\\", "Y:\\", "Z:\\" };
@@ -257,7 +266,7 @@ public:
 			}
 		}
 		maxW += 16.0f; // padding
-		const FLOAT minW = MaxF(90.0f, kLineH * 4.0f);
+		const FLOAT minW = max(90.0f, kLineH * 4.0f);
 		const FLOAT maxWClamp = kListW * 0.40f;
 		if(maxW < minW) maxW = minW;
 		if(maxW > maxWClamp) maxW = maxWClamp;
@@ -334,7 +343,7 @@ public:
 			if (prevSel < 0) prevSel = 0;
 			p.sel = prevSel;
 
-			int maxScroll = MaxI(0, (int)p.items.size() - m_visible);
+			int maxScroll = max(0, (int)p.items.size() - m_visible);
 			if (prevScroll > maxScroll) prevScroll = maxScroll;
 			if (prevScroll < 0) prevScroll = 0;
 			p.scroll = prevScroll;
@@ -691,8 +700,8 @@ public:
 		if (!m_renActive) return;
 
 		D3DVIEWPORT8 vp; m_pd3dDevice->GetViewport(&vp);
-		const FLOAT panelW = MaxF(520.0f, vp.Width * 0.55f);
-		const FLOAT panelH = MaxF(280.0f, vp.Height*0.45f);
+		const FLOAT panelW = max(520.0f, vp.Width * 0.55f);
+		const FLOAT panelH = max(280.0f, vp.Height*0.45f);
 		const FLOAT x = Snap((vp.Width  - panelW)*0.5f);
 		const FLOAT y = Snap((vp.Height - panelH)*0.5f);
 
@@ -1023,24 +1032,24 @@ public:
 		// compute resolution-aware layout from viewport
 		D3DVIEWPORT8 vp; m_pd3dDevice->GetViewport(&vp);
 
-		const FLOAT sideMargin = MaxF(24.0f,  vp.Width  * 0.04f);
-		const FLOAT gap        = MaxF(24.0f,  vp.Width  * 0.035f);
+		const FLOAT sideMargin = max(24.0f,  vp.Width  * 0.04f);
+		const FLOAT gap        = max(24.0f,  vp.Width  * 0.035f);
 
 		kPaneGap  = gap;
 		kListX_L  = sideMargin;
 
 		const FLOAT totalUsable = (FLOAT)vp.Width - (sideMargin * 2.0f) - gap;
-		kListW = MaxF(260.0f, (totalUsable / 2.0f) - 10.0f);
+		kListW = max(260.0f, (totalUsable / 2.0f) - 10.0f);
 
 		kHdrW   = kListW + 30.0f;
-		kHdrY   = MaxF(12.0f, vp.Height * 0.03f);
-		kHdrH   = MaxF(22.0f, vp.Height * 0.04f);
-		kListY  = MaxF(60.0f, kHdrY + kHdrH + 34.0f); // room under "Name/Size"
+		kHdrY   = max(12.0f, vp.Height * 0.03f);
+		kHdrH   = max(22.0f, vp.Height * 0.04f);
+		kListY  = max(60.0f, kHdrY + kHdrH + 34.0f); // room under "Name/Size"
 
-		kLineH  = MaxF(22.0f, vp.Height * 0.036f);
+		kLineH  = max(22.0f, vp.Height * 0.036f);
 
 		// compute rows by viewport (leave footer space)
-		FLOAT bottomY = (FLOAT)vp.Height - MaxF(48.0f, vp.Height * 0.09f);
+		FLOAT bottomY = (FLOAT)vp.Height - max(48.0f, vp.Height * 0.09f);
 		FLOAT usableH = bottomY - kListY; if (usableH < 0) usableH = 0;
 		m_visible = (int)(usableH / kLineH); if (m_visible < 6) m_visible=6; if (m_visible>30) m_visible=30;
 
@@ -1055,7 +1064,7 @@ public:
 		if (p.sel < 0) p.sel = 0;
 
 		if (p.scroll > p.sel) p.scroll = p.sel;
-		int maxScroll = MaxI(0, (int)p.items.size() - m_visible);
+		int maxScroll = max(0, (int)p.items.size() - m_visible);
 		if (p.scroll > maxScroll) p.scroll = maxScroll;
 	}
 
@@ -1201,7 +1210,7 @@ store_prev:
 
 		// footer
 		D3DVIEWPORT8 vp2; m_pd3dDevice->GetViewport(&vp2);
-		const FLOAT footerY = (FLOAT)vp2.Height - MaxF(48.0f, vp2.Height * 0.09f);
+		const FLOAT footerY = (FLOAT)vp2.Height - max(48.0f, vp2.Height * 0.09f);
 		DrawRect(HdrX(kListX_L), footerY, kHdrW*2 + kPaneGap + 30.0f, 28.0f, 0x802A2A2A);
 		if (m_pane[m_active].mode==0){
 			DrawAnsi(m_font, HdrX(kListX_L)+5.0f, footerY+4.0f, 0xFFCCCCCC,

@@ -8,6 +8,12 @@ This project is an attempt to **pay respect to that legacy** with a new **standa
 
 ---
 
+## 🎮 RXDK Compatibility
+
+This project has been updated to work with **RXDK**, which provides a modern development environment for the Original Xbox. You can find RXDK here:  
+[https://github.com/Team-Resurgent/RXDK](https://github.com/Team-Resurgent/RXDK)
+
+
 ## ⚡ Status
 
 - This is still in the **early stages of development**.  
