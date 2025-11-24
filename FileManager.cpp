@@ -14,6 +14,8 @@
 #include "XBFont.h"
 #include "XBInput.h"
 
+#include "xipslib.h"
+
 extern "C" {
 	typedef struct _STRING { USHORT Length; USHORT MaximumLength; PCHAR Buffer; } STRING, *PSTRING;
 	LONG __stdcall IoCreateSymbolicLink(PSTRING SymbolicLinkName, PSTRING DeviceName);
@@ -162,13 +164,13 @@ public:
 	// --- Context menu/state ---
 	enum Action {
 		ACT_OPEN, ACT_COPY, ACT_MOVE, ACT_DELETE, ACT_RENAME,
-		ACT_MKDIR, ACT_CALCSIZE, ACT_GOROOT, ACT_SWITCHMEDIA
+		ACT_MKDIR, ACT_CALCSIZE, ACT_APPLYIPS, ACT_CREATEBAK, ACT_RESTOREBAK, ACT_GOROOT, ACT_SWITCHMEDIA
 	};
 	struct MenuItem { const char* label; Action act; bool enabled; };
 
 	bool        m_menuOpen;
 	int         m_menuSel;
-	MenuItem    m_menu[9];
+	MenuItem    m_menu[12];
 	int         m_menuCount;
 
 	enum { MODE_BROWSE, MODE_MENU, MODE_RENAME } m_mode;
@@ -476,21 +478,59 @@ public:
 
 	// --- context menu
 	void BuildContextMenu(){
-		Pane& p   = m_pane[m_active];
-		bool inDir  = (p.mode == 1);
-		bool hasSel = !p.items.empty();
+		Pane& src   = m_pane[m_active];
+		Pane& dst = m_pane[1 - m_active];
+		bool inDir  = (src.mode == 1);
+		bool inDir2 = (dst.mode == 1);
+		bool hasSel = !src.items.empty();
+		bool hasSel2 = !dst.items.empty();
+		const Item* sel = NULL;
+		const Item* sel2 = NULL;
+		if (hasSel) sel = &src.items[src.sel];
+		if (hasSel2) sel2 = &dst.items[dst.sel];
+		char srcFull[512] = "";
+		if (sel && !sel->isUpEntry && inDir) JoinPath(srcFull, sizeof(srcFull), src.curPath, sel->name);
+		char dstFull[512] = "";
+		if (sel2 && !sel2->isUpEntry && inDir2) JoinPath(dstFull, sizeof(dstFull), dst.curPath, sel2->name);
+		bool isFile = (sel && !sel->isDir && !sel->isUpEntry && inDir);
+		bool isFile2 = (sel2 && !sel2->isDir && !sel2->isUpEntry && inDir2);
+		char* ext = NULL;
+		if (isFile) {
+			const char* delim = strrchr(srcFull, '.');
+			if (delim && *(delim + 1)) {
+				ext = (char*)malloc(strlen(delim + 1) + 1);
+				strcpy(ext, delim + 1);
+			}
+		}
+		char* ext2 = NULL;
+		if (isFile2) {
+			const char* delim = strrchr(dstFull, '.');
+			if (delim && *(delim + 1)) {
+				ext2 = (char*)malloc(strlen(delim + 1) + 1);
+				strcpy(ext2, delim + 1);
+			}
+		}
 
 		m_menuCount = 0;
 
-		if (inDir) AddMenuItem("Open",            ACT_OPEN,       hasSel);
-		AddMenuItem("Copy",            ACT_COPY,       hasSel);
-		AddMenuItem("Move",            ACT_MOVE,       hasSel);
-		AddMenuItem("Delete",          ACT_DELETE,     hasSel);
-		AddMenuItem("Rename",          ACT_RENAME,     hasSel);
-		AddMenuItem("Make new folder", ACT_MKDIR,      inDir);
-		AddMenuItem("Calculate size",  ACT_CALCSIZE,   hasSel);
-		AddMenuItem("Go to root",      ACT_GOROOT,     inDir);
-		AddMenuItem("Switch pane",     ACT_SWITCHMEDIA,true);
+	  //if (visibleCondition)
+	  //AddMenuItem("Example",         ACT_EXAMPLE,     (activeCondition);
+
+		AddMenuItem("Open",            ACT_OPEN,        (hasSel));
+		AddMenuItem("Copy",            ACT_COPY,        (hasSel));
+		AddMenuItem("Move",            ACT_MOVE,        (hasSel));
+		AddMenuItem("Delete",          ACT_DELETE,      (hasSel));
+		AddMenuItem("Rename",          ACT_RENAME,      (hasSel));
+		AddMenuItem("Make new folder", ACT_MKDIR,       (inDir));
+		AddMenuItem("Calculate size",  ACT_CALCSIZE,    (hasSel));
+		if (isFile && ext && _stricmp(ext, "ips") == 0) 
+		AddMenuItem("Apply ips",       ACT_APPLYIPS,    (isFile2 && ext2 && _stricmp(ext2, "xbe") == 0));
+		if (isFile && ext && _stricmp(ext, "xbe") == 0)
+		AddMenuItem("Create bak",      ACT_CREATEBAK,   (true));
+		if (isFile && ext && _stricmp(ext, "bak") == 0)
+		AddMenuItem("Restore bak",     ACT_RESTOREBAK,  (true));
+		AddMenuItem("Go to root",      ACT_GOROOT,      (inDir));
+		AddMenuItem("Switch pane",     ACT_SWITCHMEDIA, (true));
 
 		if (m_menuSel >= m_menuCount) m_menuSel = m_menuCount-1;
 		if (m_menuSel < 0)            m_menuSel = 0;
@@ -781,14 +821,38 @@ public:
 	}
 
 	void ExecuteAction(Action act){
-		Pane& src = m_pane[m_active];
+		Pane& src   = m_pane[m_active];
 		Pane& dst = m_pane[1 - m_active];
-
+		bool inDir  = (src.mode == 1);
+		bool inDir2 = (dst.mode == 1);
+		bool hasSel = !src.items.empty();
+		bool hasSel2 = !dst.items.empty();
 		const Item* sel = NULL;
-		if (!src.items.empty()) sel = &src.items[src.sel];
-
-		char srcFull[512]="";
-		if (sel && src.mode==1 && !sel->isUpEntry) JoinPath(srcFull, sizeof(srcFull), src.curPath, sel->name);
+		const Item* sel2 = NULL;
+		if (hasSel) sel = &src.items[src.sel];
+		if (hasSel2) sel2 = &dst.items[dst.sel];
+		char srcFull[512] = "";
+		if (sel && !sel->isUpEntry && inDir) JoinPath(srcFull, sizeof(srcFull), src.curPath, sel->name);
+		char dstFull[512] = "";
+		if (sel2 && !sel2->isUpEntry && inDir2) JoinPath(dstFull, sizeof(dstFull), dst.curPath, sel2->name);
+		bool isFile = (sel && !sel->isDir && !sel->isUpEntry && inDir);
+		bool isFile2 = (sel2 && !sel2->isDir && !sel2->isUpEntry && inDir2);
+		char* ext = NULL;
+		if (isFile) {
+			const char* delim = strrchr(srcFull, '.');
+			if (delim && *(delim + 1)) {
+				ext = (char*)malloc(strlen(delim + 1) + 1);
+				strcpy(ext, delim + 1);
+			}
+		}
+		char* ext2 = NULL;
+		if (isFile2) {
+			const char* delim = strrchr(dstFull, '.');
+			if (delim && *(delim + 1)) {
+				ext2 = (char*)malloc(strlen(delim + 1) + 1);
+				strcpy(ext2, delim + 1);
+			}
+		}
 
 		switch (act){
 		case ACT_OPEN:
@@ -945,12 +1009,48 @@ public:
 			}
 
 		case ACT_CALCSIZE:
-			if (sel){
-				ULONGLONG bytes = DirSizeRecursiveA(srcFull);
-				char tmp[64]; FormatSize(bytes, tmp, sizeof(tmp));
-				SetStatus("%s", tmp);
+			{
+				if (sel){
+					ULONGLONG bytes = DirSizeRecursiveA(srcFull);
+					char tmp[64]; 
+					FormatSize(bytes, tmp, sizeof(tmp));
+					SetStatus("%s", tmp);
+				}
+				CloseMenu(); 
+				break;
 			}
-			CloseMenu(); break;
+		
+		case ACT_APPLYIPS:
+			{
+				if (isFile && ext && _stricmp(ext, "ips") == 0 && isFile2 && ext2 && _stricmp(ext2, "xbe") == 0){
+					if (applyIPS(srcFull, dstFull) == E_NO_ERROR) SetStatus("Patch applied");
+					else SetStatus("Patch failed");
+				}
+				CloseMenu();
+				break;
+			}
+
+		case ACT_CREATEBAK:
+			{
+				if (isFile) {
+					if (createBak(srcFull, false) == E_NO_ERROR) SetStatus("Bak created");
+					else SetStatus("Bak failed");
+				}
+				CloseMenu();
+				RefreshPane(m_pane[0]); RefreshPane(m_pane[1]);
+				break;
+			}
+
+		case ACT_RESTOREBAK:
+			{
+				if (isFile && ext && _stricmp(ext, "bak") == 0) {
+					if (restoreBak(srcFull, true) == E_NO_ERROR) SetStatus("Bak restored");
+					else SetStatus("Restore failed");
+				}
+				CloseMenu();
+				RefreshPane(m_pane[0]); RefreshPane(m_pane[1]);
+				break;
+			}
 
 		case ACT_GOROOT:
 			{
