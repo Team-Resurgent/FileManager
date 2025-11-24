@@ -3,6 +3,8 @@
 #include "FsUtil.h"
 #include "XBInput.h"   // XBInput_GetInput, g_Gamepads
 
+#include "xipslib.h"
+
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>   // toupper
@@ -135,17 +137,23 @@ static void GatherMarkedOrSelectedFullPaths(const Pane& src, std::vector<std::st
 }
 
 // Main dispatcher: runs the action the user picked from the context menu.
-void Execute(Action act, FileBrowserApp& app)
-{
+void Execute(Action act, FileBrowserApp& app) {
     Pane& src = app.m_pane[app.m_active];
+	Pane& dst = app.m_pane[1 - app.m_active];
 
     const Item* sel = NULL;
+	const Item* sel2 = NULL;
     if (!src.items.empty()) sel = &src.items[src.sel];
+	if (!dst.items.empty()) sel2 = &dst.items[dst.sel];
 
     // Full path of selection (if any). Also supports drive-list selection.
     char srcFull[512] = "";
+	char dstFull[512] = "";
+	const char* ext = NULL;
+	const char* ext2 = NULL;
     if (sel) {
         if (src.mode == 1 && !sel->isUpEntry) {
+			if (!sel->isDir) ext = GetExtension(sel->name);
             // Normal directory listing: dir + name
             JoinPath(srcFull, sizeof(srcFull), src.curPath, sel->name);
             srcFull[sizeof(srcFull)-1] = 0;
@@ -156,6 +164,19 @@ void Execute(Action act, FileBrowserApp& app)
             NormalizeDirA(srcFull); // ensure trailing slash
         }
     }
+	if (sel2) {
+		if (dst.mode == 1 && !sel2->isUpEntry) {
+			if (!sel2->isDir) ext2 = GetExtension(sel2->name);
+            // Normal directory listing: dir + name
+            JoinPath(dstFull, sizeof(dstFull), dst.curPath, sel2->name);
+            dstFull[sizeof(dstFull)-1] = 0;
+        } else if (dst.mode == 0 && sel2->isDir && !sel2->isUpEntry) {
+            // Drive list: item name is already something like "E:\"
+            _snprintf(dstFull, sizeof(dstFull), "%s", sel2->name);
+            dstFull[sizeof(dstFull)-1] = 0;
+            NormalizeDirA(dstFull); // ensure trailing slash
+        }
+	}
 
     switch (act)
     {
@@ -639,6 +660,40 @@ void Execute(Action act, FileBrowserApp& app)
     case ACT_SWITCHMEDIA:
         app.m_active = 1 - app.m_active;
         break;
+	
+	case ACT_APPLYIPS:
+		if (ext && _stricmp(ext, "ips") == 0 && ext2 && _stricmp(ext2, "xbe") == 0) {
+			if (applyIPS(srcFull, dstFull) == E_NO_ERROR) app.SetStatus("Patch applied");
+			else app.SetStatus("Patch failed");
+		}
+		break;
+
+	case ACT_CREATEBAK:
+	{
+		if (ext && _stricmp(ext, "xbe") == 0) {
+			switch (createBak(srcFull, false)) {
+			case E_NO_ERROR: 
+				app.SetStatus("Bak created");
+				break;
+			case E_CANNOT_OVR: 
+				app.SetStatus("Bak already exists");
+				break;
+			default: 
+				app.SetStatus("Bak failed");
+			}
+		}
+		app.RefreshPane(app.m_pane[0]);
+        app.RefreshPane(app.m_pane[1]);
+		break;
+	}
+	case ACT_RESTOREBAK:
+		if (ext && _stricmp(ext, "bak") == 0) {
+			if (restoreBak(srcFull, true) == E_NO_ERROR) app.SetStatus("Bak restored");
+			else app.SetStatus("Restore failed");
+		}
+		app.RefreshPane(app.m_pane[0]);
+        app.RefreshPane(app.m_pane[1]);
+		break;
 
     } // switch
 }

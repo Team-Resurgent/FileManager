@@ -35,7 +35,11 @@ enum Action {
     ACT_INVERT_MARKS,  // Toggle mark flag on each regular entry
 
     ACT_SWITCHMEDIA,   // Switch active pane (left <-> right)
-    ACT_FORMAT_CACHE   // Format X/Y/Z cache partitions (+ clear E:\CACHE)
+    ACT_FORMAT_CACHE,  // Format X/Y/Z cache partitions (+ clear E:\CACHE)
+
+	ACT_APPLYIPS,      //xipslib
+	ACT_CREATEBAK,     //xipslib
+	ACT_RESTOREBAK     //xipslib
 };
 
 // --------------------------------------------------------------------------

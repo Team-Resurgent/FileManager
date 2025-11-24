@@ -86,8 +86,11 @@ void SetCopyProgressCallback(CopyProgressFn fn, void* user);
 bool CopyRecursiveWithProgressA(const char* srcPath, const char* dstDir,
                                 ULONGLONG totalBytes);
 
-// ===== .xbe launching ========================================================
+// ===== extension functions ==================================================
+const char* GetExtension(const char* name);
 bool HasXbeExt(const char* name);
+
+// ===== .xbe launching =======================================================
 bool LaunchXbeA(const char* pathOrDir);
 
 // ===== FATX formatting (cache partitions) ===================================

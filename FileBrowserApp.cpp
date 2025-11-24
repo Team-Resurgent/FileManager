@@ -488,35 +488,52 @@ void FileBrowserApp::AddMenuItem(const char* label, Action act, bool enabled){
 
 // Build the context menu based on current mode and selection.
 void FileBrowserApp::BuildContextMenu(){
-    Pane& p   = m_pane[m_active];
-    bool inDir  = (p.mode == 1);
-    bool hasSel = !p.items.empty();
+    Pane& p = m_pane[m_active];
+	Pane& p2 = m_pane[1 - m_active];
+	bool inDir = (p.mode == 1);
+	bool inDir2 = (p2.mode == 1);
+	bool hasSel = !p.items.empty();
+	bool hasSel2 = !p2.items.empty();
+	bool isFile = false;
+	bool isFile2 = false;
+	const char* ext = NULL;
+	const char* ext2 = NULL;
+	if (hasSel){
+		const Item& cur = p.items[p.sel];
+		if (inDir && !cur.isUpEntry && !cur.isDir) isFile = true;
+		if (isFile) ext = GetExtension(cur.name);
+	}
+	if (hasSel2){
+		const Item& cur2 = p2.items[p2.sel];
+		if (inDir2 && !cur2.isUpEntry && !cur2.isDir) isFile2 = true;
+		if (isFile) ext2 = GetExtension(cur2.name);
+	}	
+
     int  marked = 0; for (size_t i=0; i<p.items.size(); ++i) if (p.items[i].marked) ++marked;
 
     m_ctx.Clear();
 
-    // Primary action label depends on context (Open vs Launch for .xbe).
-    if (hasSel) {
-        const Item& cur = p.items[p.sel];
-        bool showPrimary = false;
-        const char* primaryLabel = "Open";
-        if (p.mode == 0) { showPrimary = true; primaryLabel = "Open"; }
-        else if (!cur.isUpEntry) {
-            if (cur.isDir) { showPrimary = true; primaryLabel = "Open"; }
-            else if (HasXbeExt(cur.name)) { showPrimary = true; primaryLabel = "Launch"; }
-        }
-        if (showPrimary) AddMenuItem(primaryLabel, ACT_OPEN, true);
-    }
-
     // Common operations
-    AddMenuItem("Copy",            ACT_COPY,        hasSel);
-    AddMenuItem("Move",            ACT_MOVE,        hasSel);
-    AddMenuItem("Delete",          ACT_DELETE,      hasSel);
-    AddMenuItem("Rename",          ACT_RENAME,      hasSel);
-    AddMenuItem("Make new folder", ACT_MKDIR,       inDir);
-    AddMenuItem("Calculate size",  ACT_CALCSIZE,    hasSel);
-    AddMenuItem("Go to root",      ACT_GOROOT,      inDir);
-    AddMenuItem("Switch pane",     ACT_SWITCHMEDIA, true);
+	if (ext && _stricmp(ext, "xbe") == 0)
+	AddMenuItem("Launch",          ACT_OPEN,        (hasSel));
+	else
+	AddMenuItem("Open",            ACT_OPEN,        (hasSel));
+    AddMenuItem("Copy",            ACT_COPY,        (inDir && hasSel && inDir2));
+    AddMenuItem("Move",            ACT_MOVE,        (inDir && hasSel && inDir2));
+    AddMenuItem("Delete",          ACT_DELETE,      (inDir && hasSel));
+    AddMenuItem("Rename",          ACT_RENAME,      (inDir && hasSel));
+
+	if (ext && _stricmp(ext, "ips") == 0)
+	AddMenuItem("Apply ips",       ACT_APPLYIPS,    (ext2 && _stricmp(ext2, "xbe") == 0));
+	if (ext && _stricmp(ext, "xbe") == 0)
+	AddMenuItem("Create bak",      ACT_CREATEBAK,   (true));
+	if (ext && _stricmp(ext, "bak") == 0)
+	AddMenuItem("Restore bak",     ACT_RESTOREBAK,  (true));
+
+    AddMenuItem("Make new folder", ACT_MKDIR,       (inDir));
+    AddMenuItem("Calculate size",  ACT_CALCSIZE,    (hasSel));
+    AddMenuItem("Go to root",      ACT_GOROOT,      (inDir));
+    AddMenuItem("Switch pane",     ACT_SWITCHMEDIA, (hasSel));
 
     // Marking tools (directory mode only; skip the ".." row)
     if (inDir) {

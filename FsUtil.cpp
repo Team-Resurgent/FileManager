@@ -511,10 +511,19 @@ bool DeleteRecursiveA(const char* path){
 // File type helpers
 // ============================================================================
 
+const char* GetExtension(const char* name){
+	if (!name) return NULL;
+	char* ext = NULL;
+	const char* delim = strrchr(name, '.');
+	if (delim && *(delim + 1)) {
+		return (delim + 1);
+	}
+	return NULL;
+}
 bool HasXbeExt(const char* name){
     if (!name) return false;
-    const char* dot = strrchr(name, '.');
-    return (dot && _stricmp(dot, ".xbe") == 0);
+	const char* ext = GetExtension(name);
+    return (ext && _stricmp(ext, "xbe") == 0);
 }
 
 // ============================================================================
