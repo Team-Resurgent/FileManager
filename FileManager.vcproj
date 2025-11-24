@@ -2,8 +2,9 @@
 <VisualStudioProject
 	ProjectType="Visual C++"
 	Version="7.10"
-	Name="FileManager"
+	Name="Daemon-X"
 	ProjectGUID="{FACA2AC8-C180-47B6-8692-86E7C200A599}"
+	RootNamespace="Daemon-X"
 	Keyword="XboxProj">
 	<Platforms>
 		<Platform
@@ -56,7 +57,11 @@
 				FileName="$(TargetDir)default.xbe"
 				StackSize="65536"
 				IncludeDebugInfo="TRUE"
-				NoLibWarn="TRUE"/>
+				NoLibWarn="TRUE"
+				TitleID="0xDAE420"
+				TitleName="Daemon-X"
+				TitleImage="$(ProjectDir)Daemon-X.xpr"
+				SaveGameImage="$(ProjectDir)Daemon-X.xpr"/>
 		</Configuration>
 		<Configuration
 			Name="Profile|Xbox"
@@ -210,7 +215,12 @@
 				Name="XboxDeploymentTool"/>
 			<Tool
 				Name="XboxImageTool"
-				StackSize="65536"/>
+				StackSize="65536"
+				FormatUD="TRUE"
+				TitleID="0xDAE420"
+				TitleName="Daemon-X"
+				TitleImage="$(ProjectDir)Daemon-X.xpr"
+				SaveGameImage="$(ProjectDir)Daemon-X.xpr"/>
 		</Configuration>
 		<Configuration
 			Name="Release_LTCG|Xbox"
@@ -271,40 +281,34 @@
 			Filter="cpp;c;cxx;def;odl;idl;hpj;bat;asm;asmx"
 			UniqueIdentifier="{4FC737F1-C7A5-4376-A066-2A32D752A2FF}">
 			<File
-				RelativePath=".\FileManager.cpp">
+				RelativePath=".\AppActions.cpp">
 			</File>
 			<File
-				RelativePath=".\stdafx.cpp">
-				<FileConfiguration
-					Name="Debug|Xbox">
-					<Tool
-						Name="VCCLCompilerTool"
-						UsePrecompiledHeader="1"/>
-				</FileConfiguration>
-				<FileConfiguration
-					Name="Profile|Xbox">
-					<Tool
-						Name="VCCLCompilerTool"
-						UsePrecompiledHeader="1"/>
-				</FileConfiguration>
-				<FileConfiguration
-					Name="Profile_FastCap|Xbox">
-					<Tool
-						Name="VCCLCompilerTool"
-						UsePrecompiledHeader="1"/>
-				</FileConfiguration>
-				<FileConfiguration
-					Name="Release|Xbox">
-					<Tool
-						Name="VCCLCompilerTool"
-						UsePrecompiledHeader="1"/>
-				</FileConfiguration>
-				<FileConfiguration
-					Name="Release_LTCG|Xbox">
-					<Tool
-						Name="VCCLCompilerTool"
-						UsePrecompiledHeader="1"/>
-				</FileConfiguration>
+				RelativePath=".\ContextMenu.cpp">
+			</File>
+			<File
+				RelativePath=".\DebugPrint.cpp">
+			</File>
+			<File
+				RelativePath=".\FileBrowserApp.cpp">
+			</File>
+			<File
+				RelativePath=".\font_xpr.c">
+			</File>
+			<File
+				RelativePath=".\FsUtil.cpp">
+			</File>
+			<File
+				RelativePath=".\GfxPrims.cpp">
+			</File>
+			<File
+				RelativePath=".\main.cpp">
+			</File>
+			<File
+				RelativePath=".\OnScreenKeyboard.cpp">
+			</File>
+			<File
+				RelativePath=".\PaneRenderer.cpp">
 			</File>
 			<File
 				RelativePath=".\xipslib.cpp">
@@ -315,7 +319,34 @@
 			Filter="h;hpp;hxx;hm;inl;inc;xsd"
 			UniqueIdentifier="{93995380-89BD-4b04-88EB-625FBE52EBFB}">
 			<File
-				RelativePath=".\stdafx.h">
+				RelativePath=".\AppActions.h">
+			</File>
+			<File
+				RelativePath=".\ContextMenu.h">
+			</File>
+			<File
+				RelativePath=".\DebugPrint.h">
+			</File>
+			<File
+				RelativePath=".\FileBrowserApp.h">
+			</File>
+			<File
+				RelativePath=".\font_xpr.h">
+			</File>
+			<File
+				RelativePath=".\FsUtil.h">
+			</File>
+			<File
+				RelativePath=".\GfxPrims.h">
+			</File>
+			<File
+				RelativePath=".\OnScreenKeyboard.h">
+			</File>
+			<File
+				RelativePath=".\PaneModel.h">
+			</File>
+			<File
+				RelativePath=".\PaneRenderer.h">
 			</File>
 			<File
 				RelativePath=".\xipslib.h">
