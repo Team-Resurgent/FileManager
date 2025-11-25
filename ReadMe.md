@@ -41,7 +41,6 @@ We want *you* — the scene and community that keeps the OG Xbox alive — to:
 
 - Build with XDK.  
 - Copy the compiled `.xbe` to your Xbox.  
-- ⚠️ **Important**: Copy the **Media** folder into the **same directory as the `.xbe`**, otherwise the app will fail to load (fonts won’t be found).  
 *(Set Xbox to display in **720p** for correct interface display.)*
 
 ---
