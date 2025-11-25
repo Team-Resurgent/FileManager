@@ -28,7 +28,7 @@
     <ClCompile Include="main.cpp" />
     <ClCompile Include="OnScreenKeyboard.cpp" />
     <ClCompile Include="PaneRenderer.cpp" />
-    <ClCompile Include="Source.cpp" />
+    <ClCompile Include="Resolves.cpp" />
     <ClCompile Include="xipslib.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -104,14 +104,14 @@
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>false</SDLCheck>
-      <PreprocessorDefinitions>XBOX;_XBOX;_DEBUG;_HAS_EXCEPTIONS=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>XBOX;_XBOX;_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>false</ConformanceMode>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <AdditionalIncludeDirectories>C:\Program Files %28x86%29\Microsoft Xbox SDK\Samples\Xbox\Common\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <BufferSecurityCheck>false</BufferSecurityCheck>
       <ExceptionHandling>false</ExceptionHandling>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
-      <AdditionalOptions>/arch:SSE /Zc:sizedDealloc- /Zc:threadSafeInit- </AdditionalOptions>
+      <AdditionalOptions>/arch:SSE /Zc:sizedDealloc- /Zc:threadSafeInit-</AdditionalOptions>
       <SupportJustMyCode>false</SupportJustMyCode>
       <ControlFlowGuard>false</ControlFlowGuard>
       <LanguageStandard>stdcpp17</LanguageStandard>
@@ -134,7 +134,7 @@
     <PostBuildEvent>
       <Message>Creating Xbox Image...</Message>
       <Command>"$(RXDK_LIBS)bin\patchSubsystem.exe" -i="$(OutDir)$(TargetFileName)" -s=0x000E
-"$(RXDK_LIBS)bin\imagebld.exe" /in:"$(OutDir)$(TargetFileName)" /out:"$(OutDir)$(TargetName).xbe" /nologo /stack:65536 /debug /nolibwarn
+"$(RXDK_LIBS)bin\imagebld.exe" /in:"$(OutDir)$(TargetFileName)" /out:"$(OutDir)$(TargetName).xbe" /nologo /stack:65536 /debug /nolibwarn /testid:"0xDAE420" /testname:"Daemon-X" /titleimage:"$(ProjectDir)Daemon-X.xpr" /defaultsaveimage:"$(ProjectDir)Daemon-X.xpr"
 MKDIR "$(OutDir)Build\$(ProjectName)"
 COPY /Y "$(OutDir)$(TargetName).xbe" "$(OutDir)Build\$(ProjectName)\default.xbe"
 XCOPY /I /E /S /Y /F "$(ProjectDir)Media\*" "$(OutDir)Build\$(ProjectName)"
