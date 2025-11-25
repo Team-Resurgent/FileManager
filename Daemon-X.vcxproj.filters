@@ -16,6 +16,9 @@
     <Filter Include="Media">
       <UniqueIdentifier>{fd94aff1-7048-4168-966a-088e42b11ed6}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Common">
+      <UniqueIdentifier>{2d292162-8d7b-4f69-a9e9-6c727546bd1a}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="DebugPrint.cpp">
@@ -50,6 +53,30 @@
     </ClCompile>
     <ClCompile Include="main.cpp">
       <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\..\..\Program Files (x86)\Microsoft Xbox SDK\Samples\Xbox\Common\Src\sjis2unicode.cpp">
+      <Filter>Common</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\..\..\Program Files (x86)\Microsoft Xbox SDK\Samples\Xbox\Common\Src\xbapp.cpp">
+      <Filter>Common</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\..\..\Program Files (x86)\Microsoft Xbox SDK\Samples\Xbox\Common\Src\xbinput.cpp">
+      <Filter>Common</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\..\..\Program Files (x86)\Microsoft Xbox SDK\Samples\Xbox\Common\Src\xbfont.cpp">
+      <Filter>Common</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\..\..\Program Files (x86)\Microsoft Xbox SDK\Samples\Xbox\Common\Src\xbutil.cpp">
+      <Filter>Common</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\..\..\Program Files (x86)\Microsoft Xbox SDK\Samples\Xbox\Common\Src\xbstopwatch.cpp">
+      <Filter>Common</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\..\..\Program Files (x86)\Microsoft Xbox SDK\Samples\Xbox\Common\Src\xbresource.cpp">
+      <Filter>Common</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

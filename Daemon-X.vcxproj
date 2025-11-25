@@ -11,6 +11,13 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="..\..\..\..\..\Program Files (x86)\Microsoft Xbox SDK\Samples\Xbox\Common\Src\sjis2unicode.cpp" />
+    <ClCompile Include="..\..\..\..\..\Program Files (x86)\Microsoft Xbox SDK\Samples\Xbox\Common\Src\xbapp.cpp" />
+    <ClCompile Include="..\..\..\..\..\Program Files (x86)\Microsoft Xbox SDK\Samples\Xbox\Common\Src\xbfont.cpp" />
+    <ClCompile Include="..\..\..\..\..\Program Files (x86)\Microsoft Xbox SDK\Samples\Xbox\Common\Src\xbinput.cpp" />
+    <ClCompile Include="..\..\..\..\..\Program Files (x86)\Microsoft Xbox SDK\Samples\Xbox\Common\Src\xbresource.cpp" />
+    <ClCompile Include="..\..\..\..\..\Program Files (x86)\Microsoft Xbox SDK\Samples\Xbox\Common\Src\xbstopwatch.cpp" />
+    <ClCompile Include="..\..\..\..\..\Program Files (x86)\Microsoft Xbox SDK\Samples\Xbox\Common\Src\xbutil.cpp" />
     <ClCompile Include="AppActions.cpp" />
     <ClCompile Include="ContextMenu.cpp" />
     <ClCompile Include="DebugPrint.cpp" />
@@ -21,6 +28,7 @@
     <ClCompile Include="main.cpp" />
     <ClCompile Include="OnScreenKeyboard.cpp" />
     <ClCompile Include="PaneRenderer.cpp" />
+    <ClCompile Include="Source.cpp" />
     <ClCompile Include="xipslib.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -48,13 +56,13 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
-    <PlatformToolset>v142</PlatformToolset>
+    <PlatformToolset>v143</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
-    <PlatformToolset>v142</PlatformToolset>
+    <PlatformToolset>v143</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
@@ -71,7 +79,7 @@
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
-    <IncludePath>$(VC_IncludePath);$(RXDK_LIBS)include</IncludePath>
+    <IncludePath>$(RXDK_LIBS)include</IncludePath>
     <ExternalIncludePath>$(RXDK_LIBS)include</ExternalIncludePath>
     <LibraryWPath />
     <SourcePath />
@@ -96,22 +104,24 @@
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>false</SDLCheck>
-      <PreprocessorDefinitions>XBOX;_XBOX;_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>XBOX;_XBOX;_DEBUG;_HAS_EXCEPTIONS=0</PreprocessorDefinitions>
       <ConformanceMode>false</ConformanceMode>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <AdditionalIncludeDirectories>C:\Program Files %28x86%29\Microsoft Xbox SDK\Samples\Xbox\Common\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <BufferSecurityCheck>false</BufferSecurityCheck>
-      <ExceptionHandling>Sync</ExceptionHandling>
+      <ExceptionHandling>false</ExceptionHandling>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
-      <AdditionalOptions>/arch:SSE %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/arch:SSE /Zc:externC- /Zc:sizedDealloc- /Zc:threadSafeInit- /Zc:throwingNew-</AdditionalOptions>
       <SupportJustMyCode>false</SupportJustMyCode>
       <ControlFlowGuard>false</ControlFlowGuard>
-      <LanguageStandard>stdcpp17</LanguageStandard>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <EnableEnhancedInstructionSet>StreamingSIMDExtensions</EnableEnhancedInstructionSet>
+      <FloatingPointModel>Fast</FloatingPointModel>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>xboxkrnl.lib;libcmtd.lib;xapilibd.lib;d3d8d.lib;d3dx8d.lib</AdditionalDependencies>
+      <AdditionalDependencies>xapilibd.lib;d3d8d.lib;d3dx8d.lib;xgraphicsd.lib;dsoundd.lib;dmusicd.lib;xactengd.lib;xsndtrkd.lib;xvoiced.lib;xonlined.lib;xboxkrnl.lib;xbdm.lib;libcmtd.lib;libcpmtd.lib</AdditionalDependencies>
       <IgnoreAllDefaultLibraries>true</IgnoreAllDefaultLibraries>
       <BaseAddress>
       </BaseAddress>
