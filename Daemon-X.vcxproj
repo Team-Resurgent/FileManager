@@ -56,7 +56,7 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
-    <PlatformToolset>v143</PlatformToolset>
+    <PlatformToolset>v142</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
@@ -104,24 +104,24 @@
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>false</SDLCheck>
-      <PreprocessorDefinitions>XBOX;_XBOX;_DEBUG;_HAS_EXCEPTIONS=0</PreprocessorDefinitions>
+      <PreprocessorDefinitions>XBOX;_XBOX;_DEBUG;%(PreprocessorDefinitions);_HAS_EXCEPTIONS=0</PreprocessorDefinitions>
       <ConformanceMode>false</ConformanceMode>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <AdditionalIncludeDirectories>C:\Program Files %28x86%29\Microsoft Xbox SDK\Samples\Xbox\Common\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <BufferSecurityCheck>false</BufferSecurityCheck>
       <ExceptionHandling>false</ExceptionHandling>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
-      <AdditionalOptions>/arch:SSE /Zc:externC- /Zc:sizedDealloc- /Zc:threadSafeInit- /Zc:throwingNew-</AdditionalOptions>
+      <AdditionalOptions>/arch:SSE /Zc:sizedDealloc- /Zc:threadSafeInit- </AdditionalOptions>
       <SupportJustMyCode>false</SupportJustMyCode>
       <ControlFlowGuard>false</ControlFlowGuard>
-      <LanguageStandard>stdcpp20</LanguageStandard>
+      <LanguageStandard>stdcpp17</LanguageStandard>
       <EnableEnhancedInstructionSet>StreamingSIMDExtensions</EnableEnhancedInstructionSet>
       <FloatingPointModel>Fast</FloatingPointModel>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>xapilibd.lib;d3d8d.lib;d3dx8d.lib;xgraphicsd.lib;dsoundd.lib;dmusicd.lib;xactengd.lib;xsndtrkd.lib;xvoiced.lib;xonlined.lib;xboxkrnl.lib;xbdm.lib;libcmtd.lib;libcpmtd.lib</AdditionalDependencies>
+      <AdditionalDependencies>xboxkrnl.lib;libcmtd.lib;xapilibd.lib;d3d8d.lib;d3dx8d.lib;xgraphicsd.lib;libcpmtd.lib</AdditionalDependencies>
       <IgnoreAllDefaultLibraries>true</IgnoreAllDefaultLibraries>
       <BaseAddress>
       </BaseAddress>
