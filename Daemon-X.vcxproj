@@ -134,11 +134,22 @@
     <PostBuildEvent>
       <Message>Creating Xbox Image...</Message>
       <Command>"$(RXDK_LIBS)bin\patchSubsystem.exe" -i="$(OutDir)$(TargetFileName)" -s=0x000E
-"$(RXDK_LIBS)bin\imagebld.exe" /in:"$(OutDir)$(TargetFileName)" /out:"$(OutDir)$(TargetName).xbe" /nologo /stack:65536 /debug /nolibwarn /testid:"0xDAE420" /testname:"Daemon-X" /titleimage:"$(ProjectDir)Daemon-X.xpr" /defaultsaveimage:"$(ProjectDir)Daemon-X.xpr"
-MKDIR "$(OutDir)Build\$(ProjectName)"
-COPY /Y "$(OutDir)$(TargetName).xbe" "$(OutDir)Build\$(ProjectName)\default.xbe"
-XCOPY /I /E /S /Y /F "$(ProjectDir)Media\*" "$(OutDir)Build\$(ProjectName)"
-MKDIR "$(OutDir)XISO"
+COPY /Y "$(ProjectDir)titleimage.png" "$(OutDir)titleimage.png" &gt;NUL
+ECHO Texture MyTex &gt; "$(OutDir)titleimage.rdf"
+ECHO { &gt;&gt; "$(OutDir)titleimage.rdf"
+ECHO Source titleimage.png &gt;&gt; "$(OutDir)titleimage.rdf"
+ECHO Format D3DFMT_DXT1 &gt;&gt; "$(OutDir)titleimage.rdf"
+ECHO Width 128 &gt;&gt; "$(OutDir)titleimage.rdf"
+ECHO Height 128 &gt;&gt; "$(OutDir)titleimage.rdf"
+ECHO } &gt;&gt; "$(OutDir)titleimage.rdf"
+"$(RXDK_LIBS)bin\bundler.exe" "$(OutDir)titleimage.rdf" -o "$(OutDir)titleimage.xbx"
+DEL /q "$(OutDir)titleimage.rdf"
+DEL /q "$(OutDir)titleimage.h"
+"$(RXDK_LIBS)bin\imagebld.exe" /in:"$(OutDir)$(TargetFileName)" /out:"$(OutDir)$(TargetName).xbe" /nologo /stack:65536 /debug /nolibwarn /testid:"0xDAE420" /testname:"Daemon-X" /titleimage:"$(OutDir)titleimage.xbx" /defaultsaveimage:"$(OutDir)titleimage.xbx"
+MKDIR "$(OutDir)Build\$(ProjectName)" &gt;NUL 2&gt;&amp;1
+COPY /Y "$(OutDir)$(TargetName).xbe" "$(OutDir)Build\$(ProjectName)\default.xbe" &gt;NUL
+XCOPY /C /Q /I /E /S /Y /F "$(ProjectDir)Media\*" "$(OutDir)Build\$(ProjectName)" &gt;NUL 2&gt;NUL
+MKDIR "$(OutDir)XISO" &gt;NUL 2&gt;&amp;1
 "$(RXDK_LIBS)bin\xdvdfs.exe" pack "$(OutDir)Build\$(ProjectName)" "$(OutDir)XISO\$(ProjectName).iso"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
