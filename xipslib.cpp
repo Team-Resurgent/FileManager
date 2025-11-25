@@ -32,7 +32,7 @@ int createBak(const char* src, bool ovr) {
         return E_FOPEN_DST;
     }
 
-    char buf[1024];
+    char buf[4096];
     int c;
     while ((c = fread(buf, 1, sizeof(buf), fsrc))) fwrite(buf, 1, c, fdst);
 
@@ -111,5 +111,5 @@ int applyIPS(const char* ips, const char* src) {
     fclose(fips);
     fclose(fsrc);
 
-    return 0;
+    return E_NO_ERROR;
 }
