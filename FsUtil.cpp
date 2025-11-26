@@ -53,12 +53,13 @@ static inline void MakeDosString(char* out, size_t cap, const char* letter){
 // ============================================================================
 // Copy progress callback plumbing
 // ============================================================================
-static CopyProgressFn g_copyProgFn   = 0;
-static void*          g_copyProgUser = 0;
+
+CopyProgressFn CopyProgress::g_copyProgFn   = 0;
+void*          CopyProgress::g_copyProgUser = 0;
 
 void SetCopyProgressCallback(CopyProgressFn fn, void* user){
-    g_copyProgFn   = fn;
-    g_copyProgUser = user;
+    CopyProgress::g_copyProgFn   = fn;
+    CopyProgress::g_copyProgUser = user;
 }
 
 // ============================================================================
@@ -574,8 +575,8 @@ static bool CopyFileChunkedA(const char* s, const char* d,
         inoutBytesDone += wr;
 
         // Progress/cancel callback
-        if (g_copyProgFn){
-            if (!g_copyProgFn(inoutBytesDone, totalBytes, s, g_copyProgUser)){
+        if (CopyProgress::g_copyProgFn){
+            if (!CopyProgress::g_copyProgFn(inoutBytesDone, totalBytes, s, CopyProgress::g_copyProgUser)){
                 ok = false; break; // canceled
             }
         }

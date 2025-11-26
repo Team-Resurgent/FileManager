@@ -29,7 +29,18 @@
     <ClCompile Include="OnScreenKeyboard.cpp" />
     <ClCompile Include="PaneRenderer.cpp" />
     <ClCompile Include="Resolves.cpp" />
-    <ClCompile Include="xipslib.cpp" />
+    <ClCompile Include="xipslib\xipslib.cpp" />
+    <ClCompile Include="xunzip2\unzipLIB\src\adler32.c" />
+    <ClCompile Include="xunzip2\unzipLIB\src\crc32.c" />
+    <ClCompile Include="xunzip2\unzipLIB\src\infback.c" />
+    <ClCompile Include="xunzip2\unzipLIB\src\inffast.c" />
+    <ClCompile Include="xunzip2\unzipLIB\src\inflate.c" />
+    <ClCompile Include="xunzip2\unzipLIB\src\inftrees.c" />
+    <ClCompile Include="xunzip2\unzipLIB\src\unzip.c" />
+    <ClCompile Include="xunzip2\unzipLIB\src\unzipLIB.cpp" />
+    <ClCompile Include="xunzip2\unzipLIB\src\zutil.c" />
+    <ClCompile Include="xunzip2\xunzip2.cpp" />
+    <ClCompile Include="xunzip2\ziparchive.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="AppActions.h" />
@@ -42,7 +53,22 @@
     <ClInclude Include="OnScreenKeyboard.h" />
     <ClInclude Include="PaneModel.h" />
     <ClInclude Include="PaneRenderer.h" />
-    <ClInclude Include="xipslib.h" />
+    <ClInclude Include="xipslib\xipslib.h" />
+    <ClInclude Include="xunzip2\stdint.h" />
+    <ClInclude Include="xunzip2\StdString.h" />
+    <ClInclude Include="xunzip2\unzipLIB\src\crc32.h" />
+    <ClInclude Include="xunzip2\unzipLIB\src\gzguts.h" />
+    <ClInclude Include="xunzip2\unzipLIB\src\inffast.h" />
+    <ClInclude Include="xunzip2\unzipLIB\src\inffixed.h" />
+    <ClInclude Include="xunzip2\unzipLIB\src\inflate.h" />
+    <ClInclude Include="xunzip2\unzipLIB\src\inftrees.h" />
+    <ClInclude Include="xunzip2\unzipLIB\src\unzip.h" />
+    <ClInclude Include="xunzip2\unzipLIB\src\unzipLIB.h" />
+    <ClInclude Include="xunzip2\unzipLIB\src\zconf.h" />
+    <ClInclude Include="xunzip2\unzipLIB\src\zlib.h" />
+    <ClInclude Include="xunzip2\unzipLIB\src\zutil.h" />
+    <ClInclude Include="xunzip2\xunzip2.h" />
+    <ClInclude Include="xunzip2\ziparchive.h" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>16.0</VCProjectVersion>
@@ -107,7 +133,7 @@
       <PreprocessorDefinitions>XBOX;_XBOX;_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>false</ConformanceMode>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
-      <AdditionalIncludeDirectories>C:\Program Files %28x86%29\Microsoft Xbox SDK\Samples\Xbox\Common\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)xipslib;$(ProjectDir)xunzip2;$(ProjectDir)xunzip2\unzipLIB\src;C:\Program Files %28x86%29\Microsoft Xbox SDK\Samples\Xbox\Common\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <BufferSecurityCheck>false</BufferSecurityCheck>
       <ExceptionHandling>false</ExceptionHandling>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
