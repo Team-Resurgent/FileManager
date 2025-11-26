@@ -82,6 +82,10 @@ typedef bool (*CopyProgressFn)(ULONGLONG bytesDone,
                                ULONGLONG bytesTotal,
                                const char* currentPath,
                                void* user);
+struct CopyProgress {
+    static CopyProgressFn g_copyProgFn;
+    static void* g_copyProgUser;
+};
 void SetCopyProgressCallback(CopyProgressFn fn, void* user);
 bool CopyRecursiveWithProgressA(const char* srcPath, const char* dstDir,
                                 ULONGLONG totalBytes);
