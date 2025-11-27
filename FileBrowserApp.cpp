@@ -467,6 +467,31 @@ bool FileBrowserApp::ResolveDestDir(char* outDst, size_t cap){
     return false;
 }
 
+// Resolve the source directory for unzip based on the current pane.
+// Returns normalized path with trailing slash in outDst on success.
+bool FileBrowserApp::ResolveSrcDir(char* srcDst, size_t cap) {
+    Pane& dst = m_pane[m_active];
+    srcDst[0] = 0;
+
+    if (dst.mode == 1) {
+        _snprintf(srcDst, (int)cap, "%s", dst.curPath);
+        srcDst[cap - 1] = 0;
+        NormalizeDirA(srcDst);
+        return true;
+    }
+    // If the other pane is the drive list, allow selecting a drive as destination.
+    if (!dst.items.empty()) {
+        const Item& di = dst.items[dst.sel];
+        if (di.isDir && !di.isUpEntry) {
+            _snprintf(srcDst, (int)cap, "%s", di.name);  // e.g. "E:\"
+            srcDst[cap - 1] = 0;
+            NormalizeDirA(srcDst);
+            return true;
+        }
+    }
+    return false;
+}
+
 // Select an item in a pane by name and adjust scroll to reveal it.
 void FileBrowserApp::SelectItemInPane(Pane& p, const char* name){
     if (!name || p.items.empty()) return;
@@ -529,6 +554,10 @@ void FileBrowserApp::BuildContextMenu(){
 	AddMenuItem("Create bak",      ACT_CREATEBAK,   (true));
 	if (ext && _stricmp(ext, "bak") == 0)
 	AddMenuItem("Restore bak",     ACT_RESTOREBAK,  (true));
+    if (ext && _stricmp(ext, "zip") == 0)
+    AddMenuItem("Unzip here",      ACT_UNZIPHERE,   (true));
+    if (ext && _stricmp(ext, "zip") == 0)
+    AddMenuItem("Unzip to..",      ACT_UNZIPTO,     (inDir2));
 
     AddMenuItem("Make new folder", ACT_MKDIR,       (inDir));
     AddMenuItem("Calculate size",  ACT_CALCSIZE,    (hasSel));

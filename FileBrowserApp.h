@@ -94,6 +94,7 @@ private:
     void  UpOne(Pane& p);                          // go up one or back to drive list
     void  RefreshPane(Pane& p);                    // rebuild items, preserve selection/scroll
     bool  ResolveDestDir(char* outDst, size_t cap);// determine destination dir from other pane
+    bool  ResolveSrcDir(char* srcDst, size_t cap); // determine destination dir from current pane
     void  SelectItemInPane(Pane& p, const char* name);
 
     // --- Context menu -------------------------------------------------------

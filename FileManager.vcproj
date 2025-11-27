@@ -21,7 +21,7 @@
 				Name="VCCLCompilerTool"
 				Optimization="0"
 				OptimizeForProcessor="2"
-				AdditionalIncludeDirectories=".\xipslib;.\xunzip2;.\xunzip2\unzipLIB\src;&quot;C:\Program Files\Microsoft Xbox SDK\Samples\Xbox\Common\Include&quot;"
+				AdditionalIncludeDirectories=".\xipslib;.\unzipLIB\src;&quot;C:\Program Files\Microsoft Xbox SDK\Samples\Xbox\Common\Include&quot;"
 				PreprocessorDefinitions="_DEBUG;_XBOX"
 				MinimalRebuild="TRUE"
 				BasicRuntimeChecks="3"
@@ -382,90 +382,68 @@
 			</File>
 		</Filter>
 		<Filter
-			Name="xunzip2"
+			Name="unzipLIB"
 			Filter="">
 			<File
-				RelativePath=".\xunzip2\stdint.h">
+				RelativePath=".\unzipLIB\src\adler32.c">
 			</File>
 			<File
-				RelativePath=".\xunzip2\StdString.h">
+				RelativePath=".\unzipLIB\src\crc32.c">
 			</File>
 			<File
-				RelativePath=".\xunzip2\xunzip2.cpp">
+				RelativePath=".\unzipLIB\src\crc32.h">
 			</File>
 			<File
-				RelativePath=".\xunzip2\xunzip2.h">
+				RelativePath=".\unzipLIB\src\gzguts.h">
 			</File>
 			<File
-				RelativePath=".\xunzip2\ziparchive.cpp">
+				RelativePath=".\unzipLIB\src\infback.c">
 			</File>
 			<File
-				RelativePath=".\xunzip2\ziparchive.h">
+				RelativePath=".\unzipLIB\src\inffast.c">
 			</File>
-			<Filter
-				Name="unzipLIB"
-				Filter="">
-				<File
-					RelativePath=".\xunzip2\unzipLIB\src\adler32.c">
-				</File>
-				<File
-					RelativePath=".\xunzip2\unzipLIB\src\crc32.c">
-				</File>
-				<File
-					RelativePath=".\xunzip2\unzipLIB\src\crc32.h">
-				</File>
-				<File
-					RelativePath=".\xunzip2\unzipLIB\src\gzguts.h">
-				</File>
-				<File
-					RelativePath=".\xunzip2\unzipLIB\src\infback.c">
-				</File>
-				<File
-					RelativePath=".\xunzip2\unzipLIB\src\inffast.c">
-				</File>
-				<File
-					RelativePath=".\xunzip2\unzipLIB\src\inffast.h">
-				</File>
-				<File
-					RelativePath=".\xunzip2\unzipLIB\src\inffixed.h">
-				</File>
-				<File
-					RelativePath=".\xunzip2\unzipLIB\src\inflate.c">
-				</File>
-				<File
-					RelativePath=".\xunzip2\unzipLIB\src\inflate.h">
-				</File>
-				<File
-					RelativePath=".\xunzip2\unzipLIB\src\inftrees.c">
-				</File>
-				<File
-					RelativePath=".\xunzip2\unzipLIB\src\inftrees.h">
-				</File>
-				<File
-					RelativePath=".\xunzip2\unzipLIB\src\unzip.c">
-				</File>
-				<File
-					RelativePath=".\xunzip2\unzipLIB\src\unzip.h">
-				</File>
-				<File
-					RelativePath=".\xunzip2\unzipLIB\src\unzipLIB.cpp">
-				</File>
-				<File
-					RelativePath=".\xunzip2\unzipLIB\src\unzipLIB.h">
-				</File>
-				<File
-					RelativePath=".\xunzip2\unzipLIB\src\zconf.h">
-				</File>
-				<File
-					RelativePath=".\xunzip2\unzipLIB\src\zlib.h">
-				</File>
-				<File
-					RelativePath=".\xunzip2\unzipLIB\src\zutil.c">
-				</File>
-				<File
-					RelativePath=".\xunzip2\unzipLIB\src\zutil.h">
-				</File>
-			</Filter>
+			<File
+				RelativePath=".\unzipLIB\src\inffast.h">
+			</File>
+			<File
+				RelativePath=".\unzipLIB\src\inffixed.h">
+			</File>
+			<File
+				RelativePath=".\unzipLIB\src\inflate.c">
+			</File>
+			<File
+				RelativePath=".\unzipLIB\src\inflate.h">
+			</File>
+			<File
+				RelativePath=".\unzipLIB\src\inftrees.c">
+			</File>
+			<File
+				RelativePath=".\unzipLIB\src\inftrees.h">
+			</File>
+			<File
+				RelativePath=".\unzipLIB\src\unzip.c">
+			</File>
+			<File
+				RelativePath=".\unzipLIB\src\unzip.h">
+			</File>
+			<File
+				RelativePath=".\unzipLIB\src\unzipLIB.cpp">
+			</File>
+			<File
+				RelativePath=".\unzipLIB\src\unzipLIB.h">
+			</File>
+			<File
+				RelativePath=".\unzipLIB\src\zconf.h">
+			</File>
+			<File
+				RelativePath=".\unzipLIB\src\zlib.h">
+			</File>
+			<File
+				RelativePath=".\unzipLIB\src\zutil.c">
+			</File>
+			<File
+				RelativePath=".\unzipLIB\src\zutil.h">
+			</File>
 		</Filter>
 	</Files>
 	<Globals>
