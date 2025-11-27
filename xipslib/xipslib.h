@@ -9,36 +9,23 @@ typedef enum {
 	E_NOT_IPS,
 	E_OUT_OF_MEMORY,
 	E_CANNOT_OVR,
-	E_REN_ERROR
+	E_REN_ERROR,
+	E_BAD_IPS,
+	E_FWRITE_DST,
+	E_FSEEK_SRC
 } ErrorCode;
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-	/// <summary>
-	/// Creates an identical file with the extension .bak
-	/// </summary>
-	/// <param name="src">source filepath</param>
-	/// <param name="ovr">overwrite</param>
-	/// <returns>ErrorCode</returns>
-	int createBak(const char* src, bool ovr);
+	int CheckIPS(const char* ips);
 
-	/// <summary>
-	/// Restores a .bak file
-	/// </summary>
-	/// <param name="src">source filepath</param>
-	/// <param name="ovr">overwrite</param>
-	/// <returns>ErrorCode</returns>
-	int restoreBak(const char* src, bool ovr);
+	int CreateBak(const char* src, bool ovr);
 
-	/// <summary>
-	/// Applies IPS patch file
-	/// </summary>
-	/// <param name="ips">ips filepath</param>
-	/// <param name="src">source filepath</param>
-	/// <returns>ErrorCode</returns>
-	int applyIPS(const char* ips, const char* src);
+	int RestoreBak(const char* src, bool ovr);
+
+	int ApplyIPS(const char* ips, const char* src);
 
 #ifdef __cplusplus
 }

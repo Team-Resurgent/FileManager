@@ -550,8 +550,6 @@ void FileBrowserApp::BuildContextMenu(){
 
 	if (ext && _stricmp(ext, "ips") == 0)
 	AddMenuItem("Apply ips",       ACT_APPLYIPS,    (ext2 && _stricmp(ext2, "xbe") == 0));
-	if (ext && _stricmp(ext, "xbe") == 0)
-	AddMenuItem("Create bak",      ACT_CREATEBAK,   (true));
 	if (ext && _stricmp(ext, "bak") == 0)
 	AddMenuItem("Restore bak",     ACT_RESTOREBAK,  (true));
     if (ext && _stricmp(ext, "zip") == 0)

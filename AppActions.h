@@ -38,7 +38,6 @@ enum Action {
     ACT_FORMAT_CACHE,  // Format X/Y/Z cache partitions (+ clear E:\CACHE)
 
 	ACT_APPLYIPS,      //xipslib
-	ACT_CREATEBAK,     //xipslib
 	ACT_RESTOREBAK,    //xipslib
     ACT_UNZIPTO,       //unzipLIB
     ACT_UNZIPHERE,     //unzipLIB

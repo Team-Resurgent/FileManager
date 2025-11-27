@@ -188,7 +188,6 @@ char* strreplall(char* Str, size_t BufSiz, char* OldStr, char* NewStr) {
 }
 
 void* m_pUnZipBuffer = (void*)NULL;
-unsigned int m_uiUnZipBufferSize = 65536;
 int ExtractCurrentFile(UNZIP* zip, const char* pszDestinationFolder, const bool bUseFolderNames, bool bOverwrite, ULONGLONG& inoutBytesDone, ULONGLONG totalBytes, const char* s) {
 
     char szFileName_InZip[512];
@@ -273,7 +272,7 @@ int ExtractCurrentFile(UNZIP* zip, const char* pszDestinationFolder, const bool 
     // Do we have a buffer?
     if (m_pUnZipBuffer == (void*)NULL) {
         // Allocate buffer
-        if ((m_pUnZipBuffer = (void*)malloc(m_uiUnZipBufferSize)) == (void*)NULL) {
+        if ((m_pUnZipBuffer = (void*)malloc(65536)) == (void*)NULL) {
             // Return not OK
             return UNZ_INTERNALERROR;
         }
@@ -356,7 +355,7 @@ int ExtractCurrentFile(UNZIP* zip, const char* pszDestinationFolder, const bool 
     if (hFile != (HANDLE)INVALID_HANDLE_VALUE) {
         do {
             // Read the current file
-            if ((rc = zip->readCurrentFile((uint8_t*)m_pUnZipBuffer, m_uiUnZipBufferSize)) < 0) {
+            if ((rc = zip->readCurrentFile((uint8_t*)m_pUnZipBuffer, 65536)) < 0) {
                 // Error reading zip file
                 // Break out of loop
                 break;
@@ -400,6 +399,60 @@ int ExtractCurrentFile(UNZIP* zip, const char* pszDestinationFolder, const bool 
 
     // Return status
     return rc;
+}
+
+// ------------------------------------------------------------------
+// CreateBak function with added prog - src-dev
+// ------------------------------------------------------------------
+int CreateBakWithProgress(const char* src, const char* dst, bool ovr, ULONGLONG& inoutBytesDone, ULONGLONG totalBytes, const char* s) {
+
+    if (!ovr) {
+        FILE* fdst = fopen(dst, "rb");
+        bool exists = false;
+        if (fdst) {
+            exists = true;
+            fclose(fdst);
+        }
+        if (exists) return E_CANNOT_OVR;
+    }
+
+    FILE* fsrc = fopen(src, "rb");
+    if (!fsrc) return E_FOPEN_SRC;
+
+    FILE* fdst = fopen(dst, "wb");
+    if (!fdst) {
+        fclose(fsrc);
+        return E_FOPEN_DST;
+    }
+
+    char* buf = (char*)malloc(sizeof(char) * 65536);
+    if (buf == NULL) return E_OUT_OF_MEMORY;
+
+    int c;
+    while ((c = fread(buf, 1, 65536, fsrc))) {
+        int rb = fwrite(buf, 1, c, fdst);
+        if (rb != c) {
+            fclose(fsrc);
+            fclose(fdst);
+
+            free(buf);
+
+            return E_FWRITE_DST;
+        }
+        inoutBytesDone += rb;
+        if (CopyProgress::g_copyProgFn) {
+            if (!CopyProgress::g_copyProgFn(inoutBytesDone, totalBytes, s, CopyProgress::g_copyProgUser)) {
+                break; // canceled
+            }
+        }
+    }
+
+    fclose(fsrc);
+    fclose(fdst);
+
+    free(buf);
+
+    return E_NO_ERROR;
 }
 
 namespace AppActions {
@@ -473,284 +526,289 @@ void Execute(Action act, FileBrowserApp& app) {
 
     switch (act)
     {
-    // ---- Open / Enter / Launch ------------------------------------------------
+        // ---- Open / Enter / Launch --------------------------------------------
     case ACT_OPEN:
-        if (sel){
+    {
+        if (sel) {
             if (sel->isUpEntry) { app.UpOne(src); }
             else if (sel->isDir) { app.EnterSelection(src); }
-            else if (HasXbeExt(sel->name)){
+            else if (HasXbeExt(sel->name)) {
                 char full[512]; JoinPath(full, sizeof(full), src.curPath, sel->name);
                 if (!LaunchXbeA(full)) app.SetStatusLastErr("Launch failed");
             }
         }
         break;
+    }
 
     // ---- Copy -----------------------------------------------------------------
-	case ACT_COPY:
-	{
-		if (src.mode != 1) { app.SetStatus("Open a folder"); break; }
+    case ACT_COPY:
+    {
+        if (src.mode != 1) { app.SetStatus("Open a folder"); break; }
 
-		// Resolve destination (other pane preferred)
-		char dstDir[512];
-		if (!app.ResolveDestDir(dstDir, sizeof(dstDir))) { app.SetStatus("Pick a destination"); break; }
-		if ((dstDir[0]=='D'||dstDir[0]=='d') && dstDir[1]==':'){ app.SetStatus("Cannot copy to D:\\"); break; }
-		NormalizeDirA(dstDir);
-		if (!CanWriteHereA(dstDir)){ app.SetStatusLastErr("Dest not writable"); break; }
+        // Resolve destination (other pane preferred)
+        char dstDir[512];
+        if (!app.ResolveDestDir(dstDir, sizeof(dstDir))) { app.SetStatus("Pick a destination"); break; }
+        if ((dstDir[0] == 'D' || dstDir[0] == 'd') && dstDir[1] == ':') { app.SetStatus("Cannot copy to D:\\"); break; }
+        NormalizeDirA(dstDir);
+        if (!CanWriteHereA(dstDir)) { app.SetStatusLastErr("Dest not writable"); break; }
 
-		// Gather sources
-		std::vector<std::string> srcs;
-		GatherMarkedOrSelectedFullPaths(src, srcs);
-		if (srcs.empty()) { app.SetStatus("Nothing to copy"); break; }
+        // Gather sources
+        std::vector<std::string> srcs;
+        GatherMarkedOrSelectedFullPaths(src, srcs);
+        if (srcs.empty()) { app.SetStatus("Nothing to copy"); break; }
 
-		// Compute total bytes for progress bar
-		ULONGLONG total=0;
-		for (size_t i=0;i<srcs.size();++i) total += DirSizeRecursiveA(srcs[i].c_str());
+        // Compute total bytes for progress bar
+        ULONGLONG total = 0;
+        for (size_t i = 0; i < srcs.size(); ++i) total += DirSizeRecursiveA(srcs[i].c_str());
 
-		// --- preflight free-space check on destination (kept from your version) ---
-		{
-			ULONGLONG freeB=0, totB=0;
-			GetDriveFreeTotal(dstDir, freeB, totB);
-			if (total > freeB){
-				char need[64], have[64];
-				FormatSize(total, need, sizeof(need));
-				FormatSize(freeB, have, sizeof(have));
-				app.SetStatus("Not enough space: need %s, have %s", need, have);
-				break;
-			}
-		}
-		// --- end preflight ---
+        // --- preflight free-space check on destination (kept from your version) ---
+        {
+            ULONGLONG freeB = 0, totB = 0;
+            GetDriveFreeTotal(dstDir, freeB, totB);
+            if (total > freeB) {
+                char need[64], have[64];
+                FormatSize(total, need, sizeof(need));
+                FormatSize(freeB, have, sizeof(have));
+                app.SetStatus("Not enough space: need %s, have %s", need, have);
+                break;
+            }
+        }
+        // --- end preflight ---
 
-		// Begin progress + set callback
-		app.BeginProgress(total, srcs[0].c_str(), "Copying...");
-		CopyProgCtx ctx = { &app, 0, false, false, 0, false };
-		SetCopyProgressCallback(CopyProgThunk, &ctx);
+        // Begin progress + set callback
+        app.BeginProgress(total, srcs[0].c_str(), "Copying...");
+        CopyProgCtx ctx = { &app, 0, false, false, 0, false };
+        SetCopyProgressCallback(CopyProgThunk, &ctx);
 
-		ULONGLONG base = 0;           // cumulative bytes completed
-		char lastDstTop[512] = {0};   // for cancel cleanup
+        ULONGLONG base = 0;           // cumulative bytes completed
+        char lastDstTop[512] = { 0 };   // for cancel cleanup
 
-		// NEW: track results so the final toast reflects reality
-		size_t copiedOk = 0, failed = 0, skipped = 0;
+        // NEW: track results so the final toast reflects reality
+        size_t copiedOk = 0, failed = 0, skipped = 0;
 
-		for (size_t i=0;i<srcs.size();++i){
-			const char* sp = srcs[i].c_str();
+        for (size_t i = 0; i < srcs.size(); ++i) {
+            const char* sp = srcs[i].c_str();
 
-			// Compute top-level destination path (dstDir\basename(sp)) for cleanup
-			const char* bn = BaseNameOf(sp);
-			JoinPath(lastDstTop, sizeof(lastDstTop), dstDir, bn);
+            // Compute top-level destination path (dstDir\basename(sp)) for cleanup
+            const char* bn = BaseNameOf(sp);
+            JoinPath(lastDstTop, sizeof(lastDstTop), dstDir, bn);
 
-			ULONGLONG thisSize = DirSizeRecursiveA(sp);
-			ctx.base = base;
+            ULONGLONG thisSize = DirSizeRecursiveA(sp);
+            ctx.base = base;
 
-			// --- prevent copying a folder into its own subfolder (or itself) ---
-			if (IsSubPathCaseI(sp, lastDstTop)) {
-				app.SetStatus("Cannot copy a folder into its own subfolder");
-				++skipped;
-				continue; // skip this item, proceed to next
-			}
+            // --- prevent copying a folder into its own subfolder (or itself) ---
+            if (IsSubPathCaseI(sp, lastDstTop)) {
+                app.SetStatus("Cannot copy a folder into its own subfolder");
+                ++skipped;
+                continue; // skip this item, proceed to next
+            }
 
-			// --- per-item free-space check (extra safety) ---
-			{
-				ULONGLONG freeB=0, totB=0;
-				GetDriveFreeTotal(lastDstTop, freeB, totB); // any path on dest volume is fine
-				if (thisSize > freeB) {
-					char need[64], have[64];
-					FormatSize(thisSize, need, sizeof(need));
-					FormatSize(freeB,   have, sizeof(have));
-					app.SetStatus("Not enough space for %s: need %s, have %s", bn, need, have);
-					break; // stop the whole batch (change to 'continue;' to try remaining items)
-				}
-			}
-			// --- end per-item check ---
+            // --- per-item free-space check (extra safety) ---
+            {
+                ULONGLONG freeB = 0, totB = 0;
+                GetDriveFreeTotal(lastDstTop, freeB, totB); // any path on dest volume is fine
+                if (thisSize > freeB) {
+                    char need[64], have[64];
+                    FormatSize(thisSize, need, sizeof(need));
+                    FormatSize(freeB, have, sizeof(have));
+                    app.SetStatus("Not enough space for %s: need %s, have %s", bn, need, have);
+                    break; // stop the whole batch (change to 'continue;' to try remaining items)
+                }
+            }
+            // --- end per-item check ---
 
-			if (!CopyRecursiveWithProgressA(sp, dstDir, total)){
-				if (ctx.canceled){
-					// Remove partial destination of the current item, then stop
-					DeleteRecursiveA(lastDstTop);
-					break;
-				}
-				// Non-cancel failure
-				++failed;
-			} else {
-				base += thisSize;
-				++copiedOk;
-			}
-		}
+            if (!CopyRecursiveWithProgressA(sp, dstDir, total)) {
+                if (ctx.canceled) {
+                    // Remove partial destination of the current item, then stop
+                    DeleteRecursiveA(lastDstTop);
+                    break;
+                }
+                // Non-cancel failure
+                ++failed;
+            }
+            else {
+                base += thisSize;
+                ++copiedOk;
+            }
+        }
 
-		// End progress and clear callback
-		SetCopyProgressCallback(NULL, NULL);
-		app.EndProgress();
+        // End progress and clear callback
+        SetCopyProgressCallback(NULL, NULL);
+        app.EndProgress();
 
-		if (ctx.canceled){
-			app.SetStatus("Copy canceled (%u done, %u skipped, %u failed)",
-						(unsigned)copiedOk, (unsigned)skipped, (unsigned)failed);
-			app.RefreshPane(app.m_pane[0]); app.RefreshPane(app.m_pane[1]);
-			break;
-		}
+        if (ctx.canceled) {
+            app.SetStatus("Copy canceled (%u done, %u skipped, %u failed)",
+                (unsigned)copiedOk, (unsigned)skipped, (unsigned)failed);
+            app.RefreshPane(app.m_pane[0]); app.RefreshPane(app.m_pane[1]);
+            break;
+        }
 
-		// If we copied into the currently displayed dest folder, refresh it
-		Pane& dstp = app.m_pane[1 - app.m_active];
-		if (dstp.mode==1 && _stricmp(dstp.curPath, dstDir)==0) ListDirectory(dstp.curPath, dstp.items);
+        // If we copied into the currently displayed dest folder, refresh it
+        Pane& dstp = app.m_pane[1 - app.m_active];
+        if (dstp.mode == 1 && _stricmp(dstp.curPath, dstDir) == 0) ListDirectory(dstp.curPath, dstp.items);
 
-		// Clear marks and refresh both panes
-		for (size_t i=0;i<src.items.size();++i) src.items[i].marked=false;
-		app.RefreshPane(app.m_pane[0]); app.RefreshPane(app.m_pane[1]);
+        // Clear marks and refresh both panes
+        for (size_t i = 0; i < src.items.size(); ++i) src.items[i].marked = false;
+        app.RefreshPane(app.m_pane[0]); app.RefreshPane(app.m_pane[1]);
 
-		// Final toast that reflects what actually happened
-		if (failed==0 && skipped==0) {
-			app.SetStatus("Copied %u item(s)", (unsigned)copiedOk);
-		} else {
-			app.SetStatus("Copied %u, %u skipped, %u failed",
-						(unsigned)copiedOk, (unsigned)skipped, (unsigned)failed);
-		}
-		break;
-}
-
+        // Final toast that reflects what actually happened
+        if (failed == 0 && skipped == 0) {
+            app.SetStatus("Copied %u item(s)", (unsigned)copiedOk);
+        }
+        else {
+            app.SetStatus("Copied %u, %u skipped, %u failed",
+                (unsigned)copiedOk, (unsigned)skipped, (unsigned)failed);
+        }
+        break;
+    }
 
     // ---- Move -----------------------------------------------------------------
-	case ACT_MOVE:
-	{
-		if (src.mode != 1) { app.SetStatus("Open a folder"); break; }
+    case ACT_MOVE:
+    {
+        if (src.mode != 1) { app.SetStatus("Open a folder"); break; }
 
-		char dstDir[512];
-		if (!app.ResolveDestDir(dstDir, sizeof(dstDir))) { app.SetStatus("Pick a destination"); break; }
-		if ((dstDir[0]=='D'||dstDir[0]=='d') && dstDir[1]==':'){ app.SetStatus("Cannot move to D:\\"); break; }
-		NormalizeDirA(dstDir);
-		if (!CanWriteHereA(dstDir)){ app.SetStatusLastErr("Dest not writable"); break; }
+        char dstDir[512];
+        if (!app.ResolveDestDir(dstDir, sizeof(dstDir))) { app.SetStatus("Pick a destination"); break; }
+        if ((dstDir[0] == 'D' || dstDir[0] == 'd') && dstDir[1] == ':') { app.SetStatus("Cannot move to D:\\"); break; }
+        NormalizeDirA(dstDir);
+        if (!CanWriteHereA(dstDir)) { app.SetStatusLastErr("Dest not writable"); break; }
 
-		std::vector<std::string> srcs;
-		GatherMarkedOrSelectedFullPaths(src, srcs);
-		if (srcs.empty()) { app.SetStatus("Nothing to move"); break; }
+        std::vector<std::string> srcs;
+        GatherMarkedOrSelectedFullPaths(src, srcs);
+        if (srcs.empty()) { app.SetStatus("Nothing to move"); break; }
 
-		// Total bytes for progress
-		ULONGLONG total=0;
-		for (size_t i=0;i<srcs.size();++i) total += DirSizeRecursiveA(srcs[i].c_str());
+        // Total bytes for progress
+        ULONGLONG total = 0;
+        for (size_t i = 0; i < srcs.size(); ++i) total += DirSizeRecursiveA(srcs[i].c_str());
 
-		// --- preflight space only when cross-volume (move will copy+delete) ---
-		{
-			const bool sameVol = SameDriveLetter(src.curPath, dstDir) != 0;
-			if (!sameVol){
-				ULONGLONG freeB=0, totB=0;
-				GetDriveFreeTotal(dstDir, freeB, totB);
-				if (total > freeB){
-					char need[64], have[64];
-					FormatSize(total, need, sizeof(need));
-					FormatSize(freeB, have, sizeof(have));
-					app.SetStatus("Not enough space: need %s, have %s", need, have);
-					break;
-				}
-			}
-		}
-		// --- end preflight ---
+        // --- preflight space only when cross-volume (move will copy+delete) ---
+        {
+            const bool sameVol = SameDriveLetter(src.curPath, dstDir) != 0;
+            if (!sameVol) {
+                ULONGLONG freeB = 0, totB = 0;
+                GetDriveFreeTotal(dstDir, freeB, totB);
+                if (total > freeB) {
+                    char need[64], have[64];
+                    FormatSize(total, need, sizeof(need));
+                    FormatSize(freeB, have, sizeof(have));
+                    app.SetStatus("Not enough space: need %s, have %s", need, have);
+                    break;
+                }
+            }
+        }
+        // --- end preflight ---
 
-		app.BeginProgress(total, srcs[0].c_str(), "Moving...");
-		CopyProgCtx ctx = { &app, 0, false, false, 0, false };
-		SetCopyProgressCallback(CopyProgThunk, &ctx);
+        app.BeginProgress(total, srcs[0].c_str(), "Moving...");
+        CopyProgCtx ctx = { &app, 0, false, false, 0, false };
+        SetCopyProgressCallback(CopyProgThunk, &ctx);
 
-		size_t movedOk = 0, failed = 0, skipped = 0;  // NEW: track results
-		ULONGLONG base = 0;
+        size_t movedOk = 0, failed = 0, skipped = 0;  // NEW: track results
+        ULONGLONG base = 0;
 
-		for (size_t i=0;i<srcs.size();++i){
-			const char* sp = srcs[i].c_str();
-			ULONGLONG thisSize = DirSizeRecursiveA(sp);
-			ctx.base = base;
+        for (size_t i = 0; i < srcs.size(); ++i) {
+            const char* sp = srcs[i].c_str();
+            ULONGLONG thisSize = DirSizeRecursiveA(sp);
+            ctx.base = base;
 
-			// Destination top (dstDir\basename(sp))
-			const char* baseName = BaseNameOf(sp);
-			char dstTop[512]; JoinPath(dstTop, sizeof(dstTop), dstDir, baseName);
+            // Destination top (dstDir\basename(sp))
+            const char* baseName = BaseNameOf(sp);
+            char dstTop[512]; JoinPath(dstTop, sizeof(dstTop), dstDir, baseName);
 
-			// --- NEW: prevent moving a folder into its own subfolder (or onto itself)
-			if (IsSubPathCaseI(sp, dstTop)) {
-				app.SetStatus("Cannot move a folder into its own subfolder");
-				++skipped;
-				continue; // skip this item and go on
-			}
+            // --- NEW: prevent moving a folder into its own subfolder (or onto itself)
+            if (IsSubPathCaseI(sp, dstTop)) {
+                app.SetStatus("Cannot move a folder into its own subfolder");
+                ++skipped;
+                continue; // skip this item and go on
+            }
 
-			BOOL doneThis = FALSE;
+            BOOL doneThis = FALSE;
 
-			// --- NEW: per-item free-space check only if not a fast same-volume rename
-			const BOOL canFastRename =
-				SameDriveLetter(sp, dstDir) && !IsSubPathCaseI(sp, dstTop);
+            // --- NEW: per-item free-space check only if not a fast same-volume rename
+            const BOOL canFastRename =
+                SameDriveLetter(sp, dstDir) && !IsSubPathCaseI(sp, dstTop);
 
-			if (!canFastRename) {
-				ULONGLONG freeB=0, totB=0;
-				GetDriveFreeTotal(dstTop, freeB, totB);
-				if (thisSize > freeB) {
-					char need[64], have[64];
-					FormatSize(thisSize, need, sizeof(need));
-					FormatSize(freeB,   have, sizeof(have));
-					app.SetStatus("Not enough space to move %s: need %s, have %s", baseName, need, have);
-					break; // stop the whole batch (use 'continue;' if you prefer to try remaining items)
-				}
-			}
-			// --- end NEW ---
+            if (!canFastRename) {
+                ULONGLONG freeB = 0, totB = 0;
+                GetDriveFreeTotal(dstTop, freeB, totB);
+                if (thisSize > freeB) {
+                    char need[64], have[64];
+                    FormatSize(thisSize, need, sizeof(need));
+                    FormatSize(freeB, have, sizeof(have));
+                    app.SetStatus("Not enough space to move %s: need %s, have %s", baseName, need, have);
+                    break; // stop the whole batch (use 'continue;' if you prefer to try remaining items)
+                }
+            }
+            // --- end NEW ---
 
-			// Fast path: same drive and not moving into own subfolder -> MoveFileA
-			if (SameDriveLetter(sp, dstDir) && !IsSubPathCaseI(sp, dstTop)) {
-				if (MoveFileA(sp, dstTop)) {
-					doneThis = TRUE;  // instant rename/move within volume
-				}
-			}
+            // Fast path: same drive and not moving into own subfolder -> MoveFileA
+            if (SameDriveLetter(sp, dstDir) && !IsSubPathCaseI(sp, dstTop)) {
+                if (MoveFileA(sp, dstTop)) {
+                    doneThis = TRUE;  // instant rename/move within volume
+                }
+            }
 
-			// Fallback: copy -> delete original (only delete if copy succeeded)
-			if (!doneThis) {
-				if (!CopyRecursiveWithProgressA(sp, dstDir, total)){
-					if (ctx.canceled){
-						// Clean partial dest and stop
-						DeleteRecursiveA(dstTop);
-						break;
-					}
-					// Non-cancel failure
-					++failed;
-				} else {
-					if (DeleteRecursiveA(sp)) {
-						doneThis = TRUE;
-					} else {
-						// Optional: consider removing dstTop if source delete failed
-						++failed;
-					}
-				}
-			}
+            // Fallback: copy -> delete original (only delete if copy succeeded)
+            if (!doneThis) {
+                if (!CopyRecursiveWithProgressA(sp, dstDir, total)) {
+                    if (ctx.canceled) {
+                        // Clean partial dest and stop
+                        DeleteRecursiveA(dstTop);
+                        break;
+                    }
+                    // Non-cancel failure
+                    ++failed;
+                }
+                else {
+                    if (DeleteRecursiveA(sp)) {
+                        doneThis = TRUE;
+                    }
+                    else {
+                        // Optional: consider removing dstTop if source delete failed
+                        ++failed;
+                    }
+                }
+            }
 
-			if (doneThis) ++movedOk;
-			base += thisSize;
-		}
+            if (doneThis) ++movedOk;
+            base += thisSize;
+        }
 
-		SetCopyProgressCallback(NULL, NULL);
-		app.EndProgress();
+        SetCopyProgressCallback(NULL, NULL);
+        app.EndProgress();
 
-		if (ctx.canceled){
-			app.SetStatus("Move canceled (%u done, %u skipped, %u failed)",
-						(unsigned)movedOk, (unsigned)skipped, (unsigned)failed);
-			// On cancel we keep originals; clear marks and refresh UI
-			for (size_t i=0;i<src.items.size();++i) src.items[i].marked=false;
-			if (src.mode==1) ListDirectory(src.curPath, src.items);
-			{
-				Pane& dstp = app.m_pane[1 - app.m_active];
-				if (dstp.mode==1 && _stricmp(dstp.curPath, dstDir)==0) ListDirectory(dstp.curPath, dstp.items);
-			}
-			app.RefreshPane(app.m_pane[0]); app.RefreshPane(app.m_pane[1]);
-			break;
-		}
+        if (ctx.canceled) {
+            app.SetStatus("Move canceled (%u done, %u skipped, %u failed)",
+                (unsigned)movedOk, (unsigned)skipped, (unsigned)failed);
+            // On cancel we keep originals; clear marks and refresh UI
+            for (size_t i = 0; i < src.items.size(); ++i) src.items[i].marked = false;
+            if (src.mode == 1) ListDirectory(src.curPath, src.items);
+            {
+                Pane& dstp = app.m_pane[1 - app.m_active];
+                if (dstp.mode == 1 && _stricmp(dstp.curPath, dstDir) == 0) ListDirectory(dstp.curPath, dstp.items);
+            }
+            app.RefreshPane(app.m_pane[0]); app.RefreshPane(app.m_pane[1]);
+            break;
+        }
 
-		// Normal completion: refresh both panes, clear marks
-		for (size_t i=0;i<src.items.size();++i) src.items[i].marked=false;
-		if (src.mode==1) ListDirectory(src.curPath, src.items);
-		{
-			Pane& dstp = app.m_pane[1 - app.m_active];
-			if (dstp.mode==1 && _stricmp(dstp.curPath, dstDir)==0) ListDirectory(dstp.curPath, dstp.items);
-		}
-		app.RefreshPane(app.m_pane[0]); app.RefreshPane(app.m_pane[1]);
+        // Normal completion: refresh both panes, clear marks
+        for (size_t i = 0; i < src.items.size(); ++i) src.items[i].marked = false;
+        if (src.mode == 1) ListDirectory(src.curPath, src.items);
+        {
+            Pane& dstp = app.m_pane[1 - app.m_active];
+            if (dstp.mode == 1 && _stricmp(dstp.curPath, dstDir) == 0) ListDirectory(dstp.curPath, dstp.items);
+        }
+        app.RefreshPane(app.m_pane[0]); app.RefreshPane(app.m_pane[1]);
 
-		// NEW: accurate final toast
-		if (failed==0 && skipped==0) {
-			app.SetStatus("Moved %u item(s)", (unsigned)movedOk);
-		} else {
-			app.SetStatus("Moved %u, %u skipped, %u failed",
-						(unsigned)movedOk, (unsigned)skipped, (unsigned)failed);
-		}
-		break;
-	}
-
+        // NEW: accurate final toast
+        if (failed == 0 && skipped == 0) {
+            app.SetStatus("Moved %u item(s)", (unsigned)movedOk);
+        }
+        else {
+            app.SetStatus("Moved %u, %u skipped, %u failed",
+                (unsigned)movedOk, (unsigned)skipped, (unsigned)failed);
+        }
+        break;
+    }
 
     // ---- Delete ---------------------------------------------------------------
     case ACT_DELETE:
@@ -761,43 +819,47 @@ void Execute(Action act, FileBrowserApp& app) {
         GatherMarkedOrSelectedFullPaths(src, srcs);
         if (srcs.empty()) { app.SetStatus("Nothing to delete"); break; }
 
-        int ok=0;
-        for (size_t i=0;i<srcs.size();++i) if (DeleteRecursiveA(srcs[i].c_str())) ++ok;
+        int ok = 0;
+        for (size_t i = 0; i < srcs.size(); ++i) if (DeleteRecursiveA(srcs[i].c_str())) ++ok;
 
         // Clear marks, refresh, and toast result
-        for (size_t i=0;i<src.items.size();++i) src.items[i].marked=false;
-        if (src.mode==1) ListDirectory(src.curPath, src.items);
+        for (size_t i = 0; i < src.items.size(); ++i) src.items[i].marked = false;
+        if (src.mode == 1) ListDirectory(src.curPath, src.items);
         app.RefreshPane(app.m_pane[0]); app.RefreshPane(app.m_pane[1]);
         app.SetStatus("Deleted %d / %d", ok, (int)srcs.size());
         break;
     }
 
-    // ---- Rename (opens modal OSK) --------------------------------------------
+    // ---- Rename (opens modal OSK) ---------------------------------------------
     case ACT_RENAME:
-        if (sel && src.mode==1 && !sel->isUpEntry){
+    {
+        if (sel && src.mode == 1 && !sel->isUpEntry) {
             app.BeginRename(src.curPath, sel->name);
-        } else {
+        }
+        else {
             app.SetStatus("Open a folder and select an item");
         }
         break;
+    }
 
     // ---- Make new folder ------------------------------------------------------
     case ACT_MKDIR:
     {
-        char baseDir[512] = {0};
+        char baseDir[512] = { 0 };
 
         if (src.mode == 1) {
             _snprintf(baseDir, sizeof(baseDir), "%s", src.curPath);
-        } else if (!src.items.empty()) {
+        }
+        else if (!src.items.empty()) {
             const Item& di = src.items[src.sel];
             if (di.isDir && !di.isUpEntry) {
                 _snprintf(baseDir, sizeof(baseDir), "%s", di.name); // drive root, e.g. "E:\"
             }
         }
-        baseDir[sizeof(baseDir)-1] = 0;
+        baseDir[sizeof(baseDir) - 1] = 0;
         if (!baseDir[0]) { app.SetStatus("Open a folder or select a drive first"); break; }
 
-        if ((baseDir[0]=='D' || baseDir[0]=='d') && baseDir[1]==':') {
+        if ((baseDir[0] == 'D' || baseDir[0] == 'd') && baseDir[1] == ':') {
             app.SetStatus("Cannot create on D:\\ (read-only)"); break;
         }
 
@@ -808,22 +870,23 @@ void Execute(Action act, FileBrowserApp& app) {
         char nameBuf[64];
         char target[512];
         int idx = 0;
-        for (;;){
+        for (;;) {
             if (idx == 0) _snprintf(nameBuf, sizeof(nameBuf), "NewFolder");
             else          _snprintf(nameBuf, sizeof(nameBuf), "NewFolder%d", idx);
-            nameBuf[sizeof(nameBuf)-1]=0;
+            nameBuf[sizeof(nameBuf) - 1] = 0;
 
             JoinPath(target, sizeof(target), baseDir, nameBuf);
 
             if (!DirExistsA(target)) {
                 if (CreateDirectoryA(target, NULL)) {
                     app.SetStatus("Created %s", nameBuf);
-                } else {
+                }
+                else {
                     app.SetStatusLastErr("Create folder failed");
                 }
                 break;
             }
-            if (++idx > 999){ app.SetStatus("Create folder failed (names exhausted)"); break; }
+            if (++idx > 999) { app.SetStatus("Create folder failed (names exhausted)"); break; }
         }
 
         app.RefreshPane(app.m_pane[0]); app.RefreshPane(app.m_pane[1]);
@@ -844,7 +907,7 @@ void Execute(Action act, FileBrowserApp& app) {
             char tmpPath[512] = "";
             if (src.mode == 0 && sel->isDir && !sel->isUpEntry) {
                 _snprintf(tmpPath, sizeof(tmpPath), "%s", sel->name);
-                tmpPath[sizeof(tmpPath)-1] = 0;
+                tmpPath[sizeof(tmpPath) - 1] = 0;
                 NormalizeDirA(tmpPath);
             }
             if (!tmpPath[0]) { app.SetStatus("Open a folder or select a drive"); break; }
@@ -860,34 +923,38 @@ void Execute(Action act, FileBrowserApp& app) {
         break;
     }
 
-    // ---- Go to root (or back to drive list) ----------------------------------
+    // ---- Go to root (or back to drive list) -----------------------------------
     case ACT_GOROOT:
-        if (src.mode == 1){
-            if (!IsDriveRoot(src.curPath)){
+    {
+        if (src.mode == 1) {
+            if (!IsDriveRoot(src.curPath)) {
                 char root[4] = { src.curPath[0], ':', '\\', 0 };
-                strncpy(src.curPath, root, sizeof(src.curPath)-1);
+                strncpy(src.curPath, root, sizeof(src.curPath) - 1);
                 src.curPath[3] = 0;
                 src.sel = 0; src.scroll = 0;
                 ListDirectory(src.curPath, src.items);
-            } else {
+            }
+            else {
                 // Already at root -> switch to drive list
                 src.mode = 0; src.curPath[0] = 0; src.sel = 0; src.scroll = 0;
                 BuildDriveItems(src.items);
             }
-        } else {
+        }
+        else {
             // In drive list: refresh it
             BuildDriveItems(src.items);
         }
         break;
+    }
 
     // ---- Marking operations ---------------------------------------------------
     case ACT_MARK_ALL:
     {
         Pane& p = app.m_pane[app.m_active];
-        if (p.mode==1 && !p.items.empty()){
+        if (p.mode==1 && !p.items.empty()) {
             int n=0;
-            for (size_t i=0; i<p.items.size(); ++i){
-                if (!p.items[i].isUpEntry && !p.items[i].marked){
+            for (size_t i=0; i<p.items.size(); ++i) {
+                if (!p.items[i].isUpEntry && !p.items[i].marked) {
                     p.items[i].marked = true; ++n;
                 }
             }
@@ -900,10 +967,10 @@ void Execute(Action act, FileBrowserApp& app) {
     case ACT_INVERT_MARKS:
     {
         Pane& p = app.m_pane[app.m_active];
-        if (p.mode==1 && !p.items.empty()){
+        if (p.mode==1 && !p.items.empty()) {
             int toggled=0;
-            for (size_t i=0;i<p.items.size(); ++i){
-                if (!p.items[i].isUpEntry){
+            for (size_t i=0;i<p.items.size(); ++i) {
+                if (!p.items[i].isUpEntry) {
                     p.items[i].marked = !p.items[i].marked;
                     ++toggled;
                 }
@@ -916,10 +983,13 @@ void Execute(Action act, FileBrowserApp& app) {
     case ACT_CLEAR_MARKS:
     {
         Pane& p = app.m_pane[app.m_active];
-        if (p.mode==1 && !p.items.empty()){
+        if (p.mode==1 && !p.items.empty()) {
             int cleared=0;
-            for (size_t i=0;i<p.items.size(); ++i){
-                if (p.items[i].marked){ p.items[i].marked=false; ++cleared; }
+            for (size_t i=0;i<p.items.size(); ++i) {
+                if (p.items[i].marked) { 
+                    p.items[i].marked=false; 
+                    ++cleared; 
+                }
             }
             app.SetStatus(cleared ? "Cleared %d" : "No marks", cleared);
         }
@@ -951,50 +1021,140 @@ void Execute(Action act, FileBrowserApp& app) {
 
     // ---- Switch active pane ---------------------------------------------------
     case ACT_SWITCHMEDIA:
+    {
         app.m_active = 1 - app.m_active;
         break;
+    }
 	
+    // ---- Apply ips patch ------------------------------------------------------
 	case ACT_APPLYIPS:
 		if (ext && _stricmp(ext, "ips") == 0 && ext2 && _stricmp(ext2, "xbe") == 0) {
-			if (applyIPS(srcFull, dstFull) == E_NO_ERROR) app.SetStatus("Patch applied");
-			else app.SetStatus("Patch failed");
-		}
-		break;
 
-	case ACT_CREATEBAK:
-	{
-		if (ext && _stricmp(ext, "xbe") == 0) {
-			switch (createBak(srcFull, false)) {
-			case E_NO_ERROR: 
-				app.SetStatus("Bak created");
-				break;
-			case E_CANNOT_OVR: 
-				app.SetStatus("Bak already exists");
-				break;
-			default: 
-				app.SetStatus("Bak failed");
-			}
+            bool bkcr = false;
+            bool bkcrfail = false;
+            bool bkcrcanc = false;
+            bool ptchfail = false;
+
+            char dst[1024];
+
+            strcpy(dst, dstFull);
+            strcat(dst, ".bak");
+
+            while (true) {
+
+                // Resolve destination
+                char dstDir[512];
+                app.ResolveDestDir(dstDir, sizeof(dstDir));
+                NormalizeDirA(dstDir);
+
+                if (!CanWriteHereA(dstDir)) {
+                    bkcrfail = true; 
+                    break;
+                }
+
+                ULONGLONG total = DirSizeRecursiveA(dstFull);
+
+                // --- preflight free-space check on destination ---
+                ULONGLONG freeB = 0, totB = 0;
+                GetDriveFreeTotal(dstDir, freeB, totB);
+                if (total > freeB) {
+                    bkcrfail = true;
+                    break;
+                }
+                // --- end preflight ---
+
+                ULONGLONG base = 0; // cumulative bytes completed
+
+                char dstName[47];
+                strcpy(dstName, sel2->name);
+                strcat(dstName, ".bak");
+
+                // Begin progress + set callback
+                app.BeginProgress(total, dstName, "Creaking bak...");
+                CopyProgCtx ctx = { &app, 0, false, false, 0, false };
+                SetCopyProgressCallback(CopyProgThunk, &ctx);
+
+                int cb = CreateBakWithProgress(dstFull, dst, false, base, total, dstName);
+
+                switch (cb) {
+                case E_NO_ERROR:
+                    bkcr = true;
+                    bkcrfail = false;
+                    break;
+
+                case E_CANNOT_OVR:
+                    bkcr = false;
+                    bkcrfail = false;
+                    break;
+
+                default:
+                    bkcr = false;
+                    bkcrfail = true;
+                }
+
+                // End progress and clear callback
+                SetCopyProgressCallback(NULL, NULL);
+                app.EndProgress();
+
+                if (bkcrfail) break;
+
+                if (ctx.canceled) {
+                    bkcrcanc = true;
+                    break;
+                }
+
+                if (ApplyIPS(srcFull, dstFull) != E_NO_ERROR) ptchfail = true;
+
+                break;
+            }//while
+
+            //Give result
+            if (bkcrcanc) {
+                remove(dst);
+                app.SetStatus("Bak canceled, patch skipped");
+            }
+            else if (bkcrfail) {
+                app.SetStatus("Bak failed, patch skipped");
+            }
+            else if (ptchfail) {
+                if (bkcr) {
+                    if (RestoreBak(dst, true) == E_NO_ERROR) app.SetStatus("Patch failed, bak restored");
+                    else app.SetStatus("Patch failed, bak restore failed");
+                }
+                else app.SetStatus("Failed to apply patch");
+            }
+            else if (!bkcr) {
+                app.SetStatus("Patch applied, bak skipped");
+            }
+            else {
+                app.SetStatus("Patch applied, bak created");
+            }
+
 		}
-		app.RefreshPane(app.m_pane[0]);
+        app.RefreshPane(app.m_pane[0]);
         app.RefreshPane(app.m_pane[1]);
 		break;
-	}
-	case ACT_RESTOREBAK:
-		if (ext && _stricmp(ext, "bak") == 0) {
-			if (restoreBak(srcFull, true) == E_NO_ERROR) app.SetStatus("Bak restored");
-			else app.SetStatus("Restore failed");
-		}
-		app.RefreshPane(app.m_pane[0]);
+    
+    // ---- Restore .bak file ----------------------------------------------------
+    case ACT_RESTOREBAK:
+    {
+        if (ext && _stricmp(ext, "bak") == 0) {
+            if (RestoreBak(srcFull, true) == E_NO_ERROR) app.SetStatus("Bak restored");
+            else app.SetStatus("Restore failed");
+        }
+        app.RefreshPane(app.m_pane[0]);
         app.RefreshPane(app.m_pane[1]);
-		break;
+        break;
+    }
 
+    // ---- Unzip zip file -------------------------------------------------------
     case ACT_UNZIPHERE:
     case ACT_UNZIPTO:
+    {
+        if (ext && _stricmp(ext, "zip") == 0) {
 
-		if (ext && _stricmp(ext, "zip") == 0) {
-
-			// Resolve destination
-			char dstDir[512];
+            // Resolve destination
+            char dstDir[512];
             if (act == ACT_UNZIPHERE) {
                 if (!app.ResolveSrcDir(dstDir, sizeof(dstDir))) {
                     app.SetStatus("Pick a destination");
@@ -1026,46 +1186,46 @@ void Execute(Action act, FileBrowserApp& app) {
                 }
             }
 
-			UNZIP* zip = new UNZIP;
+            UNZIP* zip = new UNZIP;
 
-			if (zip->openZIP(srcFull, zipFile_Open, zipFile_Close, zipFile_Read, zipFile_Seek) != UNZ_OK) {
-				zip->closeZIP();
-				app.SetStatus("Bad zip file");
-				break;
-			}
+            if (zip->openZIP(srcFull, zipFile_Open, zipFile_Close, zipFile_Read, zipFile_Seek) != UNZ_OK) {
+                zip->closeZIP();
+                app.SetStatus("Bad zip file");
+                break;
+            }
 
-			int rc = zip->gotoFirstFile();
+            int rc = zip->gotoFirstFile();
 
-			unz_file_info fi;
-			ULONGLONG total = 0;
+            unz_file_info fi;
+            ULONGLONG total = 0;
             char szName[512];
 
-			// Compute total bytes for progress bar
-			while (rc == UNZ_OK) {
-				rc = zip->getFileInfo(&fi, szName, 512, NULL, 0, NULL, 0);
-				if (rc == UNZ_OK) {
-					total += fi.uncompressed_size;
-					rc = zip->gotoNextFile();
-				}
-			}
+            // Compute total bytes for progress bar
+            while (rc == UNZ_OK) {
+                rc = zip->getFileInfo(&fi, szName, 512, NULL, 0, NULL, 0);
+                if (rc == UNZ_OK) {
+                    total += fi.uncompressed_size;
+                    rc = zip->gotoNextFile();
+                }
+            }
 
-			if (total == 0) {
-				app.SetStatus("Bad zip file");
-				break;
-			}
+            if (total == 0) {
+                app.SetStatus("Bad zip file");
+                break;
+            }
 
-			// --- preflight free-space check on destination ---
-			ULONGLONG freeB = 0, totB = 0;
-			GetDriveFreeTotal(dstDir, freeB, totB);
-			if (total > freeB) {
-				zip->closeZIP();
-				char need[64], have[64];
-				FormatSize(total, need, sizeof(need));
-				FormatSize(freeB, have, sizeof(have));
-				app.SetStatus("Not enough space: need %s, have %s", need, have);
-				break;
-			}
-			// --- end preflight ---
+            // --- preflight free-space check on destination ---
+            ULONGLONG freeB = 0, totB = 0;
+            GetDriveFreeTotal(dstDir, freeB, totB);
+            if (total > freeB) {
+                zip->closeZIP();
+                char need[64], have[64];
+                FormatSize(total, need, sizeof(need));
+                FormatSize(freeB, have, sizeof(have));
+                app.SetStatus("Not enough space: need %s, have %s", need, have);
+                break;
+            }
+            // --- end preflight ---
 
             if ((rc = zip->gotoFirstFile()) == UNZ_OK) {
                 rc = zip->getFileInfo(&fi, szName, 512, NULL, 0, NULL, 0);
@@ -1077,14 +1237,14 @@ void Execute(Action act, FileBrowserApp& app) {
             SetCopyProgressCallback(CopyProgThunk, &ctx);
 
             ULONGLONG base = 0; // cumulative bytes completed
-			size_t extractedOk = 0, skipped = 0;
+            size_t extractedOk = 0, skipped = 0;
 
-			while (rc == UNZ_OK) {
-                
+            while (rc == UNZ_OK) {
+
                 if (ctx.canceled) break;
 
-				if ((rc = ExtractCurrentFile(zip, dstDir, true, true, base, total, szName)) != UNZ_OK) skipped += 1;
-				else extractedOk += 1;
+                if ((rc = ExtractCurrentFile(zip, dstDir, true, true, base, total, szName)) != UNZ_OK) skipped += 1;
+                else extractedOk += 1;
 
                 if ((rc = zip->gotoNextFile()) == UNZ_OK) {
                     rc = zip->getFileInfo(&fi, szName, 512, NULL, 0, NULL, 0);
@@ -1096,11 +1256,13 @@ void Execute(Action act, FileBrowserApp& app) {
                     }
                 }
 
-			} //end while
+            } //end while
 
             // End progress and clear callback
             SetCopyProgressCallback(NULL, NULL);
             app.EndProgress();
+
+            free(m_pUnZipBuffer);
 
             if (ctx.canceled) {
                 while (rc == UNZ_OK) {
@@ -1114,13 +1276,14 @@ void Execute(Action act, FileBrowserApp& app) {
                 app.SetStatus("%u extracted, %u skipped", (unsigned)extractedOk, (unsigned)skipped);
             }
 
-			zip->closeZIP();
+            zip->closeZIP();
 
-		}
+        }
 
         app.RefreshPane(app.m_pane[0]);
         app.RefreshPane(app.m_pane[1]);
-		break;
+        break;
+    }
 
     } // switch
 }
