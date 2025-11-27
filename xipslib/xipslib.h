@@ -12,14 +12,15 @@ typedef enum {
 	E_REN_ERROR,
 	E_BAD_IPS,
 	E_FWRITE_DST,
-	E_FSEEK_SRC
+	E_FSEEK_SRC,
+	E_FSEEK_IPS
 } ErrorCode;
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-	int CheckIPS(const char* ips);
+	int CheckIPS(FILE* fips);
 
 	int CreateBak(const char* src, bool ovr);
 
