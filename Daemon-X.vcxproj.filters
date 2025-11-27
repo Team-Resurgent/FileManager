@@ -22,11 +22,8 @@
     <Filter Include="xipslib">
       <UniqueIdentifier>{1b88a13d-7f8e-453c-ab80-ac546d3b2e56}</UniqueIdentifier>
     </Filter>
-    <Filter Include="xunzip2">
-      <UniqueIdentifier>{d9f8de27-5717-4051-a91c-9dfc298bc3db}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="xunzip2\unzipLIB">
-      <UniqueIdentifier>{e47a1939-d7ab-4586-990a-cff83641e340}</UniqueIdentifier>
+    <Filter Include="unzipLIB">
+      <UniqueIdentifier>{310af676-5dbf-43d5-b879-5e69c7ff633e}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
@@ -84,41 +81,35 @@
     <ClCompile Include="AppActions.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="xunzip2\ziparchive.cpp">
-      <Filter>xunzip2</Filter>
-    </ClCompile>
-    <ClCompile Include="xunzip2\xunzip2.cpp">
-      <Filter>xunzip2</Filter>
-    </ClCompile>
-    <ClCompile Include="xunzip2\unzipLIB\src\inffast.c">
-      <Filter>xunzip2\unzipLIB</Filter>
-    </ClCompile>
-    <ClCompile Include="xunzip2\unzipLIB\src\inflate.c">
-      <Filter>xunzip2\unzipLIB</Filter>
-    </ClCompile>
-    <ClCompile Include="xunzip2\unzipLIB\src\inftrees.c">
-      <Filter>xunzip2\unzipLIB</Filter>
-    </ClCompile>
-    <ClCompile Include="xunzip2\unzipLIB\src\unzip.c">
-      <Filter>xunzip2\unzipLIB</Filter>
-    </ClCompile>
-    <ClCompile Include="xunzip2\unzipLIB\src\unzipLIB.cpp">
-      <Filter>xunzip2\unzipLIB</Filter>
-    </ClCompile>
-    <ClCompile Include="xunzip2\unzipLIB\src\zutil.c">
-      <Filter>xunzip2\unzipLIB</Filter>
-    </ClCompile>
-    <ClCompile Include="xunzip2\unzipLIB\src\adler32.c">
-      <Filter>xunzip2\unzipLIB</Filter>
-    </ClCompile>
-    <ClCompile Include="xunzip2\unzipLIB\src\crc32.c">
-      <Filter>xunzip2\unzipLIB</Filter>
-    </ClCompile>
-    <ClCompile Include="xunzip2\unzipLIB\src\infback.c">
-      <Filter>xunzip2\unzipLIB</Filter>
-    </ClCompile>
     <ClCompile Include="xipslib\xipslib.cpp">
       <Filter>xipslib</Filter>
+    </ClCompile>
+    <ClCompile Include="unzipLIB\src\inffast.c">
+      <Filter>unzipLIB</Filter>
+    </ClCompile>
+    <ClCompile Include="unzipLIB\src\inflate.c">
+      <Filter>unzipLIB</Filter>
+    </ClCompile>
+    <ClCompile Include="unzipLIB\src\inftrees.c">
+      <Filter>unzipLIB</Filter>
+    </ClCompile>
+    <ClCompile Include="unzipLIB\src\unzip.c">
+      <Filter>unzipLIB</Filter>
+    </ClCompile>
+    <ClCompile Include="unzipLIB\src\unzipLIB.cpp">
+      <Filter>unzipLIB</Filter>
+    </ClCompile>
+    <ClCompile Include="unzipLIB\src\zutil.c">
+      <Filter>unzipLIB</Filter>
+    </ClCompile>
+    <ClCompile Include="unzipLIB\src\adler32.c">
+      <Filter>unzipLIB</Filter>
+    </ClCompile>
+    <ClCompile Include="unzipLIB\src\crc32.c">
+      <Filter>unzipLIB</Filter>
+    </ClCompile>
+    <ClCompile Include="unzipLIB\src\infback.c">
+      <Filter>unzipLIB</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -152,53 +143,41 @@
     <ClInclude Include="GfxPrims.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="xunzip2\ziparchive.h">
-      <Filter>xunzip2</Filter>
-    </ClInclude>
-    <ClInclude Include="xunzip2\stdint.h">
-      <Filter>xunzip2</Filter>
-    </ClInclude>
-    <ClInclude Include="xunzip2\StdString.h">
-      <Filter>xunzip2</Filter>
-    </ClInclude>
-    <ClInclude Include="xunzip2\xunzip2.h">
-      <Filter>xunzip2</Filter>
-    </ClInclude>
     <ClInclude Include="xipslib\xipslib.h">
       <Filter>xipslib</Filter>
     </ClInclude>
-    <ClInclude Include="xunzip2\unzipLIB\src\inffast.h">
-      <Filter>xunzip2\unzipLIB</Filter>
+    <ClInclude Include="unzipLIB\src\inffast.h">
+      <Filter>unzipLIB</Filter>
     </ClInclude>
-    <ClInclude Include="xunzip2\unzipLIB\src\inffixed.h">
-      <Filter>xunzip2\unzipLIB</Filter>
+    <ClInclude Include="unzipLIB\src\inffixed.h">
+      <Filter>unzipLIB</Filter>
     </ClInclude>
-    <ClInclude Include="xunzip2\unzipLIB\src\inflate.h">
-      <Filter>xunzip2\unzipLIB</Filter>
+    <ClInclude Include="unzipLIB\src\inflate.h">
+      <Filter>unzipLIB</Filter>
     </ClInclude>
-    <ClInclude Include="xunzip2\unzipLIB\src\inftrees.h">
-      <Filter>xunzip2\unzipLIB</Filter>
+    <ClInclude Include="unzipLIB\src\inftrees.h">
+      <Filter>unzipLIB</Filter>
     </ClInclude>
-    <ClInclude Include="xunzip2\unzipLIB\src\unzip.h">
-      <Filter>xunzip2\unzipLIB</Filter>
+    <ClInclude Include="unzipLIB\src\unzip.h">
+      <Filter>unzipLIB</Filter>
     </ClInclude>
-    <ClInclude Include="xunzip2\unzipLIB\src\unzipLIB.h">
-      <Filter>xunzip2\unzipLIB</Filter>
+    <ClInclude Include="unzipLIB\src\unzipLIB.h">
+      <Filter>unzipLIB</Filter>
     </ClInclude>
-    <ClInclude Include="xunzip2\unzipLIB\src\zconf.h">
-      <Filter>xunzip2\unzipLIB</Filter>
+    <ClInclude Include="unzipLIB\src\zconf.h">
+      <Filter>unzipLIB</Filter>
     </ClInclude>
-    <ClInclude Include="xunzip2\unzipLIB\src\zlib.h">
-      <Filter>xunzip2\unzipLIB</Filter>
+    <ClInclude Include="unzipLIB\src\zlib.h">
+      <Filter>unzipLIB</Filter>
     </ClInclude>
-    <ClInclude Include="xunzip2\unzipLIB\src\zutil.h">
-      <Filter>xunzip2\unzipLIB</Filter>
+    <ClInclude Include="unzipLIB\src\zutil.h">
+      <Filter>unzipLIB</Filter>
     </ClInclude>
-    <ClInclude Include="xunzip2\unzipLIB\src\crc32.h">
-      <Filter>xunzip2\unzipLIB</Filter>
+    <ClInclude Include="unzipLIB\src\crc32.h">
+      <Filter>unzipLIB</Filter>
     </ClInclude>
-    <ClInclude Include="xunzip2\unzipLIB\src\gzguts.h">
-      <Filter>xunzip2\unzipLIB</Filter>
+    <ClInclude Include="unzipLIB\src\gzguts.h">
+      <Filter>unzipLIB</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

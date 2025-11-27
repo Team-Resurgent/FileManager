@@ -4,6 +4,7 @@
 #include "XBInput.h"   // XBInput_GetInput, g_Gamepads
 
 #include "xipslib.h"
+#include "unzipLIB.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -107,6 +108,290 @@ static int IsSubPathCaseI(const char* parent, const char* child){
 static const char* BaseNameOf(const char* path){
     const char* s = path ? strrchr(path, '\\') : 0;
     return s ? (s+1) : path;
+}
+
+// ------------------------------------------------------------------
+// unzipLIB filesystem callbacks (for openZIP in ACT_UNZIP)
+// ------------------------------------------------------------------
+void* zipFile_Open(const char* filename, int32_t* size) {
+    FILE* f = fopen(filename, "rb");
+    fseek(f, 0L, SEEK_END);
+    *size = ftell(f);
+    rewind(f);
+    return (void*)f;
+}
+
+void zipFile_Close(void* p) {
+    ZIPFILE* pzf = (ZIPFILE*)p;
+    FILE* f = (FILE*)pzf->fHandle;
+
+    if (f) {
+        fclose(f);
+    }
+}
+
+int32_t zipFile_Read(void* p, uint8_t* buffer, int32_t length) {
+    ZIPFILE* pzf = (ZIPFILE*)p;
+    FILE* f = (FILE*)pzf->fHandle;
+    return fread(buffer, 1, length, f);
+}
+
+int32_t zipFile_Seek(void* p, int32_t position, int iType) {
+    ZIPFILE* pzf = (ZIPFILE*)p;
+    FILE* f = (FILE*)pzf->fHandle;
+    long l = 0;
+
+    if (iType == SEEK_SET) {
+        return fseek(f, position, SEEK_SET);
+    }
+    else if (iType == SEEK_END) {
+        return fseek(f, position + pzf->iSize, SEEK_END);
+    }
+    else { // SEEK_CUR
+        l = ftell(f);
+    }
+
+    return fseek(f, l + position, SEEK_CUR);
+}
+
+// ------------------------------------------------------------------
+// ExtractCurrentFile & helper methods courtesy of CrunchBite
+// ------------------------------------------------------------------
+char* strrepl(char* Str, size_t BufSiz, char* OldStr, char* NewStr) {
+    int OldLen, NewLen;
+    char* p, * q;
+
+    if (NULL == (p = strstr(Str, OldStr))) {
+        return Str;
+    }
+
+    OldLen = strlen(OldStr);
+    NewLen = strlen(NewStr);
+
+    if ((strlen(Str) + NewLen - OldLen + 1) > BufSiz) {
+        return NULL;
+    }
+
+    memmove(q = p + NewLen, p + OldLen, strlen(p + OldLen) + 1);
+    memcpy(p, NewStr, NewLen);
+    return q;
+}
+char* strreplall(char* Str, size_t BufSiz, char* OldStr, char* NewStr) {
+    char* ret;
+    size_t i;
+
+    for (i = 0; i < BufSiz; i++) {
+        ret = strrepl(Str, BufSiz, OldStr, NewStr);
+    }
+
+    return ret;
+}
+
+void* m_pUnZipBuffer = (void*)NULL;
+unsigned int m_uiUnZipBufferSize = 131072;
+int ExtractCurrentFile(UNZIP* zip, const char* pszDestinationFolder, const bool bUseFolderNames, bool bOverwrite) {
+
+    char szFileName_InZip[512];
+    char szBuffer[512];
+    unz_file_info fi;
+    char szPathSep[2];
+    char* pszFileName_WithOutPath;
+    char* pszPos;
+    int rc;
+    char* pszWriteFileName;
+    char chHold;
+    bool bSkip = false;
+    HANDLE hFile;
+    DWORD dwBytesWritten = 0;
+
+    // Check if the destination folder ends with an '\\'
+    if (*(pszDestinationFolder + strlen(pszDestinationFolder) - 1) == '\\') {
+        // Use no separator
+        *szPathSep = '\0';
+    }
+    else {
+        // Use path separator
+        strcpy(szPathSep, "\\");
+    }
+
+    // Get information about the current file
+    rc = zip->getFileInfo(&fi, szBuffer, 1024, NULL, 0, NULL, 0);
+    if (rc != UNZ_OK) {
+        return rc;
+    }
+
+    // Substitute '/' with '\'
+    strreplall(szBuffer, 1024, "/", "\\");
+
+    // Don't include the drive letter (if present) and the leading '\' (if present)
+    if (szBuffer[1] == ':' && szBuffer[2] == '\\') {
+        // Copy file name
+        strcpy(szFileName_InZip, (szBuffer + 3));
+    }
+    else if (szBuffer[1] == ':') {
+        strcpy(szFileName_InZip, (szBuffer + 2));
+    }
+    else if (szBuffer[0] == '\\') {
+        strcpy(szFileName_InZip, (szBuffer + 1));
+    }
+    else {
+        strcpy(szFileName_InZip, szBuffer);
+    }
+
+    // Set reference
+    pszPos = (char*)pszFileName_WithOutPath = (char*)szFileName_InZip;
+
+    // Find filename part (without the path)
+    while ((*pszPos) != '\0') {
+        if (((*pszPos) == '/') || ((*pszPos) == '\\')) {
+            // Set reference
+            pszFileName_WithOutPath = (char*)(pszPos + 1);
+        }
+
+        // Increment position
+        pszPos++;
+    }
+
+    // Is this a folder?
+    if ((*pszFileName_WithOutPath) == '\0') {
+        // Use folder names?
+        if (bUseFolderNames) {
+            // Compose file name
+            sprintf(szBuffer, "%s%s%s", pszDestinationFolder, szPathSep, szFileName_InZip);
+
+            // Substitute '/' with '\'
+            strreplall(szBuffer, 1024, "/", "\\");
+
+            // Create folder
+            CreateDirectory(szBuffer, NULL);
+        }
+
+        // Return OK
+        return UNZ_OK;
+    }
+
+    // Do we have a buffer?
+    if (m_pUnZipBuffer == (void*)NULL) {
+        // Allocate buffer
+        if ((m_pUnZipBuffer = (void*)malloc(m_uiUnZipBufferSize)) == (void*)NULL) {
+            // Return not OK
+            return UNZ_INTERNALERROR;
+        }
+    }
+
+    // Use folder names?
+    if (bUseFolderNames) {
+        // Use total file name
+        pszWriteFileName = szFileName_InZip;
+    }
+    else {
+        // Use file name only
+        pszWriteFileName = pszFileName_WithOutPath;
+    }
+
+    // Open the current file
+    if ((rc = zip->openCurrentFile()) != UNZ_OK) {
+        return rc;
+    }
+
+    // Compose file name
+    sprintf(szBuffer, "%s%s%s", pszDestinationFolder, szPathSep, pszWriteFileName);
+
+    // Check if file exists?
+    if (!bOverwrite && rc == UNZ_OK) {
+        // Open the local file
+        hFile = CreateFile(szBuffer, GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+
+        // Check handle
+        if (hFile != (HANDLE)INVALID_HANDLE_VALUE) {
+            // File exists but don't overwrite. Close file
+            CloseHandle(hFile);
+
+            // Skip this file
+            bSkip = true;
+        }
+    }
+
+    // Skip this file?
+    if (!bSkip && rc == UNZ_OK) {
+        // Create the file
+        hFile = CreateFile(szBuffer, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+
+        // Check handle
+        if (hFile == (HANDLE)INVALID_HANDLE_VALUE) {
+            // File not created. Some zipfiles doesn't contain
+            // folder alone before file
+            if (bUseFolderNames && pszFileName_WithOutPath != (char*)szFileName_InZip) {
+                // Store character
+                chHold = *(pszFileName_WithOutPath - 1);
+
+                // Terminate string
+                *(pszFileName_WithOutPath - 1) = '\0';
+
+                // Compose folder name
+                sprintf(szBuffer, "%s%s%s", pszDestinationFolder, szPathSep, pszWriteFileName);
+
+                // Create folder
+                CreateDirectory(szBuffer, NULL);
+
+                // Restore file name
+                *(pszFileName_WithOutPath - 1) = chHold;
+
+                // Compose folder name
+                sprintf(szBuffer, "%s%s%s", pszDestinationFolder, szPathSep, pszWriteFileName);
+
+                // Try to create the file
+                hFile = CreateFile(szBuffer, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+            }
+        }
+
+        // Check handle
+        if (hFile == (HANDLE)INVALID_HANDLE_VALUE) {
+            // Return not OK
+            return UNZ_ERRNO;
+        }
+    }
+
+    // Check handle
+    if (hFile != (HANDLE)INVALID_HANDLE_VALUE) {
+        do {
+            // Read the current file
+            if ((rc = zip->readCurrentFile((uint8_t*)m_pUnZipBuffer, m_uiUnZipBufferSize)) < 0) {
+                // Error reading zip file
+                // Break out of loop
+                break;
+            }
+
+            // Check return code
+            if (rc > 0) {
+                // Write to file
+                if (WriteFile(hFile, m_pUnZipBuffer, (DWORD)rc, &dwBytesWritten, NULL) == false) {
+                    // Error during write of file
+
+                    // Set return status
+                    rc = UNZ_ERRNO;
+
+                    // Break out of loop
+                    break;
+                }
+            }
+        } while (rc > 0);
+
+        // Close file
+        CloseHandle(hFile);
+    }
+
+    if (rc == UNZ_OK) {
+        // Close current file
+        rc = zip->closeCurrentFile();
+    }
+    else {
+        // Close current file (don't lose the error)
+        zip->closeCurrentFile();
+    }
+
+    // Return status
+    return rc;
 }
 
 namespace AppActions {
@@ -692,6 +977,145 @@ void Execute(Action act, FileBrowserApp& app) {
 			else app.SetStatus("Restore failed");
 		}
 		app.RefreshPane(app.m_pane[0]);
+        app.RefreshPane(app.m_pane[1]);
+		break;
+
+    case ACT_UNZIPHERE:
+    case ACT_UNZIPTO:
+
+		if (ext && _stricmp(ext, "zip") == 0) {
+
+			// Resolve destination
+			char dstDir[512];
+            if (act == ACT_UNZIPHERE) {
+                if (!app.ResolveSrcDir(dstDir, sizeof(dstDir))) {
+                    app.SetStatus("Pick a destination");
+                    break;
+                }
+                if ((dstDir[0] == 'D' || dstDir[0] == 'd') && dstDir[1] == ':') {
+                    app.SetStatus("Cannot extract to D:\\");
+                    break;
+                }
+                NormalizeDirA(dstDir);
+                if (!CanWriteHereA(dstDir)) {
+                    app.SetStatusLastErr("Dest not writable");
+                    break;
+                }
+            }
+            else if (act == ACT_UNZIPTO) {
+                if (!app.ResolveDestDir(dstDir, sizeof(dstDir))) {
+                    app.SetStatus("Pick a destination");
+                    break;
+                }
+                if ((dstDir[0] == 'D' || dstDir[0] == 'd') && dstDir[1] == ':') {
+                    app.SetStatus("Cannot extract to D:\\");
+                    break;
+                }
+                NormalizeDirA(dstDir);
+                if (!CanWriteHereA(dstDir)) {
+                    app.SetStatusLastErr("Dest not writable");
+                    break;
+                }
+            }
+
+			UNZIP* zip = new UNZIP;
+
+			if (zip->openZIP(srcFull, zipFile_Open, zipFile_Close, zipFile_Read, zipFile_Seek) != UNZ_OK) {
+				zip->closeZIP();
+				app.SetStatus("Bad zip file");
+				break;
+			}
+
+			int rc = zip->gotoFirstFile();
+
+			unz_file_info fi;
+			ULONGLONG total = 0;
+            char szName[512];
+
+			// Compute total bytes for progress bar
+			while (rc == UNZ_OK) {
+				rc = zip->getFileInfo(&fi, szName, 512, NULL, 0, NULL, 0);
+				if (rc == UNZ_OK) {
+					total += fi.uncompressed_size;
+					rc = zip->gotoNextFile();
+				}
+			}
+
+			if (total == 0) {
+				app.SetStatus("Bad zip file");
+				break;
+			}
+
+			// --- preflight free-space check on destination ---
+			ULONGLONG freeB = 0, totB = 0;
+			GetDriveFreeTotal(dstDir, freeB, totB);
+			if (total > freeB) {
+				zip->closeZIP();
+				char need[64], have[64];
+				FormatSize(total, need, sizeof(need));
+				FormatSize(freeB, have, sizeof(have));
+				app.SetStatus("Not enough space: need %s, have %s", need, have);
+				break;
+			}
+			// --- end preflight ---
+
+            if ((rc = zip->gotoFirstFile()) == UNZ_OK) {
+                rc = zip->getFileInfo(&fi, szName, 512, NULL, 0, NULL, 0);
+            }
+
+            // Begin progress + set callback
+            app.BeginProgress(total, szName, "Extracting...");
+            CopyProgCtx ctx = { &app, 0, false, false, 0, false };
+            SetCopyProgressCallback(CopyProgThunk, &ctx);
+
+            ULONGLONG base = 0; // cumulative bytes completed
+			size_t extractedOk = 0, skipped = 0;
+            
+
+			while (rc == UNZ_OK) {
+
+                ctx.base = base;
+                if (ctx.canceled) break;
+
+				if ((rc = ExtractCurrentFile(zip, dstDir, true, false)) != UNZ_OK) skipped += 1;
+				else extractedOk += 1;
+
+                base += fi.uncompressed_size;
+
+                if ((rc = zip->gotoNextFile()) == UNZ_OK) {
+                    rc = zip->getFileInfo(&fi, szName, 512, NULL, 0, NULL, 0);
+                }
+
+                if (CopyProgress::g_copyProgFn) {
+                    if (!CopyProgress::g_copyProgFn(base, total, szName, CopyProgress::g_copyProgUser)) {
+                        break; // canceled
+                    }
+                }
+
+			} //end while
+
+            // End progress and clear callback
+            SetCopyProgressCallback(NULL, NULL);
+            app.EndProgress();
+
+            if (ctx.canceled) {
+                while (rc == UNZ_OK) {
+                    ++skipped;
+                    rc = zip->gotoNextFile();
+                }
+                app.SetStatus("Extraction canceled (%u extracted, %u skipped)", (unsigned)extractedOk, (unsigned)skipped);
+                break;
+            }
+            else {
+                // Final toast that reflects what actually happened
+                app.SetStatus("%u extracted, %u skipped", (unsigned)extractedOk, (unsigned)skipped);
+            }
+
+			zip->closeZIP();
+
+		}
+
+        app.RefreshPane(app.m_pane[0]);
         app.RefreshPane(app.m_pane[1]);
 		break;
 

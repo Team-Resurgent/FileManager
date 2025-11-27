@@ -39,7 +39,9 @@ enum Action {
 
 	ACT_APPLYIPS,      //xipslib
 	ACT_CREATEBAK,     //xipslib
-	ACT_RESTOREBAK     //xipslib
+	ACT_RESTOREBAK,    //xipslib
+    ACT_UNZIPTO,       //unzipLIB
+    ACT_UNZIPHERE,     //unzipLIB
 };
 
 // --------------------------------------------------------------------------
