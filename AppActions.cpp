@@ -188,8 +188,8 @@ char* strreplall(char* Str, size_t BufSiz, char* OldStr, char* NewStr) {
 }
 
 void* m_pUnZipBuffer = (void*)NULL;
-unsigned int m_uiUnZipBufferSize = 131072;
-int ExtractCurrentFile(UNZIP* zip, const char* pszDestinationFolder, const bool bUseFolderNames, bool bOverwrite) {
+unsigned int m_uiUnZipBufferSize = 65536;
+int ExtractCurrentFile(UNZIP* zip, const char* pszDestinationFolder, const bool bUseFolderNames, bool bOverwrite, ULONGLONG& inoutBytesDone, ULONGLONG totalBytes, const char* s) {
 
     char szFileName_InZip[512];
     char szBuffer[512];
@@ -373,6 +373,14 @@ int ExtractCurrentFile(UNZIP* zip, const char* pszDestinationFolder, const bool 
 
                     // Break out of loop
                     break;
+                }
+                else {
+                    inoutBytesDone += dwBytesWritten;
+                    if (CopyProgress::g_copyProgFn) {
+                        if (!CopyProgress::g_copyProgFn(inoutBytesDone, totalBytes, s, CopyProgress::g_copyProgUser)) {
+                            break; // canceled
+                        }
+                    }
                 }
             }
         } while (rc > 0);
@@ -1070,17 +1078,13 @@ void Execute(Action act, FileBrowserApp& app) {
 
             ULONGLONG base = 0; // cumulative bytes completed
 			size_t extractedOk = 0, skipped = 0;
-            
 
 			while (rc == UNZ_OK) {
-
-                ctx.base = base;
+                
                 if (ctx.canceled) break;
 
-				if ((rc = ExtractCurrentFile(zip, dstDir, true, false)) != UNZ_OK) skipped += 1;
+				if ((rc = ExtractCurrentFile(zip, dstDir, true, true, base, total, szName)) != UNZ_OK) skipped += 1;
 				else extractedOk += 1;
-
-                base += fi.uncompressed_size;
 
                 if ((rc = zip->gotoNextFile()) == UNZ_OK) {
                     rc = zip->getFileInfo(&fi, szName, 512, NULL, 0, NULL, 0);
@@ -1104,7 +1108,6 @@ void Execute(Action act, FileBrowserApp& app) {
                     rc = zip->gotoNextFile();
                 }
                 app.SetStatus("Extraction canceled (%u extracted, %u skipped)", (unsigned)extractedOk, (unsigned)skipped);
-                break;
             }
             else {
                 // Final toast that reflects what actually happened

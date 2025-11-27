@@ -562,7 +562,7 @@ void FileBrowserApp::BuildContextMenu(){
     AddMenuItem("Make new folder", ACT_MKDIR,       (inDir));
     AddMenuItem("Calculate size",  ACT_CALCSIZE,    (hasSel));
     AddMenuItem("Go to root",      ACT_GOROOT,      (inDir));
-    AddMenuItem("Switch pane",     ACT_SWITCHMEDIA, (hasSel));
+    //AddMenuItem("Switch pane",     ACT_SWITCHMEDIA, (hasSel));
 
     // Marking tools (directory mode only; skip the ".." row)
     if (inDir) {
