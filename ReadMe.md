@@ -45,6 +45,7 @@ We want *you* — the scene and community that keeps the OG Xbox alive — to:
 
 - Install both the XDK and RXDK
 - Be sure you have the XDK "Samples" installed (C:\\Program Files (x86)\\Microsoft Xbox SDK\\Samples)
+- Build
 - Copy the compiled `.xbe` (Debug\\Build\\Daemon-X\\default.xbe) to your Xbox
 
 ---
