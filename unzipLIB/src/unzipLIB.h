@@ -14,7 +14,7 @@
 #define __UNZIPLIB__
 #if defined( PICO_BUILD ) || defined( __MACH__ ) || defined( __LINUX__ ) || defined( __MCUXPRESSO ) || defined( _XBOX )
 #include <stdio.h>
-#include "../../stdint.h"
+#include "stdint.h"
 #include <string.h>
 #include <stdlib.h>
 #define memcpy_P memcpy

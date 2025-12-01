@@ -54,7 +54,7 @@
     <ClCompile Include="main.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Resolves.cpp">
+    <ClCompile Include="RXDKResolves.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\..\..\..\..\Program Files (x86)\Microsoft Xbox SDK\Samples\Xbox\Common\Src\sjis2unicode.cpp">
@@ -110,6 +110,12 @@
     </ClCompile>
     <ClCompile Include="unzipLIB\src\infback.c">
       <Filter>unzipLIB</Filter>
+    </ClCompile>
+    <ClCompile Include="unzipLIBUtil.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="xipslibUtil.cpp">
+      <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -178,6 +184,12 @@
     </ClInclude>
     <ClInclude Include="unzipLIB\src\gzguts.h">
       <Filter>unzipLIB</Filter>
+    </ClInclude>
+    <ClInclude Include="xipslibUtil.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="unzipLIBUtil.h">
+      <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

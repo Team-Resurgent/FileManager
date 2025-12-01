@@ -28,7 +28,9 @@
     <ClCompile Include="main.cpp" />
     <ClCompile Include="OnScreenKeyboard.cpp" />
     <ClCompile Include="PaneRenderer.cpp" />
-    <ClCompile Include="Resolves.cpp" />
+    <ClCompile Include="RXDKResolves.cpp" />
+    <ClCompile Include="xipslibUtil.cpp" />
+    <ClCompile Include="unzipLIBUtil.cpp" />
     <ClCompile Include="unzipLIB\src\adler32.c" />
     <ClCompile Include="unzipLIB\src\crc32.c" />
     <ClCompile Include="unzipLIB\src\infback.c" />
@@ -51,6 +53,7 @@
     <ClInclude Include="OnScreenKeyboard.h" />
     <ClInclude Include="PaneModel.h" />
     <ClInclude Include="PaneRenderer.h" />
+    <ClInclude Include="unzipLIBUtil.h" />
     <ClInclude Include="unzipLIB\src\crc32.h" />
     <ClInclude Include="unzipLIB\src\gzguts.h" />
     <ClInclude Include="unzipLIB\src\inffast.h" />
@@ -62,6 +65,7 @@
     <ClInclude Include="unzipLIB\src\zconf.h" />
     <ClInclude Include="unzipLIB\src\zlib.h" />
     <ClInclude Include="unzipLIB\src\zutil.h" />
+    <ClInclude Include="xipslibUtil.h" />
     <ClInclude Include="xipslib\xipslib.h" />
   </ItemGroup>
   <PropertyGroup Label="Globals">

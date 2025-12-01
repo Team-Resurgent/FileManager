@@ -45,7 +45,7 @@
 extern "C" {
 #endif
 
-#include "../../stdint.h"
+#include "stdint.h"
 
 #ifndef _ZLIB_H
 #include "zlib.h"

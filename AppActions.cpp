@@ -4,7 +4,9 @@
 #include "XBInput.h"   // XBInput_GetInput, g_Gamepads
 
 #include "xipslib.h"
+#include "xipslibUtil.h"
 #include "unzipLIB.h"
+#include "unzipLIBUtil.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -108,351 +110,6 @@ static int IsSubPathCaseI(const char* parent, const char* child){
 static const char* BaseNameOf(const char* path){
     const char* s = path ? strrchr(path, '\\') : 0;
     return s ? (s+1) : path;
-}
-
-// ------------------------------------------------------------------
-// unzipLIB filesystem callbacks (for openZIP in ACT_UNZIP)
-// ------------------------------------------------------------------
-void* zipFile_Open(const char* filename, int32_t* size) {
-    FILE* f = fopen(filename, "rb");
-    fseek(f, 0L, SEEK_END);
-    *size = ftell(f);
-    rewind(f);
-    return (void*)f;
-}
-
-void zipFile_Close(void* p) {
-    ZIPFILE* pzf = (ZIPFILE*)p;
-    FILE* f = (FILE*)pzf->fHandle;
-
-    if (f) {
-        fclose(f);
-    }
-}
-
-int32_t zipFile_Read(void* p, uint8_t* buffer, int32_t length) {
-    ZIPFILE* pzf = (ZIPFILE*)p;
-    FILE* f = (FILE*)pzf->fHandle;
-    return fread(buffer, 1, length, f);
-}
-
-int32_t zipFile_Seek(void* p, int32_t position, int iType) {
-    ZIPFILE* pzf = (ZIPFILE*)p;
-    FILE* f = (FILE*)pzf->fHandle;
-    long l = 0;
-
-    if (iType == SEEK_SET) {
-        return fseek(f, position, SEEK_SET);
-    }
-    else if (iType == SEEK_END) {
-        return fseek(f, position + pzf->iSize, SEEK_END);
-    }
-    else { // SEEK_CUR
-        l = ftell(f);
-    }
-
-    return fseek(f, l + position, SEEK_CUR);
-}
-
-// ------------------------------------------------------------------
-// ExtractCurrentFile & helper methods courtesy of CrunchBite
-// ------------------------------------------------------------------
-char* strrepl(char* Str, size_t BufSiz, char* OldStr, char* NewStr) {
-    int OldLen, NewLen;
-    char* p, * q;
-
-    if (NULL == (p = strstr(Str, OldStr))) {
-        return Str;
-    }
-
-    OldLen = strlen(OldStr);
-    NewLen = strlen(NewStr);
-
-    if ((strlen(Str) + NewLen - OldLen + 1) > BufSiz) {
-        return NULL;
-    }
-
-    memmove(q = p + NewLen, p + OldLen, strlen(p + OldLen) + 1);
-    memcpy(p, NewStr, NewLen);
-    return q;
-}
-char* strreplall(char* Str, size_t BufSiz, char* OldStr, char* NewStr) {
-    char* ret;
-    size_t i;
-
-    for (i = 0; i < BufSiz; i++) {
-        ret = strrepl(Str, BufSiz, OldStr, NewStr);
-    }
-
-    return ret;
-}
-
-void* m_pUnZipBuffer = (void*)NULL;
-int ExtractCurrentFile(UNZIP* zip, const char* pszDestinationFolder, const bool bUseFolderNames, bool bOverwrite, ULONGLONG& inoutBytesDone, ULONGLONG totalBytes, const char* s) {
-
-    char szFileName_InZip[512];
-    char szBuffer[512];
-    unz_file_info fi;
-    char szPathSep[2];
-    char* pszFileName_WithOutPath;
-    char* pszPos;
-    int rc;
-    char* pszWriteFileName;
-    char chHold;
-    bool bSkip = false;
-    HANDLE hFile;
-    DWORD dwBytesWritten = 0;
-
-    // Check if the destination folder ends with an '\\'
-    if (*(pszDestinationFolder + strlen(pszDestinationFolder) - 1) == '\\') {
-        // Use no separator
-        *szPathSep = '\0';
-    }
-    else {
-        // Use path separator
-        strcpy(szPathSep, "\\");
-    }
-
-    // Get information about the current file
-    rc = zip->getFileInfo(&fi, szBuffer, 1024, NULL, 0, NULL, 0);
-    if (rc != UNZ_OK) {
-        return rc;
-    }
-
-    // Substitute '/' with '\'
-    strreplall(szBuffer, 1024, "/", "\\");
-
-    // Don't include the drive letter (if present) and the leading '\' (if present)
-    if (szBuffer[1] == ':' && szBuffer[2] == '\\') {
-        // Copy file name
-        strcpy(szFileName_InZip, (szBuffer + 3));
-    }
-    else if (szBuffer[1] == ':') {
-        strcpy(szFileName_InZip, (szBuffer + 2));
-    }
-    else if (szBuffer[0] == '\\') {
-        strcpy(szFileName_InZip, (szBuffer + 1));
-    }
-    else {
-        strcpy(szFileName_InZip, szBuffer);
-    }
-
-    // Set reference
-    pszPos = (char*)pszFileName_WithOutPath = (char*)szFileName_InZip;
-
-    // Find filename part (without the path)
-    while ((*pszPos) != '\0') {
-        if (((*pszPos) == '/') || ((*pszPos) == '\\')) {
-            // Set reference
-            pszFileName_WithOutPath = (char*)(pszPos + 1);
-        }
-
-        // Increment position
-        pszPos++;
-    }
-
-    // Is this a folder?
-    if ((*pszFileName_WithOutPath) == '\0') {
-        // Use folder names?
-        if (bUseFolderNames) {
-            // Compose file name
-            sprintf(szBuffer, "%s%s%s", pszDestinationFolder, szPathSep, szFileName_InZip);
-
-            // Substitute '/' with '\'
-            strreplall(szBuffer, 1024, "/", "\\");
-
-            // Create folder
-            CreateDirectory(szBuffer, NULL);
-        }
-
-        // Return OK
-        return UNZ_OK;
-    }
-
-    // Do we have a buffer?
-    if (m_pUnZipBuffer == (void*)NULL) {
-        // Allocate buffer
-        if ((m_pUnZipBuffer = (void*)malloc(65536)) == (void*)NULL) {
-            // Return not OK
-            return UNZ_INTERNALERROR;
-        }
-    }
-
-    // Use folder names?
-    if (bUseFolderNames) {
-        // Use total file name
-        pszWriteFileName = szFileName_InZip;
-    }
-    else {
-        // Use file name only
-        pszWriteFileName = pszFileName_WithOutPath;
-    }
-
-    // Open the current file
-    if ((rc = zip->openCurrentFile()) != UNZ_OK) {
-        return rc;
-    }
-
-    // Compose file name
-    sprintf(szBuffer, "%s%s%s", pszDestinationFolder, szPathSep, pszWriteFileName);
-
-    // Check if file exists?
-    if (!bOverwrite && rc == UNZ_OK) {
-        // Open the local file
-        hFile = CreateFile(szBuffer, GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-
-        // Check handle
-        if (hFile != (HANDLE)INVALID_HANDLE_VALUE) {
-            // File exists but don't overwrite. Close file
-            CloseHandle(hFile);
-
-            // Skip this file
-            bSkip = true;
-        }
-    }
-
-    // Skip this file?
-    if (!bSkip && rc == UNZ_OK) {
-        // Create the file
-        hFile = CreateFile(szBuffer, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-
-        // Check handle
-        if (hFile == (HANDLE)INVALID_HANDLE_VALUE) {
-            // File not created. Some zipfiles doesn't contain
-            // folder alone before file
-            if (bUseFolderNames && pszFileName_WithOutPath != (char*)szFileName_InZip) {
-                // Store character
-                chHold = *(pszFileName_WithOutPath - 1);
-
-                // Terminate string
-                *(pszFileName_WithOutPath - 1) = '\0';
-
-                // Compose folder name
-                sprintf(szBuffer, "%s%s%s", pszDestinationFolder, szPathSep, pszWriteFileName);
-
-                // Create folder
-                CreateDirectory(szBuffer, NULL);
-
-                // Restore file name
-                *(pszFileName_WithOutPath - 1) = chHold;
-
-                // Compose folder name
-                sprintf(szBuffer, "%s%s%s", pszDestinationFolder, szPathSep, pszWriteFileName);
-
-                // Try to create the file
-                hFile = CreateFile(szBuffer, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-            }
-        }
-
-        // Check handle
-        if (hFile == (HANDLE)INVALID_HANDLE_VALUE) {
-            // Return not OK
-            return UNZ_ERRNO;
-        }
-    }
-
-    // Check handle
-    if (hFile != (HANDLE)INVALID_HANDLE_VALUE) {
-        do {
-            // Read the current file
-            if ((rc = zip->readCurrentFile((uint8_t*)m_pUnZipBuffer, 65536)) < 0) {
-                // Error reading zip file
-                // Break out of loop
-                break;
-            }
-
-            // Check return code
-            if (rc > 0) {
-                // Write to file
-                if (WriteFile(hFile, m_pUnZipBuffer, (DWORD)rc, &dwBytesWritten, NULL) == false) {
-                    // Error during write of file
-
-                    // Set return status
-                    rc = UNZ_ERRNO;
-
-                    // Break out of loop
-                    break;
-                }
-                else {
-                    inoutBytesDone += dwBytesWritten;
-                    if (CopyProgress::g_copyProgFn) {
-                        if (!CopyProgress::g_copyProgFn(inoutBytesDone, totalBytes, s, CopyProgress::g_copyProgUser)) {
-                            break; // canceled
-                        }
-                    }
-                }
-            }
-        } while (rc > 0);
-
-        // Close file
-        CloseHandle(hFile);
-    }
-
-    if (rc == UNZ_OK) {
-        // Close current file
-        rc = zip->closeCurrentFile();
-    }
-    else {
-        // Close current file (don't lose the error)
-        zip->closeCurrentFile();
-    }
-
-    // Return status
-    return rc;
-}
-
-// ------------------------------------------------------------------
-// CreateBak function with added prog - src-dev
-// ------------------------------------------------------------------
-int CreateBakWithProgress(const char* src, const char* dst, bool ovr, ULONGLONG& inoutBytesDone, ULONGLONG totalBytes, const char* s) {
-
-    if (!ovr) {
-        FILE* fdst = fopen(dst, "rb");
-        bool exists = false;
-        if (fdst) {
-            exists = true;
-            fclose(fdst);
-        }
-        if (exists) return E_CANNOT_OVR;
-    }
-
-    FILE* fsrc = fopen(src, "rb");
-    if (!fsrc) return E_FOPEN_SRC;
-
-    FILE* fdst = fopen(dst, "wb");
-    if (!fdst) {
-        fclose(fsrc);
-        return E_FOPEN_DST;
-    }
-
-    char* buf = (char*)malloc(sizeof(char) * 65536);
-    if (buf == NULL) return E_OUT_OF_MEMORY;
-
-    int c;
-    while ((c = fread(buf, 1, 65536, fsrc))) {
-        int rb = fwrite(buf, 1, c, fdst);
-        if (rb != c) {
-            fclose(fsrc);
-            fclose(fdst);
-
-            free(buf);
-
-            return E_FWRITE_DST;
-        }
-        inoutBytesDone += rb;
-        if (CopyProgress::g_copyProgFn) {
-            if (!CopyProgress::g_copyProgFn(inoutBytesDone, totalBytes, s, CopyProgress::g_copyProgUser)) {
-                break; // canceled
-            }
-        }
-    }
-
-    fclose(fsrc);
-    fclose(fdst);
-
-    free(buf);
-
-    return E_NO_ERROR;
 }
 
 namespace AppActions {
@@ -1074,7 +731,7 @@ void Execute(Action act, FileBrowserApp& app) {
                 CopyProgCtx ctx = { &app, 0, false, false, 0, false };
                 SetCopyProgressCallback(CopyProgThunk, &ctx);
 
-                int cb = CreateBakWithProgress(dstFull, dst, false, base, total, dstName);
+                int cb = CreateBakWithProgress(dstFull, false, base, total);
 
                 switch (cb) {
                 case E_NO_ERROR:
@@ -1188,7 +845,7 @@ void Execute(Action act, FileBrowserApp& app) {
 
             UNZIP* zip = new UNZIP;
 
-            if (zip->openZIP(srcFull, zipFile_Open, zipFile_Close, zipFile_Read, zipFile_Seek) != UNZ_OK) {
+            if (zip->openZIP(srcFull, ZipFile_Open, ZipFile_Close, ZipFile_Read, ZipFile_Seek) != UNZ_OK) {
                 zip->closeZIP();
                 app.SetStatus("Bad zip file");
                 break;
@@ -1243,7 +900,7 @@ void Execute(Action act, FileBrowserApp& app) {
 
                 if (ctx.canceled) break;
 
-                if ((rc = ExtractCurrentFile(zip, dstDir, true, true, base, total, szName)) != UNZ_OK) skipped += 1;
+                if ((rc = ExtractCurrentFileWithProgress(zip, dstDir, true, base, total)) != UNZ_OK) skipped += 1;
                 else extractedOk += 1;
 
                 if ((rc = zip->gotoNextFile()) == UNZ_OK) {
@@ -1258,11 +915,11 @@ void Execute(Action act, FileBrowserApp& app) {
 
             } //end while
 
+            FreeUnZipBuffer();
+
             // End progress and clear callback
             SetCopyProgressCallback(NULL, NULL);
             app.EndProgress();
-
-            free(m_pUnZipBuffer);
 
             if (ctx.canceled) {
                 while (rc == UNZ_OK) {
