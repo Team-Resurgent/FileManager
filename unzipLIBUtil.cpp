@@ -81,188 +81,106 @@ char* strreplall(char* Str, size_t BufSiz, char* OldStr, char* NewStr) {
 }
 
 int ExtractCurrentFileWithProgress(UNZIP* zip, const char* dst, bool overwrite, ULONGLONG& inoutBytesDone, ULONGLONG totalBytes) {
-    char fileName_InZip[512];
-    char buf[512];
-    unz_file_info fi;
-    char pathSep[2];
-    char* fileName_WithOutPath;
-    char* pos;
-    bool useFolderNames = true;
-    int rc;
-    char* writeFileName;
-    char hold;
-    bool skip = false;
-    HANDLE file;
-    DWORD bytesWritten = 0;
+    char pathSep[2];    
 
     // Check if the destination folder ends with an '\\'
-    if (*(dst + strlen(dst) - 1) == '\\') {
-        // Use no separator
-        *pathSep = '\0';
-    }
-    else {
-        // Use path separator
-        strcpy(pathSep, "\\");
-    }
+    if (*(dst + strlen(dst) - 1) == '\\') *pathSep = '\0';
+    else strcpy(pathSep, "\\");
+
+    char buf[512];
+    unz_file_info fi;
+    int rc;
 
     // Get information about the current file
     rc = zip->getFileInfo(&fi, buf, 512, NULL, 0, NULL, 0);
-    if (rc != UNZ_OK) {
-        return rc;
-    }
+    if (rc != UNZ_OK) return rc;
 
     // Substitute '/' with '\'
     strreplall(buf, 512, "/", "\\");
 
-    // Don't include the drive letter (if present) and the leading '\' (if present)
-    if (buf[1] == ':' && buf[2] == '\\') {
-        // Copy file name
-        strcpy(fileName_InZip, (buf + 3));
-    }
-    else if (buf[1] == ':') {
-        strcpy(fileName_InZip, (buf + 2));
-    }
-    else if (buf[0] == '\\') {
-        strcpy(fileName_InZip, (buf + 1));
-    }
-    else {
-        strcpy(fileName_InZip, buf);
-    }
+    char fileName_InZip[512];
 
-    // Set reference
+    // Don't include the drive letter (if present) and the leading '\' (if present)
+    if (buf[1] == ':' && buf[2] == '\\') strcpy(fileName_InZip, (buf + 3));
+    else if (buf[1] == ':') strcpy(fileName_InZip, (buf + 2));
+    else if (buf[0] == '\\') strcpy(fileName_InZip, (buf + 1));
+    else strcpy(fileName_InZip, buf);
+    
+    char* fileName_WithOutPath;
+    char* pos;
+
     pos = (char*)fileName_WithOutPath = (char*)fileName_InZip;
 
     // Find filename part (without the path)
     while ((*pos) != '\0') {
-        if (((*pos) == '/') || ((*pos) == '\\')) {
-            // Set reference
-            fileName_WithOutPath = (char*)(pos + 1);
-        }
-
-        // Increment position
+        if (((*pos) == '/') || ((*pos) == '\\')) fileName_WithOutPath = (char*)(pos + 1);
         pos++;
     }
 
     // Is this a folder?
     if ((*fileName_WithOutPath) == '\0') {
-        // Use folder names?
-        if (useFolderNames) {
-            // Compose file name
-            sprintf(buf, "%s%s%s", dst, pathSep, fileName_InZip);
-
-            // Substitute '/' with '\'
-            strreplall(buf, 512, "/", "\\");
-
-            // Create folder
-            CreateDirectory(buf, NULL);
-        }
-
-        // Return OK
+        sprintf(buf, "%s%s%s", dst, pathSep, fileName_InZip);
+        strreplall(buf, 512, "/", "\\");
+        CreateDirectory(buf, NULL);
         return UNZ_OK;
     }
 
     // Do we have a buffer?
     if (unZipBuffer == NULL) {
-        // Allocate buffer
-        if ((unZipBuffer = (char*)malloc(65536)) == NULL) {
-            // Return not OK
-            return UNZ_INTERNALERROR;
-        }
+        if ((unZipBuffer = (char*)malloc(65536)) == NULL) return UNZ_INTERNALERROR;
     }
 
-    // Use folder names?
-    if (useFolderNames) {
-        // Use total file name
-        writeFileName = fileName_InZip;
-    }
-    else {
-        // Use file name only
-        writeFileName = fileName_WithOutPath;
-    }
+    char* writeFileName = fileName_WithOutPath;
 
     // Open the current file
-    if ((rc = zip->openCurrentFile()) != UNZ_OK) {
-        return rc;
-    }
+    if ((rc = zip->openCurrentFile()) != UNZ_OK) return rc;
 
     // Compose file name
     sprintf(buf, "%s%s%s", dst, pathSep, writeFileName);
 
+    HANDLE file;
+    bool skip = false;
+
     // Check if file exists?
     if (!overwrite && rc == UNZ_OK) {
-        // Open the local file
         file = CreateFile(buf, GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-
-        // Check handle
         if (file != (HANDLE)INVALID_HANDLE_VALUE) {
-            // File exists but don't overwrite. Close file
             CloseHandle(file);
-
-            // Skip this file
             skip = true;
         }
     }
 
-    // Skip this file?
+    char hold;
+
+    //Create the file and directories
     if (!skip && rc == UNZ_OK) {
-        // Create the file
         file = CreateFile(buf, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
 
-        // Check handle
         if (file == (HANDLE)INVALID_HANDLE_VALUE) {
-            // File not created. Some zipfiles doesn't contain
-            // folder alone before file
-            if (useFolderNames && fileName_WithOutPath != (char*)fileName_InZip) {
-                // Store character
+            if (fileName_WithOutPath != (char*)fileName_InZip) {
                 hold = *(fileName_WithOutPath - 1);
-
-                // Terminate string
                 *(fileName_WithOutPath - 1) = '\0';
-
-                // Compose folder name
                 sprintf(buf, "%s%s%s", overwrite, pathSep, writeFileName);
-
-                // Create folder
                 CreateDirectory(buf, NULL);
-
-                // Restore file name
                 *(fileName_WithOutPath - 1) = hold;
-
-                // Compose folder name
                 sprintf(buf, "%s%s%s", overwrite, pathSep, writeFileName);
-
-                // Try to create the file
                 file = CreateFile(buf, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
             }
         }
 
-        // Check handle
-        if (file == (HANDLE)INVALID_HANDLE_VALUE) {
-            // Return not OK
-            return UNZ_ERRNO;
-        }
+        if (file == (HANDLE)INVALID_HANDLE_VALUE) return UNZ_ERRNO;
     }
 
-    // Check handle
+    DWORD bytesWritten = 0;
+
+    // Read and write the current file
     if (file != (HANDLE)INVALID_HANDLE_VALUE) {
         do {
-            // Read the current file
-            if ((rc = zip->readCurrentFile((uint8_t*)unZipBuffer, 65536)) < 0) {
-                // Error reading zip file
-                // Break out of loop
-                break;
-            }
+            if ((rc = zip->readCurrentFile((uint8_t*)unZipBuffer, 65536)) < 0) break;
 
-            // Check return code
             if (rc > 0) {
-                // Write to file
                 if (WriteFile(file, unZipBuffer, (DWORD)rc, &bytesWritten, NULL) == false) {
-                    // Error during write of file
-
-                    // Set return status
                     rc = UNZ_ERRNO;
-
-                    // Break out of loop
                     break;
                 }
                 else {
@@ -276,20 +194,13 @@ int ExtractCurrentFileWithProgress(UNZIP* zip, const char* dst, bool overwrite, 
             }
         } while (rc > 0);
 
-        // Close file
         CloseHandle(file);
     }
 
-    if (rc == UNZ_OK) {
-        // Close current file
-        rc = zip->closeCurrentFile();
-    }
-    else {
-        // Close current file (don't lose the error)
-        zip->closeCurrentFile();
-    }
+    // Close current file (don't lose the error)
+    if (rc == UNZ_OK) rc = zip->closeCurrentFile();
+    else zip->closeCurrentFile();
 
-    // Return status
     return rc;
 }
 
