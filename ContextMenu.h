@@ -63,6 +63,8 @@ public:
     // NEW: Store device pointer so OpenAt() can call GetViewport()
     void SetDevice(LPDIRECT3DDEVICE8 dev) { m_dev = dev; }
 
+    void SetLabel(char* l) { strncpy(m_label, l, 64); m_label[sizeof(m_label) - 1] = '\0'; }
+
     // Render the menu (caller supplies font + D3D device)
     void Draw(CXBFont& font, LPDIRECT3DDEVICE8 dev) const;
 
@@ -95,6 +97,7 @@ private:
     Item  m_items[24];   // fixed-capacity list of menu rows
     int   m_count;       // number of items in the list
     int   m_sel;         // currently highlighted row index
+    char  m_label[64];
 
     bool  m_open;        // true if menu is open
     bool  m_waitRelease; // absorbs the button press that opened the menu

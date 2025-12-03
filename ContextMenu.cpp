@@ -35,6 +35,7 @@ ContextMenu::ContextMenu(){
     m_prevA=m_prevB=m_prevX=m_prevWhite=m_prevBlack=0;
     m_prevButtons=0;
     m_parentMenu = NULL;
+    m_label[0] = '\0';
 }
 
 void ContextMenu::Clear(){ m_count=0; m_sel=0; }
@@ -159,9 +160,8 @@ void ContextMenu::Draw(CXBFont& font, LPDIRECT3DDEVICE8 dev) const{
     // --- measure header text height (ANSI -> wide, then GetTextExtent) ---
     FLOAT hdrW = 0.0f, hdrH = 0.0f;
     {
-        const char* title = "Select action";
         WCHAR wbuf[128];
-        MultiByteToWideChar(CP_ACP, 0, title, -1, wbuf, 128);
+        MultiByteToWideChar(CP_ACP, 0, m_label, -1, wbuf, 128);
         font.GetTextExtent(wbuf, &hdrW, &hdrH);
     }
 
@@ -182,7 +182,7 @@ void ContextMenu::Draw(CXBFont& font, LPDIRECT3DDEVICE8 dev) const{
     DrawRect(dev, x, y, menuW, menuH, 0xE0222222);
 
     // Header
-    DrawAnsi(font, x + 10.0f, y + headerTopPad, 0xFFFFFFFF, "Select action");
+    DrawAnsi(font, x + 10.0f, y + headerTopPad, 0xFFFFFFFF, m_label);
     DrawRect(dev, x, lineY, menuW, 1.0f, 0x60FFFFFF);
 
     // Rows

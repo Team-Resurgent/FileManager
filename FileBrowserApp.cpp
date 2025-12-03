@@ -383,6 +383,7 @@ FileBrowserApp::FileBrowserApp(){
     m_dvdUsedBytes  = 0;
     m_dvdTotalBytes = 0;
     m_dvdHaveStats  = 0;
+
 }
 
 
@@ -507,8 +508,8 @@ void FileBrowserApp::SelectItemInPane(Pane& p, const char* name){
 }
 
 void FileBrowserApp::BuildZipSubMenu() {
-    volatile char stackProbe[20000];
-    memset((void*)stackProbe, 0xAA, sizeof(stackProbe));
+    m_zipSubMenu.SetLabel("Unzip");
+
     Pane& p = m_pane[m_active];
     Pane& p2 = m_pane[1 - m_active];
     bool inDir = (p.mode == 1);
@@ -520,30 +521,30 @@ void FileBrowserApp::BuildZipSubMenu() {
         if (inDir && !cur.isUpEntry && !cur.isDir) isFile = true;
     }
 
-    char unzipTo[256] = "Unzip to ";
+    char unzipTo[256] = "to ";
     if (isFile) {
         strcat(unzipTo, "\"");
         char name[64];
         strcpy(name, p.items[p.sel].name);
         name[strlen(name) - 4] = '\0';
-        if (strlen(name) > 23) {
-            strncat(unzipTo, name, 10);
-            strcat(unzipTo, "...");
-            strcat(unzipTo, name + strlen(name) - 10);
+        if (strlen(name) > 21) {
+            strncat(unzipTo, name, 9);
+            strcat(unzipTo, "..");
+            strcat(unzipTo, name + strlen(name) - 9);
         }
         else strcat(unzipTo, name);
         strcat(unzipTo, "\\\"");
     }
 
-    char unzipToOther[256] = "Unzip to ";
+    char unzipToOther[256] = "to ";
     if (isFile && inDir2) {
         strcat(unzipToOther, "\"");
         char path[512];
         strncpy(path, p2.curPath, sizeof(path) - 1);
-        if (strlen(path) > 23) {
-            strncat(unzipToOther, path, 10);
-            strcat(unzipToOther, "...");
-            strcat(unzipToOther, path + strlen(path) - 10);
+        if (strlen(path) > 21) {
+            strncat(unzipToOther, path, 9);
+            strcat(unzipToOther, "..");
+            strcat(unzipToOther, path + strlen(path) - 9);
         }
         else strcat(unzipToOther, path);
         if (unzipToOther[strlen(unzipToOther) - 1] != '\\') strcat(unzipToOther, "\\");
@@ -552,7 +553,7 @@ void FileBrowserApp::BuildZipSubMenu() {
 
     m_zipSubMenu.Clear();
 
-    m_zipSubMenu.AddItem("Unzip here", ACT_UNZIPHERE, (true));
+    m_zipSubMenu.AddItem("here", ACT_UNZIPHERE, (true));
     m_zipSubMenu.AddItem(unzipTo, ACT_UNZIPTO, (true));
     if (inDir2)
     m_zipSubMenu.AddItem(unzipToOther, ACT_UNZIPTOOTHER, (true));
@@ -560,6 +561,8 @@ void FileBrowserApp::BuildZipSubMenu() {
 
 // Build the context menu based on current mode and selection.
 void FileBrowserApp::BuildContextMenu(){
+    m_ctx.SetLabel("Select action");
+
     Pane& p = m_pane[m_active];
 	Pane& p2 = m_pane[1 - m_active];
 	bool inDir = (p.mode == 1);
