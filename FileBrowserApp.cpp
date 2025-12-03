@@ -508,8 +508,6 @@ void FileBrowserApp::SelectItemInPane(Pane& p, const char* name){
 }
 
 void FileBrowserApp::BuildZipSubMenu() {
-    m_zipSubMenu.SetLabel("Unzip");
-
     Pane& p = m_pane[m_active];
     Pane& p2 = m_pane[1 - m_active];
     bool inDir = (p.mode == 1);
@@ -527,10 +525,10 @@ void FileBrowserApp::BuildZipSubMenu() {
         char name[64];
         strcpy(name, p.items[p.sel].name);
         name[strlen(name) - 4] = '\0';
-        if (strlen(name) > 21) {
-            strncat(unzipTo, name, 9);
-            strcat(unzipTo, "..");
-            strcat(unzipTo, name + strlen(name) - 9);
+        if (strlen(name) > 23) {
+            strncat(unzipTo, name, 10);
+            strcat(unzipTo, "...");
+            strcat(unzipTo, name + strlen(name) - 10);
         }
         else strcat(unzipTo, name);
         strcat(unzipTo, "\\\"");
@@ -541,10 +539,10 @@ void FileBrowserApp::BuildZipSubMenu() {
         strcat(unzipToOther, "\"");
         char path[512];
         strncpy(path, p2.curPath, sizeof(path) - 1);
-        if (strlen(path) > 21) {
-            strncat(unzipToOther, path, 9);
-            strcat(unzipToOther, "..");
-            strcat(unzipToOther, path + strlen(path) - 9);
+        if (strlen(path) > 23) {
+            strncat(unzipToOther, path, 10);
+            strcat(unzipToOther, "...");
+            strcat(unzipToOther, path + strlen(path) - 10);
         }
         else strcat(unzipToOther, path);
         if (unzipToOther[strlen(unzipToOther) - 1] != '\\') strcat(unzipToOther, "\\");

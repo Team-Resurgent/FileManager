@@ -154,6 +154,9 @@ void ContextMenu::DrawRect(LPDIRECT3DDEVICE8 dev, float x,float y,float w,float 
 void ContextMenu::Draw(CXBFont& font, LPDIRECT3DDEVICE8 dev) const{
     if (!m_open || m_count <= 0) return;
 
+    bool drawHeader = false;
+    if (m_label[0] != '\0') drawHeader = true;
+
     const FLOAT menuW = m_w;
     const FLOAT rowH  = m_rowH;
 
@@ -167,7 +170,8 @@ void ContextMenu::Draw(CXBFont& font, LPDIRECT3DDEVICE8 dev) const{
 
     // Layout constants (dynamic header height support)
     const FLOAT headerTopPad    = 8.0f;
-    const FLOAT headerBottomPad = 6.0f;
+    FLOAT headerBottomPad = 6.0f;
+    if (!drawHeader) headerBottomPad = 3.0f; //inelegant solution to size correctly without the header
     const FLOAT bottomPad       = 12.0f;
 
     const FLOAT x = m_x;
@@ -182,8 +186,10 @@ void ContextMenu::Draw(CXBFont& font, LPDIRECT3DDEVICE8 dev) const{
     DrawRect(dev, x, y, menuW, menuH, 0xE0222222);
 
     // Header
-    DrawAnsi(font, x + 10.0f, y + headerTopPad, 0xFFFFFFFF, m_label);
-    DrawRect(dev, x, lineY, menuW, 1.0f, 0x60FFFFFF);
+    if (drawHeader) {
+        DrawAnsi(font, x + 10.0f, y + headerTopPad, 0xFFFFFFFF, m_label);
+        DrawRect(dev, x, lineY, menuW, 1.0f, 0x60FFFFFF);
+    }
 
     // Rows
     for (int i = 0; i < m_count; ++i){
