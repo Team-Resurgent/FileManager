@@ -80,7 +80,7 @@ char* strreplall(char* Str, size_t BufSiz, char* OldStr, char* NewStr) {
     return ret;
 }
 
-int ExtractCurrentFileWithProgress(UNZIP* zip, const char* dst, bool overwrite, ULONGLONG& inoutBytesDone, ULONGLONG totalBytes) {
+int ExtractCurrentFileWithProgress(UNZIP* zip, const char* dst, bool overwrite) {
     char pathSep[2];    
 
     // Check if the destination folder ends with an '\\'
@@ -130,7 +130,7 @@ int ExtractCurrentFileWithProgress(UNZIP* zip, const char* dst, bool overwrite, 
         if ((unZipBuffer = (char*)malloc(65536)) == NULL) return UNZ_INTERNALERROR;
     }
 
-    char* writeFileName = fileName_WithOutPath;
+    char* writeFileName = fileName_InZip;
 
     // Open the current file
     if ((rc = zip->openCurrentFile()) != UNZ_OK) return rc;
@@ -179,14 +179,13 @@ int ExtractCurrentFileWithProgress(UNZIP* zip, const char* dst, bool overwrite, 
             if ((rc = zip->readCurrentFile((uint8_t*)unZipBuffer, 65536)) < 0) break;
 
             if (rc > 0) {
-                if (WriteFile(file, unZipBuffer, (DWORD)rc, &bytesWritten, NULL) == false) {
+                if (!WriteFile(file, unZipBuffer, (DWORD)rc, &bytesWritten, NULL)) {
                     rc = UNZ_ERRNO;
                     break;
                 }
                 else {
-                    inoutBytesDone += bytesWritten;
                     if (CopyProgress::g_copyProgFn) {
-                        if (!CopyProgress::g_copyProgFn(inoutBytesDone, totalBytes, NULL, CopyProgress::g_copyProgUser)) {
+                        if (!CopyProgress::g_copyProgFn(-(LONGLONG)bytesWritten, NULL, NULL, CopyProgress::g_copyProgUser)) {
                             break; // canceled
                         }
                     }

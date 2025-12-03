@@ -38,21 +38,22 @@ struct ProgState {
     ULONGLONG   total;          // total bytes (0 if unknown)
     char        current[256];   // current path/file shown in overlay
     DWORD       lastPaintMs;    // throttle overlay redraw rate
-    char        title[24];      // short title ("Copying...", etc.)
+    char        label[24];      // short title ("Copying...", etc.)
 
     ProgState()
         : active(false), done(0), total(0), lastPaintMs(0)
     {
         current[0] = 0;
-        title[0]   = 0;
+        label[0]   = 0;
     }
 };
 
-class FileBrowserApp : public CXBApplication {
-        // Keep first for tighter packing; overlay is accessed frequently.
-        ProgState m_prog;
+class FileBrowserApp : public CXBApplication {        
 
 public:
+
+    ProgState m_prog;
+
     // Allow centralized action runner to call private helpers/members.
     friend void AppActions::Execute(Action, FileBrowserApp&);
 
@@ -98,7 +99,7 @@ private:
     void  SelectItemInPane(Pane& p, const char* name);
 
     // --- Context menu -------------------------------------------------------
-    void  AddMenuItem(const char* label, Action act, bool enabled);
+    void  BuildZipSubMenu();  // build the unzip submenu
     void  BuildContextMenu(); // build items based on mode/selection
     void  OpenMenu();         // position and open popup
     void  CloseMenu();        // close and return to browse mode
@@ -135,6 +136,9 @@ private:
     // Mode and UI components
     enum { MODE_BROWSE, MODE_MENU, MODE_RENAME } m_mode;
     ContextMenu      m_ctx;       // popup menu
+    ContextMenu      m_zipSubMenu; // zip submenu
+    ContextMenu*     m_menuStack[8];  // max possible menus
+    int              m_menuDepth;
     OnScreenKeyboard m_kb;        // rename overlay
     PaneRenderer     m_renderer;  // draws a pane (headers, rows, scrollbar)
 
@@ -144,21 +148,6 @@ private:
     // Status text buffer and expiry tick for footer toast.
     char  m_status[256];
     DWORD m_statusUntilMs;
-
-    // Legacy action entry point (kept for compatibility).
-    void ExecuteAction(Action act);
-
-    // Per-action helpers (legacy; main impl lives in AppActions.cpp).
-    void Act_Open();
-    void Act_Copy();
-    void Act_Move();
-    void Act_Delete();
-    void Act_Rename();
-    void Act_Mkdir();
-    void Act_CalcSize();
-    void Act_GoRoot();
-    void Act_SwitchMedia();
-    void Act_FormatCache(); // destructive: formats X/Y/Z cache
 
     // Copy current pad state so inputs do not leak between modes.
     void AbsorbPadState(const XBGAMEPAD& pad);

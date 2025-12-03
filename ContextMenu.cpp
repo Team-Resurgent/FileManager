@@ -34,6 +34,7 @@ ContextMenu::ContextMenu(){
     m_x=0; m_y=0; m_w=320; m_rowH=28;
     m_prevA=m_prevB=m_prevX=m_prevWhite=m_prevBlack=0;
     m_prevButtons=0;
+    m_parentMenu = NULL;
 }
 
 void ContextMenu::Clear(){ m_count=0; m_sel=0; }
@@ -41,20 +42,35 @@ void ContextMenu::Clear(){ m_count=0; m_sel=0; }
 // Add a selectable row
 void ContextMenu::AddItem(const char* label, Action act, bool enabled){
     if (m_count >= (int)(sizeof(m_items)/sizeof(m_items[0]))) return;
-    m_items[m_count].label   = label;
+    strncpy(m_items[m_count].label, label, sizeof(m_items[m_count].label) - 1);
+    m_items[m_count].label[sizeof(m_items[m_count].label) - 1] = '\0';
     m_items[m_count].act     = act;
     m_items[m_count].enabled = enabled;
     m_items[m_count].separator = false;
+    m_items[m_count].child = NULL;
     ++m_count;
 }
 
 // Add a non-selectable separator row (drawn as a thin line)
 void ContextMenu::AddSeparator(){
     if (m_count >= (int)(sizeof(m_items)/sizeof(m_items[0]))) return;
-    m_items[m_count].label     = "";       // not used for separators
+    m_items[m_count].label[0]     = 0;       // not used for separators
     m_items[m_count].act       = ACT_OPEN; // placeholder; ignored
     m_items[m_count].enabled   = false;
     m_items[m_count].separator = true;     // <-- key bit
+    m_items[m_count].child = NULL;
+    ++m_count;
+}
+
+//Add a selectable submenu
+void ContextMenu::AddSubMenu(const char* label, ContextMenu* submenu, bool enabled) {
+    if (m_count >= (int)(sizeof(m_items) / sizeof(m_items[0]))) return;
+    strncpy(m_items[m_count].label, label, sizeof(m_items[m_count].label) - 1);
+    m_items[m_count].label[sizeof(m_items[m_count].label) - 1] = '\0';
+    m_items[m_count].act = ACT_NONE;   // not used for submenu
+    m_items[m_count].enabled = enabled;
+    m_items[m_count].separator = false;
+    m_items[m_count].child = submenu;    // <--- SUBMENU POINTER
     ++m_count;
 }
 
@@ -80,7 +96,29 @@ int ContextMenu::FindNextSelectable(int start, int dir) const{
 // arms a small "wait for release" window so the A/X that opened
 // the menu doesn’t immediately trigger a choose/close here.
 void ContextMenu::OpenAt(float x, float y, float width, float rowH){
-    m_x=x; m_y=y; m_w=width; m_rowH=rowH;
+    m_x=x; m_y=y; 
+    m_w=width; m_rowH=rowH;
+
+    if (m_dev) {
+        D3DVIEWPORT8 vp;
+        m_dev->GetViewport(&vp);
+
+        float screenW = (float)vp.Width;
+        float screenH = (float)vp.Height;
+
+        // Right clamp
+        if (m_x + m_w > screenW) m_x = screenW - m_w;
+
+        // Left clamp
+        if (m_x < 0) m_x = 0;
+
+        // Bottom clamp
+        if (m_y + (m_count * m_rowH) > screenH) m_y = screenH - (m_count * m_rowH);
+
+        // Top clamp
+        if (m_y < 0) m_y = 0;
+    }
+
     if (m_sel < 0) m_sel = 0;
     if (m_sel >= m_count) m_sel = (m_count>0)?(m_count-1):0;
 
@@ -96,7 +134,7 @@ void ContextMenu::OpenAt(float x, float y, float width, float rowH){
     m_open=true;
     m_waitRelease=true; // avoid immediate A/X carry-over
     m_prevA=m_prevB=m_prevX=m_prevWhite=m_prevBlack=0;
-    m_prevButtons=0;
+    m_prevButtons = 0;
 }
 
 void ContextMenu::Close(){ m_open=false; }
@@ -140,7 +178,7 @@ void ContextMenu::Draw(CXBFont& font, LPDIRECT3DDEVICE8 dev) const{
     const FLOAT menuH   = (listTop - y) + (m_count * rowH) + bottomPad;
 
     // Frame/background
-    DrawRect(dev, x - 6.0f, y - 6.0f, menuW + 12.0f, menuH + 12.0f, 0xA0101010);
+    DrawRect(dev, x - 4.5f, y - 4.5f, menuW + 9.0f, menuH + 9.0f, 0xA0101010);
     DrawRect(dev, x, y, menuW, menuH, 0xE0222222);
 
     // Header
@@ -231,6 +269,15 @@ ContextMenu::Result ContextMenu::OnPad(const XBGAMEPAD& pad, Action& outAct){
     // Choose / close behavior
     if (aTrig){
         const Item& it = m_items[m_sel];
+
+        if (it.child != NULL) {
+            float subX = m_x + m_w;
+            float subY = m_y + (m_sel * m_rowH);
+            it.child->m_parentMenu = this;       // so it can close back to us
+            it.child->OpenAt(subX, subY, m_w, m_rowH);
+
+            return SUBMENU_OPENED;
+        }
         if (IsSelectable(m_sel)){ outAct = it.act; return CHOSEN; }
         return NOOP; // ignore A on non-selectable (e.g., separator)
     }

@@ -78,8 +78,8 @@ bool IsBadFatxChar(char c);
 void SanitizeFatxNameInPlace(char* s);
 
 // ===== Copy progress callback ===============================================
-typedef bool (*CopyProgressFn)(ULONGLONG bytesDone,
-                               ULONGLONG bytesTotal,
+typedef bool (*CopyProgressFn)(LONGLONG bytesDone,
+                               LONGLONG bytesTotal,
                                const char* currentPath,
                                void* user);
 struct CopyProgress {

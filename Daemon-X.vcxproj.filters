@@ -13,17 +13,14 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
-    <Filter Include="Media">
-      <UniqueIdentifier>{fd94aff1-7048-4168-966a-088e42b11ed6}</UniqueIdentifier>
-    </Filter>
     <Filter Include="Common">
       <UniqueIdentifier>{2d292162-8d7b-4f69-a9e9-6c727546bd1a}</UniqueIdentifier>
     </Filter>
-    <Filter Include="xipslib">
-      <UniqueIdentifier>{1b88a13d-7f8e-453c-ab80-ac546d3b2e56}</UniqueIdentifier>
-    </Filter>
     <Filter Include="unzipLIB">
       <UniqueIdentifier>{310af676-5dbf-43d5-b879-5e69c7ff633e}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="xpatchlib">
+      <UniqueIdentifier>{65cd9862-e97e-4f45-8d2d-4f30b57f4020}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
@@ -43,9 +40,6 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="ContextMenu.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="font_xpr.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="OnScreenKeyboard.cpp">
@@ -81,9 +75,6 @@
     <ClCompile Include="AppActions.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="xipslib\xipslib.cpp">
-      <Filter>xipslib</Filter>
-    </ClCompile>
     <ClCompile Include="unzipLIB\src\inffast.c">
       <Filter>unzipLIB</Filter>
     </ClCompile>
@@ -114,7 +105,16 @@
     <ClCompile Include="unzipLIBUtil.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="xipslibUtil.cpp">
+    <ClCompile Include="xpatchlibUtil.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="xpatchlib\xpatchlib.cpp">
+      <Filter>xpatchlib</Filter>
+    </ClCompile>
+    <ClCompile Include="xpatchlib\xips.cpp">
+      <Filter>xpatchlib</Filter>
+    </ClCompile>
+    <ClCompile Include="font_xpr.c">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -140,17 +140,11 @@
     <ClInclude Include="FileBrowserApp.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="font_xpr.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="FsUtil.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="GfxPrims.h">
       <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="xipslib\xipslib.h">
-      <Filter>xipslib</Filter>
     </ClInclude>
     <ClInclude Include="unzipLIB\src\inffast.h">
       <Filter>unzipLIB</Filter>
@@ -185,10 +179,22 @@
     <ClInclude Include="unzipLIB\src\gzguts.h">
       <Filter>unzipLIB</Filter>
     </ClInclude>
-    <ClInclude Include="xipslibUtil.h">
+    <ClInclude Include="xpatchlibUtil.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="unzipLIBUtil.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="xpatchlib\xpatchlib.h">
+      <Filter>xpatchlib</Filter>
+    </ClInclude>
+    <ClInclude Include="xpatchlib\xips.h">
+      <Filter>xpatchlib</Filter>
+    </ClInclude>
+    <ClInclude Include="font_xpr.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="g_FontXpr.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

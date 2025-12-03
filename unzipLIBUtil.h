@@ -18,7 +18,7 @@ int32_t ZipFile_Seek(void* p, int32_t position, int iType);
 // ------------------------------------------------------------------
 // ExtractCurrentFileWithProgress & helper functions (CrunchBite)
 // ------------------------------------------------------------------
-int ExtractCurrentFileWithProgress(UNZIP* zip, const char* dst, bool overwrite, ULONGLONG& inoutBytesDone, ULONGLONG totalBytes);
+int ExtractCurrentFileWithProgress(UNZIP* zip, const char* dst, bool overwrite);
 
 void FreeUnZipBuffer();
 

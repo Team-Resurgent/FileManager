@@ -20,7 +20,8 @@ class FileBrowserApp;
 // Central list of actions used across UI components
 // Add new actions here and implement handling in AppActions::Execute().
 // --------------------------------------------------------------------------
-enum Action {
+typedef enum {
+    ACT_NONE,
     ACT_OPEN,          // Enter dir / up one / launch .xbe (context-sensitive)
     ACT_COPY,          // Copy selected/marked items to other pane/dest
     ACT_MOVE,          // Move selected/marked items (rename within volume or copy+delete)
@@ -37,11 +38,13 @@ enum Action {
     ACT_SWITCHMEDIA,   // Switch active pane (left <-> right)
     ACT_FORMAT_CACHE,  // Format X/Y/Z cache partitions (+ clear E:\CACHE)
 
-	ACT_APPLYIPS,      //xipslib
-	ACT_RESTOREBAK,    //xipslib
-    ACT_UNZIPTO,       //unzipLIB
+    ACT_APPLYIPS,      //xpatchlib
+    ACT_RESTOREBAK,    //xpatchlib
     ACT_UNZIPHERE,     //unzipLIB
-};
+    ACT_UNZIPTO,       //unzipLIB
+    ACT_UNZIPTOOTHER   //unzipLIB
+
+} Action;
 
 // --------------------------------------------------------------------------
 // AppActions namespace: single entrypoint that executes an Action.

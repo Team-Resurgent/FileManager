@@ -29,7 +29,7 @@
     <ClCompile Include="OnScreenKeyboard.cpp" />
     <ClCompile Include="PaneRenderer.cpp" />
     <ClCompile Include="RXDKResolves.cpp" />
-    <ClCompile Include="xipslibUtil.cpp" />
+    <ClCompile Include="xpatchlibUtil.cpp" />
     <ClCompile Include="unzipLIBUtil.cpp" />
     <ClCompile Include="unzipLIB\src\adler32.c" />
     <ClCompile Include="unzipLIB\src\crc32.c" />
@@ -40,7 +40,8 @@
     <ClCompile Include="unzipLIB\src\unzip.c" />
     <ClCompile Include="unzipLIB\src\unzipLIB.cpp" />
     <ClCompile Include="unzipLIB\src\zutil.c" />
-    <ClCompile Include="xipslib\xipslib.cpp" />
+    <ClCompile Include="xpatchlib\xips.cpp" />
+    <ClCompile Include="xpatchlib\xpatchlib.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="AppActions.h" />
@@ -50,6 +51,7 @@
     <ClInclude Include="font_xpr.h" />
     <ClInclude Include="FsUtil.h" />
     <ClInclude Include="GfxPrims.h" />
+    <ClInclude Include="font_xpr.h" />
     <ClInclude Include="OnScreenKeyboard.h" />
     <ClInclude Include="PaneModel.h" />
     <ClInclude Include="PaneRenderer.h" />
@@ -65,8 +67,9 @@
     <ClInclude Include="unzipLIB\src\zconf.h" />
     <ClInclude Include="unzipLIB\src\zlib.h" />
     <ClInclude Include="unzipLIB\src\zutil.h" />
-    <ClInclude Include="xipslibUtil.h" />
-    <ClInclude Include="xipslib\xipslib.h" />
+    <ClInclude Include="xpatchlibUtil.h" />
+    <ClInclude Include="xpatchlib\xips.h" />
+    <ClInclude Include="xpatchlib\xpatchlib.h" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>16.0</VCProjectVersion>
@@ -114,7 +117,7 @@
     <LinkIncremental>false</LinkIncremental>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
-    <IncludePath>$(VC_IncludePath);$(RXDK_LIBS)include</IncludePath>
+    <IncludePath>$(RXDK_LIBS)include;$(VC_IncludePath)</IncludePath>
     <ExternalIncludePath>$(RXDK_LIBS)include</ExternalIncludePath>
     <LibraryWPath />
     <SourcePath />
@@ -131,7 +134,7 @@
       <PreprocessorDefinitions>XBOX;_XBOX;_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>false</ConformanceMode>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
-      <AdditionalIncludeDirectories>$(ProjectDir)xipslib;$(ProjectDir)unzipLIB\src;C:\Program Files %28x86%29\Microsoft Xbox SDK\Samples\Xbox\Common\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)xpatchlib;$(ProjectDir)unzipLIB\src;C:\Program Files %28x86%29\Microsoft Xbox SDK\Samples\Xbox\Common\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <BufferSecurityCheck>false</BufferSecurityCheck>
       <ExceptionHandling>false</ExceptionHandling>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
@@ -176,6 +179,10 @@ XCOPY /C /Q /I /E /S /Y /F "$(ProjectDir)Media\*" "$(OutDir)Build\$(ProjectName)
 MKDIR "$(OutDir)XISO" &gt;NUL 2&gt;&amp;1
 "$(RXDK_LIBS)bin\xdvdfs.exe" pack "$(OutDir)Build\$(ProjectName)" "$(OutDir)XISO\$(ProjectName).iso"</Command>
     </PostBuildEvent>
+    <PreBuildEvent>
+      <Command>
+      </Command>
+    </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>

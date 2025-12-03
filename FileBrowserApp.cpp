@@ -320,6 +320,7 @@ FileBrowserApp::FileBrowserApp(){
     m_dvdUsedBytes  = 0;
     m_dvdTotalBytes = 0;
     m_dvdHaveStats  = false;
+    m_menuDepth = 0;
 
     // --- Auto-detect video capabilities and set PresentParams ----------------
 	ZeroMemory(&m_d3dpp, sizeof(m_d3dpp));
@@ -505,10 +506,56 @@ void FileBrowserApp::SelectItemInPane(Pane& p, const char* name){
     }
 }
 
-// ----- context menu (delegated) ---------------------------------------------
-// Pass-through to the ContextMenu component.
-void FileBrowserApp::AddMenuItem(const char* label, Action act, bool enabled){
-    m_ctx.AddItem(label, act, enabled);
+void FileBrowserApp::BuildZipSubMenu() {
+    volatile char stackProbe[20000];
+    memset((void*)stackProbe, 0xAA, sizeof(stackProbe));
+    Pane& p = m_pane[m_active];
+    Pane& p2 = m_pane[1 - m_active];
+    bool inDir = (p.mode == 1);
+    bool inDir2 = (p2.mode == 1);
+    bool hasSel = !p.items.empty();
+    bool isFile = false;
+    if (hasSel) {
+        const Item& cur = p.items[p.sel];
+        if (inDir && !cur.isUpEntry && !cur.isDir) isFile = true;
+    }
+
+    char unzipTo[256] = "Unzip to ";
+    if (isFile) {
+        strcat(unzipTo, "\"");
+        char name[64];
+        strcpy(name, p.items[p.sel].name);
+        name[strlen(name) - 4] = '\0';
+        if (strlen(name) > 23) {
+            strncat(unzipTo, name, 10);
+            strcat(unzipTo, "...");
+            strcat(unzipTo, name + strlen(name) - 10);
+        }
+        else strcat(unzipTo, name);
+        strcat(unzipTo, "\\\"");
+    }
+
+    char unzipToOther[256] = "Unzip to ";
+    if (isFile && inDir2) {
+        strcat(unzipToOther, "\"");
+        char path[512];
+        strncpy(path, p2.curPath, sizeof(path) - 1);
+        if (strlen(path) > 23) {
+            strncat(unzipToOther, path, 10);
+            strcat(unzipToOther, "...");
+            strcat(unzipToOther, path + strlen(path) - 10);
+        }
+        else strcat(unzipToOther, path);
+        if (unzipToOther[strlen(unzipToOther) - 1] != '\\') strcat(unzipToOther, "\\");
+        strcat(unzipToOther, "\"");
+    }
+
+    m_zipSubMenu.Clear();
+
+    m_zipSubMenu.AddItem("Unzip here", ACT_UNZIPHERE, (true));
+    m_zipSubMenu.AddItem(unzipTo, ACT_UNZIPTO, (true));
+    if (inDir2)
+    m_zipSubMenu.AddItem(unzipToOther, ACT_UNZIPTOOTHER, (true));
 }
 
 // Build the context menu based on current mode and selection.
@@ -531,7 +578,7 @@ void FileBrowserApp::BuildContextMenu(){
 	if (hasSel2){
 		const Item& cur2 = p2.items[p2.sel];
 		if (inDir2 && !cur2.isUpEntry && !cur2.isDir) isFile2 = true;
-		if (isFile) ext2 = GetExtension(cur2.name);
+		if (isFile2) ext2 = GetExtension(cur2.name);
 	}	
 
     int  marked = 0; for (size_t i=0; i<p.items.size(); ++i) if (p.items[i].marked) ++marked;
@@ -540,26 +587,24 @@ void FileBrowserApp::BuildContextMenu(){
 
     // Common operations
 	if (ext && _stricmp(ext, "xbe") == 0)
-	AddMenuItem("Launch",          ACT_OPEN,        (hasSel));
+	m_ctx.AddItem("Launch",          ACT_OPEN,        (hasSel));
 	else
-	AddMenuItem("Open",            ACT_OPEN,        (hasSel));
-    AddMenuItem("Copy",            ACT_COPY,        (inDir && hasSel && inDir2));
-    AddMenuItem("Move",            ACT_MOVE,        (inDir && hasSel && inDir2));
-    AddMenuItem("Delete",          ACT_DELETE,      (inDir && hasSel));
-    AddMenuItem("Rename",          ACT_RENAME,      (inDir && hasSel));
+    m_ctx.AddItem("Open",            ACT_OPEN,        (hasSel));
+    m_ctx.AddItem("Copy",            ACT_COPY,        (inDir && hasSel && inDir2));
+    m_ctx.AddItem("Move",            ACT_MOVE,        (inDir && hasSel && inDir2));
+    m_ctx.AddItem("Delete",          ACT_DELETE,      (inDir && hasSel));
+    m_ctx.AddItem("Rename",          ACT_RENAME,      (inDir && hasSel));
 
 	if (ext && _stricmp(ext, "ips") == 0)
-	AddMenuItem("Apply ips",       ACT_APPLYIPS,    (ext2 && _stricmp(ext2, "xbe") == 0));
+    m_ctx.AddItem("Apply ips",       ACT_APPLYIPS,    (ext2 && _stricmp(ext2, "xbe") == 0));
 	if (ext && _stricmp(ext, "bak") == 0)
-	AddMenuItem("Restore bak",     ACT_RESTOREBAK,  (true));
-    if (ext && _stricmp(ext, "zip") == 0)
-    AddMenuItem("Unzip here",      ACT_UNZIPHERE,   (true));
-    if (ext && _stricmp(ext, "zip") == 0)
-    AddMenuItem("Unzip to..",      ACT_UNZIPTO,     (inDir2));
+    m_ctx.AddItem("Restore bak",     ACT_RESTOREBAK,  (true));
+    if (ext && _stricmp(ext, "zip") == 0) { BuildZipSubMenu();
+    m_ctx.AddSubMenu("Unzip",        &m_zipSubMenu,   (true));}
 
-    AddMenuItem("Make new folder", ACT_MKDIR,       (inDir));
-    AddMenuItem("Calculate size",  ACT_CALCSIZE,    (hasSel));
-    AddMenuItem("Go to root",      ACT_GOROOT,      (inDir));
+    m_ctx.AddItem("Make new folder", ACT_MKDIR,       (inDir));
+    m_ctx.AddItem("Calculate size",  ACT_CALCSIZE,    (hasSel));
+    m_ctx.AddItem("Go to root",      ACT_GOROOT,      (inDir));
     //AddMenuItem("Switch pane",     ACT_SWITCHMEDIA, (hasSel));
 
     // Marking tools (directory mode only; skip the ".." row)
@@ -567,16 +612,16 @@ void FileBrowserApp::BuildContextMenu(){
         int selectable = 0;
         for (size_t i=0;i<p.items.size(); ++i) if (!p.items[i].isUpEntry) ++selectable;
         if (selectable > 0) {
-            AddMenuItem("Mark all",     ACT_MARK_ALL,     true);
-            AddMenuItem("Invert marks", ACT_INVERT_MARKS, true);
+            m_ctx.AddItem("Mark all",     ACT_MARK_ALL,     true);
+            m_ctx.AddItem("Invert marks", ACT_INVERT_MARKS, true);
         }
     }
-    if (marked) AddMenuItem("Clear marks", ACT_CLEAR_MARKS, true);
+    if (marked) m_ctx.AddItem("Clear marks", ACT_CLEAR_MARKS, true);
 
     // Bottom-only item on drive list: destructive cache format.
     if (p.mode == 0) {
         m_ctx.AddSeparator();                               // visual separator (non-selectable)
-        AddMenuItem("Format cache (X/Y/Z)", ACT_FORMAT_CACHE, true);
+        m_ctx.AddItem("Format cache (X/Y/Z)", ACT_FORMAT_CACHE, true);
     }
 }
 
@@ -606,12 +651,21 @@ void FileBrowserApp::OpenMenu(){
     const FLOAT y = kListY + 20.0f;
 
     m_ctx.OpenAt(x, y, menuW, rowH);
+
+    m_menuStack[0] = &m_ctx;
+    m_menuDepth = 1;
+
     m_mode = MODE_MENU;
 }
 
 void FileBrowserApp::CloseMenu(){
-    m_ctx.Close();
-    if (m_mode==MODE_MENU) m_mode=MODE_BROWSE;
+    for (int i = 0; i < m_menuDepth; ++i) {
+        if (m_menuStack[i]) m_menuStack[i]->Close();
+    }
+
+    m_menuDepth = 0;
+
+    m_mode=MODE_BROWSE;
 }
 
 // ----- rename lifecycle (OnScreenKeyboard) ----------------------------------
@@ -619,6 +673,7 @@ void FileBrowserApp::CloseMenu(){
 // that opened the keyboard does not trigger other UI.
 void FileBrowserApp::BeginRename(const char* parentDir, const char* oldName){
     m_ctx.Close();             // ensure menu closes
+
     m_kb.Open(parentDir ? parentDir : "", oldName ? oldName : "");
     m_mode = MODE_RENAME;
 }
@@ -690,15 +745,32 @@ void FileBrowserApp::OnPad_Rename(const XBGAMEPAD& pad){
 
 // ----- input: context menu (delegated) -------------------------------------
 // Feed pad to the menu; on selection, execute via central AppActions.
-void FileBrowserApp::OnPad_Menu(const XBGAMEPAD& pad){
+void FileBrowserApp::OnPad_Menu(const XBGAMEPAD& pad) {
     Action act;
-    ContextMenu::Result r = m_ctx.OnPad(pad, act);
-    if (r == ContextMenu::CHOSEN){
+    ContextMenu* top = m_menuStack[m_menuDepth - 1];
+    ContextMenu::Result r = top->OnPad(pad, act);
+    if (r == ContextMenu::CHOSEN) {
+        CloseMenu();
         //SetStatus("Chosen action=%d", (int)act);   // debug toast
         AppActions::Execute(act, *this);          // perform action
-        CloseMenu();
-    } else if (r == ContextMenu::CLOSED){
-        CloseMenu();
+    } else if (r == ContextMenu::CLOSED) {
+        if (m_menuDepth > 1) {
+            m_menuDepth--;
+            ContextMenu* parent = m_menuStack[m_menuDepth - 1];
+            parent->AbsorbPadState(pad);
+        } else {
+            m_menuDepth = 0;
+            CloseMenu();
+        }
+
+    } else if (r == ContextMenu::SUBMENU_OPENED) {
+        ContextMenu* parent = m_menuStack[m_menuDepth - 1];
+        ContextMenu* child = parent->GetSelectedChildMenu();
+
+        if (child) {
+            m_menuStack[m_menuDepth] = child;
+            m_menuDepth++;
+        }
     }
 
     // Sync edge state so the next browse frame does not double-fire.
@@ -1033,8 +1105,12 @@ HRESULT FileBrowserApp::FrameMove(){
 // ----- draw: menu / rename / panes -----------------------------------------
 // Draw the context menu if open (coordinates set in OpenMenu).
 void FileBrowserApp::DrawMenu(){
-    if (!m_ctx.IsOpen()) return;
-    m_ctx.Draw(m_font, m_pd3dDevice);
+    if (m_menuDepth <= 0) return;
+
+    for (int i = 0; i < m_menuDepth; ++i) {
+        ContextMenu* cm = m_menuStack[i];
+        if (cm && cm->IsOpen()) cm->Draw(m_font, m_pd3dDevice);
+    }
 }
 
 // Draw OSD keyboard if active.
@@ -1221,6 +1297,9 @@ HRESULT FileBrowserApp::Initialize(){
     ComputeResponsiveLayout();
     XBUtil_DebugPrint("Init: Layout computed");
 
+    m_ctx.SetDevice(m_pd3dDevice);
+    m_zipSubMenu.SetDevice(m_pd3dDevice);
+
     return S_OK;
 }
 
@@ -1234,8 +1313,8 @@ void FileBrowserApp::BeginProgress(ULONGLONG total, const char* firstLabel, cons
     _snprintf(m_prog.current, sizeof(m_prog.current), "%s", firstLabel ? firstLabel : "");
     m_prog.current[sizeof(m_prog.current)-1] = 0;
 
-    _snprintf(m_prog.title, sizeof(m_prog.title), "%s", title ? title : "Working...");
-    m_prog.title[sizeof(m_prog.title)-1] = 0;
+    _snprintf(m_prog.label, sizeof(m_prog.label), "%s", title ? title : "Working...");
+    m_prog.label[sizeof(m_prog.label)-1] = 0;
 
     m_prog.lastPaintMs = 0;
 }
@@ -1295,7 +1374,7 @@ void FileBrowserApp::DrawProgressOverlay(){
     const FLOAT barW    = w - margin*2.0f;
 
     // title
-    DrawAnsi(m_font, x + margin, titleY, 0xFFFFFFFF, m_prog.title[0] ? m_prog.title : "Working...");
+    DrawAnsi(m_font, x + margin, titleY, 0xFFFFFFFF, m_prog.label[0] ? m_prog.label : "Working...");
 
     // hint (right) — red "B:" + gray "Cancel"
 	{

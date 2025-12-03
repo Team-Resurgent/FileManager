@@ -3,8 +3,8 @@
 #include "FsUtil.h"
 #include "XBInput.h"   // XBInput_GetInput, g_Gamepads
 
-#include "xipslib.h"
-#include "xipslibUtil.h"
+#include "xips.h"
+#include "xpatchlibUtil.h"
 #include "unzipLIB.h"
 #include "unzipLIBUtil.h"
 
@@ -42,8 +42,19 @@ struct CopyProgCtx {
 // - Pumps gamepad input to detect B presses
 // - Updates the app's progress overlay
 // - Implements the "press B twice" cancel logic
-static bool CopyProgThunk(ULONGLONG done, ULONGLONG total, const char* label, void* user){
-    CopyProgCtx* c = (CopyProgCtx*)user;
+static bool CopyProgThunk(LONGLONG done, LONGLONG total, const char* label, void* user){
+    CopyProgCtx* ctx = (CopyProgCtx*)user;
+    FileBrowserApp* app = ctx->app;
+
+    if (done == LLONG_MIN) done = app->m_prog.done;
+    else if (done < 0) {
+        done = _abs64(done);
+        done += app->m_prog.done;
+        done += ctx->base;
+    }
+    else done += ctx->base;
+
+    if (total == LLONG_MIN) total = 0;
 
     // Poll controller to read B presses while copying
     XBInput_GetInput();
@@ -52,33 +63,33 @@ static bool CopyProgThunk(ULONGLONG done, ULONGLONG total, const char* label, vo
     const DWORD now  = GetTickCount();
 
     // Paint progress (done is per-current-item, base is previous items)
-    c->app->UpdateProgress(c->base + done, total, label);
+    app->UpdateProgress(done, total, label);
 
     // Rising-edge B?
-    if (bNow && !c->prevB){
-        const DWORD statusUntil = c->app->StatusUntilMs();
+    if (bNow && !ctx->prevB){
+        const DWORD statusUntil = app->StatusUntilMs();
         const bool  toastAlive  = (now < statusUntil);
 
-        if (c->confirmArmed && toastAlive){
+        if (ctx->confirmArmed && toastAlive){
             // Second B while the toast is still up => cancel
-            c->canceled = true;
+            ctx->canceled = true;
             SetLastError(ERROR_OPERATION_ABORTED);
-            c->prevB = bNow;
+            ctx->prevB = bNow;
             return false; // abort copy/move
         } else {
             // First B: arm and show "press B again" toast
-            c->confirmArmed = true;
-            c->app->SetStatus("Press B again to cancel");
-            c->confirmUntil = c->app->StatusUntilMs(); // snapshot (optional)
+            ctx->confirmArmed = true;
+            app->SetStatus("Press B again to cancel");
+            ctx->confirmUntil = app->StatusUntilMs(); // snapshot (optional)
         }
     }
 
     // Disarm if toast has expired
-    if (c->confirmArmed && now >= c->app->StatusUntilMs()){
-        c->confirmArmed = false;
+    if (ctx->confirmArmed && now >= app->StatusUntilMs()){
+        ctx->confirmArmed = false;
     }
 
-    c->prevB = bNow;
+    ctx->prevB = bNow;
     return true; // keep going
 }
 
@@ -731,7 +742,11 @@ void Execute(Action act, FileBrowserApp& app) {
                 CopyProgCtx ctx = { &app, 0, false, false, 0, false };
                 SetCopyProgressCallback(CopyProgThunk, &ctx);
 
-                int cb = CreateBakWithProgress(dstFull, false, base, total);
+                int cb = CreateBak(dstFull, false, UpdateBakProgress);
+
+                // End progress and clear callback
+                SetCopyProgressCallback(NULL, NULL);
+                app.EndProgress();
 
                 switch (cb) {
                 case E_NO_ERROR:
@@ -748,10 +763,6 @@ void Execute(Action act, FileBrowserApp& app) {
                     bkcr = false;
                     bkcrfail = true;
                 }
-
-                // End progress and clear callback
-                SetCopyProgressCallback(NULL, NULL);
-                app.EndProgress();
 
                 if (bkcrfail) break;
 
@@ -807,6 +818,7 @@ void Execute(Action act, FileBrowserApp& app) {
     // ---- Unzip zip file -------------------------------------------------------
     case ACT_UNZIPHERE:
     case ACT_UNZIPTO:
+    case ACT_UNZIPTOOTHER:
     {
         if (ext && _stricmp(ext, "zip") == 0) {
 
@@ -828,6 +840,26 @@ void Execute(Action act, FileBrowserApp& app) {
                 }
             }
             else if (act == ACT_UNZIPTO) {
+                if (!app.ResolveSrcDir(dstDir, sizeof(dstDir))) {
+                    app.SetStatus("Pick a destination");
+                    break;
+                }
+                if ((dstDir[0] == 'D' || dstDir[0] == 'd') && dstDir[1] == ':') {
+                    app.SetStatus("Cannot extract to D:\\");
+                    break;
+                }
+                char name[64];
+                strcpy(name, sel->name);
+                name[strlen(name) - 4] = '\0';
+                strcat(dstDir, name);
+                NormalizeDirA(dstDir);
+                CreateDirectoryA(dstDir, NULL);
+                if (!CanWriteHereA(dstDir)) {
+                    app.SetStatusLastErr("Dest not writable");
+                    break;
+                }
+            }
+            else if (act == ACT_UNZIPTOOTHER) {
                 if (!app.ResolveDestDir(dstDir, sizeof(dstDir))) {
                     app.SetStatus("Pick a destination");
                     break;
@@ -893,14 +925,13 @@ void Execute(Action act, FileBrowserApp& app) {
             CopyProgCtx ctx = { &app, 0, false, false, 0, false };
             SetCopyProgressCallback(CopyProgThunk, &ctx);
 
-            ULONGLONG base = 0; // cumulative bytes completed
             size_t extractedOk = 0, skipped = 0;
 
             while (rc == UNZ_OK) {
 
                 if (ctx.canceled) break;
 
-                if ((rc = ExtractCurrentFileWithProgress(zip, dstDir, true, base, total)) != UNZ_OK) skipped += 1;
+                if ((rc = ExtractCurrentFileWithProgress(zip, dstDir, true)) != UNZ_OK) skipped += 1;
                 else extractedOk += 1;
 
                 if ((rc = zip->gotoNextFile()) == UNZ_OK) {
@@ -908,7 +939,7 @@ void Execute(Action act, FileBrowserApp& app) {
                 }
 
                 if (CopyProgress::g_copyProgFn) {
-                    if (!CopyProgress::g_copyProgFn(base, total, szName, CopyProgress::g_copyProgUser)) {
+                    if (!CopyProgress::g_copyProgFn(LLONG_MIN, NULL, szName, CopyProgress::g_copyProgUser)) {
                         break; // canceled
                     }
                 }
