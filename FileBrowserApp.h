@@ -100,6 +100,7 @@ private:
 
     // --- Context menu -------------------------------------------------------
     void  BuildZipSubMenu();  // build the unzip submenu
+    void  BuildConfirmDelSubMenu();
     void  BuildContextMenu(); // build items based on mode/selection
     void  OpenMenu();         // position and open popup
     void  CloseMenu();        // close and return to browse mode
@@ -137,6 +138,7 @@ private:
     enum { MODE_BROWSE, MODE_MENU, MODE_RENAME } m_mode;
     ContextMenu      m_ctx;       // popup menu
     ContextMenu      m_zipSubMenu; // zip submenu
+    ContextMenu      m_confirmDelSubMenu; // delete confirmation submenu
     ContextMenu*     m_menuStack[8];  // max possible menus
     int              m_menuDepth;
     OnScreenKeyboard m_kb;        // rename overlay

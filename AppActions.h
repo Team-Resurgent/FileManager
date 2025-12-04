@@ -42,7 +42,9 @@ typedef enum {
     ACT_RESTOREBAK,    //xpatchlib
     ACT_UNZIPHERE,     //unzipLIB
     ACT_UNZIPTO,       //unzipLIB
-    ACT_UNZIPTOOTHER   //unzipLIB
+    ACT_UNZIPTOOTHER,   //unzipLIB
+
+    ACT_CANCEL,
 
 } Action;
 

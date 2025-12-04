@@ -695,8 +695,9 @@ void Execute(Action act, FileBrowserApp& app) {
     }
 	
     // ---- Apply ips patch ------------------------------------------------------
-	case ACT_APPLYIPS:
-		if (ext && _stricmp(ext, "ips") == 0 && ext2 && _stricmp(ext2, "xbe") == 0) {
+    case ACT_APPLYIPS:
+    {
+        if (ext && _stricmp(ext, "ips") == 0 && ext2 && _stricmp(ext2, "xbe") == 0) {
 
             bool bkcr = false;
             bool bkcrfail = false;
@@ -716,7 +717,7 @@ void Execute(Action act, FileBrowserApp& app) {
                 NormalizeDirA(dstDir);
 
                 if (!CanWriteHereA(dstDir)) {
-                    bkcrfail = true; 
+                    bkcrfail = true;
                     break;
                 }
 
@@ -798,11 +799,12 @@ void Execute(Action act, FileBrowserApp& app) {
                 app.SetStatus("Patch applied, bak created");
             }
 
-		}
+        }
         app.RefreshPane(app.m_pane[0]);
         app.RefreshPane(app.m_pane[1]);
-		break;
-    
+        break;
+    }
+
     // ---- Restore .bak file ----------------------------------------------------
     case ACT_RESTOREBAK:
     {
@@ -829,50 +831,33 @@ void Execute(Action act, FileBrowserApp& app) {
                     app.SetStatus("Pick a destination");
                     break;
                 }
-                if ((dstDir[0] == 'D' || dstDir[0] == 'd') && dstDir[1] == ':') {
-                    app.SetStatus("Cannot extract to D:\\");
-                    break;
-                }
-                NormalizeDirA(dstDir);
-                if (!CanWriteHereA(dstDir)) {
-                    app.SetStatusLastErr("Dest not writable");
-                    break;
-                }
             }
             else if (act == ACT_UNZIPTO) {
                 if (!app.ResolveSrcDir(dstDir, sizeof(dstDir))) {
                     app.SetStatus("Pick a destination");
                     break;
                 }
-                if ((dstDir[0] == 'D' || dstDir[0] == 'd') && dstDir[1] == ':') {
-                    app.SetStatus("Cannot extract to D:\\");
-                    break;
-                }
                 char name[64];
                 strcpy(name, sel->name);
                 name[strlen(name) - 4] = '\0';
                 strcat(dstDir, name);
-                NormalizeDirA(dstDir);
-                CreateDirectoryA(dstDir, NULL);
-                if (!CanWriteHereA(dstDir)) {
-                    app.SetStatusLastErr("Dest not writable");
-                    break;
-                }
             }
             else if (act == ACT_UNZIPTOOTHER) {
                 if (!app.ResolveDestDir(dstDir, sizeof(dstDir))) {
                     app.SetStatus("Pick a destination");
                     break;
                 }
-                if ((dstDir[0] == 'D' || dstDir[0] == 'd') && dstDir[1] == ':') {
-                    app.SetStatus("Cannot extract to D:\\");
-                    break;
-                }
-                NormalizeDirA(dstDir);
-                if (!CanWriteHereA(dstDir)) {
-                    app.SetStatusLastErr("Dest not writable");
-                    break;
-                }
+            }
+
+            if ((dstDir[0] == 'D' || dstDir[0] == 'd') && dstDir[1] == ':') {
+                app.SetStatus("Cannot extract to D:\\");
+                break;
+            }
+
+            NormalizeDirA(dstDir);
+            if (!CanWriteHereA(dstDir)) {
+                app.SetStatusLastErr("Dest not writable");
+                break;
             }
 
             UNZIP* zip = new UNZIP;

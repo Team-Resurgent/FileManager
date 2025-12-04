@@ -557,8 +557,17 @@ void FileBrowserApp::BuildZipSubMenu() {
     m_zipSubMenu.AddItem(unzipToOther, ACT_UNZIPTOOTHER, (true));
 }
 
+void FileBrowserApp::BuildConfirmDelSubMenu() {
+    m_confirmDelSubMenu.SetLabel("Are you sure?");
+
+    m_confirmDelSubMenu.Clear();
+
+    m_confirmDelSubMenu.AddItem("Yes", ACT_DELETE, (true));
+    m_confirmDelSubMenu.AddItem("No", ACT_CANCEL, (true));
+}
+
 // Build the context menu based on current mode and selection.
-void FileBrowserApp::BuildContextMenu(){
+void FileBrowserApp::BuildContextMenu() {
     m_ctx.SetLabel("Select action");
 
     Pane& p = m_pane[m_active];
@@ -593,7 +602,8 @@ void FileBrowserApp::BuildContextMenu(){
     m_ctx.AddItem("Open",            ACT_OPEN,        (hasSel));
     m_ctx.AddItem("Copy",            ACT_COPY,        (inDir && hasSel && inDir2));
     m_ctx.AddItem("Move",            ACT_MOVE,        (inDir && hasSel && inDir2));
-    m_ctx.AddItem("Delete",          ACT_DELETE,      (inDir && hasSel));
+    if (inDir && hasSel && !p.items[p.sel].isUpEntry) { BuildConfirmDelSubMenu();
+    m_ctx.AddSubMenu("Delete",       &m_confirmDelSubMenu, (true));}
     m_ctx.AddItem("Rename",          ACT_RENAME,      (inDir && hasSel));
 
 	if (ext && _stricmp(ext, "ips") == 0)
@@ -751,10 +761,14 @@ void FileBrowserApp::OnPad_Menu(const XBGAMEPAD& pad) {
     ContextMenu* top = m_menuStack[m_menuDepth - 1];
     ContextMenu::Result r = top->OnPad(pad, act);
     if (r == ContextMenu::CHOSEN) {
-        CloseMenu();
-        //SetStatus("Chosen action=%d", (int)act);   // debug toast
-        AppActions::Execute(act, *this);          // perform action
-    } else if (r == ContextMenu::CLOSED) {
+        if (act == ACT_CANCEL) r = ContextMenu::CLOSED;
+        else {
+            CloseMenu();
+            //SetStatus("Chosen action=%d", (int)act);   // debug toast
+            AppActions::Execute(act, *this);          // perform action
+        }
+    } 
+    if (r == ContextMenu::CLOSED) { // allow fallthrough
         if (m_menuDepth > 1) {
             m_menuDepth--;
             ContextMenu* parent = m_menuStack[m_menuDepth - 1];
