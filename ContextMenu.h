@@ -106,7 +106,8 @@ private:
 
     // ---- layout ----
     float m_x, m_y;      // top-left position
-    float m_w;           // width
+    mutable float m_w;           // width
+    float m_mw;          // min width
     float m_rowH;        // row height (pixels)
     LPDIRECT3DDEVICE8 m_dev;
 

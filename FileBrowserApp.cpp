@@ -525,10 +525,10 @@ void FileBrowserApp::BuildZipSubMenu() {
         char name[64];
         strcpy(name, p.items[p.sel].name);
         name[strlen(name) - 4] = '\0';
-        if (strlen(name) > 23) {
-            strncat(unzipTo, name, 10);
+        if (strlen(name) > 33) {
+            strncat(unzipTo, name, 15);
             strcat(unzipTo, "...");
-            strcat(unzipTo, name + strlen(name) - 10);
+            strcat(unzipTo, name + strlen(name) - 15);
         }
         else strcat(unzipTo, name);
         strcat(unzipTo, "\\\"");
@@ -539,10 +539,10 @@ void FileBrowserApp::BuildZipSubMenu() {
         strcat(unzipToOther, "\"");
         char path[512];
         strncpy(path, p2.curPath, sizeof(path) - 1);
-        if (strlen(path) > 23) {
-            strncat(unzipToOther, path, 10);
+        if (strlen(path) > 33) {
+            strncat(unzipToOther, path, 15);
             strcat(unzipToOther, "...");
-            strcat(unzipToOther, path + strlen(path) - 10);
+            strcat(unzipToOther, path + strlen(path) - 15);
         }
         else strcat(unzipToOther, path);
         if (unzipToOther[strlen(unzipToOther) - 1] != '\\') strcat(unzipToOther, "\\");
@@ -1393,7 +1393,7 @@ void FileBrowserApp::DrawProgressOverlay(){
 
     // hint (right) — red "B:" + gray "Cancel"
 	{
-		const char* pre = "B:";
+		const char* pre = "\x81";
 		const char* gap = " ";
 		const char* suf = "Cancel";
 
@@ -1516,8 +1516,8 @@ HRESULT FileBrowserApp::Render(){
 		const bool smallFooter = (isLowRes || footerW <= 620.0f);
 
         if (m_pane[m_active].mode == 0){
-            const char* hintsVerbose = "D-Pad: Move  |  Left/Right: Switch pane  |  A: Enter  |  X: Menu  |  Black/White: Page";
-            const char* hintsCompact = "DPad:Move | L/R:Pane | A:Enter | X:Menu | Pg:Blk/Wht";
+            const char* hintsVerbose = "D-Pad: Move  |  Left/Right: Switch pane  |  \x80 Enter  |  \x82 Menu  |  Black/White: Page";  // \x80 = A, \x81 = B \x82 = X \x83 = Y
+            const char* hintsCompact = "DPad:Move | L/R:Pane | \x80 Enter | \x82 Menu | Pg:Blk/Wht";
             const char* base = smallFooter ? hintsCompact : hintsVerbose;
 
             char fitted[256];
@@ -1543,11 +1543,11 @@ HRESULT FileBrowserApp::Render(){
             char bar[420];
             if (smallFooter) {
                 _snprintf(bar, sizeof(bar),
-                    "Active:%s | B:Up | %s:%s/%s | X:Menu | Y:%s | Pg:Blk/Wht",
+                    "Active:%s | \x81 Up | %s:%s/%s | \x82 Menu | \x83 %s | Pg:Blk/Wht",
                     (m_active==0 ? "L" : "R"), leftLabel, leftStr, rightStr, yLab);
             } else {
                 _snprintf(bar, sizeof(bar),
-                    "Active: %s   |   B: Up   |   %s: %s / Total: %s   |   X: Menu   |   Y: %s   |   Black/White: Page",
+                    "Active: %s   |   \x81 Up   |   %s: %s / Total: %s   |   \x82 Menu   |   \x83 %s   |   Black/White: Page",
                     (m_active==0 ? "Left" : "Right"), leftLabel, leftStr, rightStr, yLab);
             }
             bar[sizeof(bar)-1] = 0;

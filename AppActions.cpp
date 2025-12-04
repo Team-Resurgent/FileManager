@@ -79,7 +79,7 @@ static bool CopyProgThunk(LONGLONG done, LONGLONG total, const char* label, void
         } else {
             // First B: arm and show "press B again" toast
             ctx->confirmArmed = true;
-            app->SetStatus("Press B again to cancel");
+            app->SetStatus("Press \x81 again to cancel");
             ctx->confirmUntil = app->StatusUntilMs(); // snapshot (optional)
         }
     }
@@ -659,7 +659,7 @@ void Execute(Action act, FileBrowserApp& app) {
                     ++cleared; 
                 }
             }
-            app.SetStatus(cleared ? "Cleared %d" : "No marks", cleared);
+            app.SetStatus(cleared ? "Cleared marks (%d)" : "No marks", cleared);
         }
         break;
     }

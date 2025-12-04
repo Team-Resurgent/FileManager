@@ -31,7 +31,8 @@
 ContextMenu::ContextMenu(){
     m_count=0; m_sel=0;
     m_open=false; m_waitRelease=false;
-    m_x=0; m_y=0; m_w=320; m_rowH=28;
+    m_x=0; m_y=0; m_w=0; m_rowH=28;
+    m_mw = 160;
     m_prevA=m_prevB=m_prevX=m_prevWhite=m_prevBlack=0;
     m_prevButtons=0;
     m_parentMenu = NULL;
@@ -56,7 +57,7 @@ void ContextMenu::AddItem(const char* label, Action act, bool enabled){
 void ContextMenu::AddSeparator(){
     if (m_count >= (int)(sizeof(m_items)/sizeof(m_items[0]))) return;
     m_items[m_count].label[0]     = 0;       // not used for separators
-    m_items[m_count].act       = ACT_OPEN; // placeholder; ignored
+    m_items[m_count].act       = ACT_NONE; // placeholder; ignored
     m_items[m_count].enabled   = false;
     m_items[m_count].separator = true;     // <-- key bit
     m_items[m_count].child = NULL;
@@ -151,14 +152,21 @@ void ContextMenu::DrawRect(LPDIRECT3DDEVICE8 dev, float x,float y,float w,float 
 
 // Render the menu panel + rows. Separators are drawn as thin centered lines.
 // Disabled rows are dimmed and cannot be focused via navigation.
-void ContextMenu::Draw(CXBFont& font, LPDIRECT3DDEVICE8 dev) const{
+void ContextMenu::Draw(CXBFont& font, LPDIRECT3DDEVICE8 dev) const {
     if (!m_open || m_count <= 0) return;
 
     bool drawHeader = false;
     if (m_label[0] != '\0') drawHeader = true;
 
-    const FLOAT menuW = m_w;
-    const FLOAT rowH  = m_rowH;
+    FLOAT tw = 0.0f;                       // This should be reused. Lots of overhead for min width calc
+    for (int i = 0; i < m_count; ++i) {
+        FLOAT cw = 0.0f, ch = 0.0f;
+        const Item& it = m_items[i];
+        WCHAR wbuf[256];
+        MultiByteToWideChar(CP_ACP, 0, it.label, -1, wbuf, 256);
+        font.GetTextExtent(wbuf, &cw, &ch);
+        tw = (tw > cw) ? tw : cw;
+    }
 
     // --- measure header text height (ANSI -> wide, then GetTextExtent) ---
     FLOAT hdrW = 0.0f, hdrH = 0.0f;
@@ -167,6 +175,15 @@ void ContextMenu::Draw(CXBFont& font, LPDIRECT3DDEVICE8 dev) const{
         MultiByteToWideChar(CP_ACP, 0, m_label, -1, wbuf, 128);
         font.GetTextExtent(wbuf, &hdrW, &hdrH);
     }
+
+    tw = (tw > hdrW) ? tw : hdrW;
+    tw = (tw > m_mw) ? tw : m_mw;
+
+    //const FLOAT menuW = m_w;
+    const FLOAT menuW = tw + 32.0f; // + 32.0f (label padding)
+    const FLOAT rowH  = m_rowH;
+
+    m_w = menuW; // menuW is unneccessary but leaving it for now
 
     // Layout constants (dynamic header height support)
     const FLOAT headerTopPad    = 8.0f;
