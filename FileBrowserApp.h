@@ -48,6 +48,9 @@ struct ProgState {
     }
 };
 
+void DrawAnsi(CXBFont& font, FLOAT x, FLOAT y, DWORD color, const char* text);
+void DrawAnsiCentered(CXBFont& font, FLOAT x, FLOAT width, FLOAT y, FLOAT height, DWORD color, const char* text);
+
 class FileBrowserApp : public CXBApplication {        
 
 public:

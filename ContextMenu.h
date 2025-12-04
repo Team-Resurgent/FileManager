@@ -85,7 +85,6 @@ private:
     };
 
     // ---- helpers for drawing ----
-    static void   DrawAnsi(CXBFont& font, FLOAT x, FLOAT y, DWORD color, const char* text);
     static void   DrawRect(LPDIRECT3DDEVICE8 dev, float x,float y,float w,float h,D3DCOLOR c);
     static inline FLOAT Snap(FLOAT v){ return (FLOAT)((int)(v + 0.5f)); }
 

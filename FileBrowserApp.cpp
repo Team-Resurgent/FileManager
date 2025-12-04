@@ -19,6 +19,47 @@
 ===============================================================================
 */
 
+// putting this here for now. NOTE TO SELF: Make colors DEFINES
+// These type of functions should be in their own .cpp
+void DrawAnsi(CXBFont& font, FLOAT x, FLOAT y, DWORD c, const char* text) {
+
+    // Colorize
+    for (int i = 0; i < strlen(text); ++i) {
+        DWORD color;
+        char ch = text[i];
+        switch (ch) {
+            case '\x80': color = 0xFF3CB54A; break;
+            case '\x81': color = 0xFFD32B2B; break;
+            case '\x82': color = 0xFF1C6FBD; break;
+            case '\x83': color = 0xFFF2D10A; break;
+            default: color = c; break;
+        }
+        WCHAR wbuf[2];
+        MultiByteToWideChar(CP_ACP, 0, &ch, 1, wbuf, 2);
+        wbuf[1] = '\0';
+        font.DrawText(x, y, color, wbuf, 0, 0.0f);
+
+        x += font.GetTextWidth(wbuf);
+    }
+}
+
+inline FLOAT Snap(FLOAT v) { return (FLOAT)((int)(v + 0.5f)); } // pixel-align
+
+// putting this here for now. Replaces DrawAnsiCenteredX - more flexible
+// Pass NULL for w or h to only center in one axis
+void DrawAnsiCentered(CXBFont& f, FLOAT x, FLOAT w, FLOAT y, FLOAT h, DWORD c, const char* s) {
+    WCHAR* wbuf = (WCHAR*)malloc(sizeof(WCHAR) * (strlen(s) + 1));
+    MultiByteToWideChar(CP_ACP, 0, s, -1, wbuf, strlen(s) + 1);
+    FLOAT tw, th;
+    f.GetTextExtent(wbuf, &tw, &th);
+    free(wbuf);
+
+    if (w != NULL) x = Snap(x + (w - tw) * 0.5f);
+    if (h != NULL) y = Snap(y + (h - th) * 0.5f);
+
+    DrawAnsi(f, x, y, c, s);
+}
+
 // Simple getter used by overlay/status timers.
 DWORD FileBrowserApp::StatusUntilMs() const { return m_statusUntilMs; }
 
@@ -29,14 +70,7 @@ namespace {
     inline FLOAT MaxF(FLOAT a, FLOAT b){ return (a>b)?a:b; }
 	inline FLOAT MinF(FLOAT a, FLOAT b) { return (a < b) ? a : b; }
     inline int   MaxI (int a,   int b){ return (a>b)?a:b; }
-    inline FLOAT Snap (FLOAT v){ return (FLOAT)((int)(v + 0.5f)); } // pixel-align
 
-    // Draw ANSI string via CXBFont (expects UTF-16); convert on the fly.
-    inline void DrawAnsi(CXBFont& font, FLOAT x, FLOAT y, DWORD color, const char* text){
-        WCHAR wbuf[512];
-        MultiByteToWideChar(CP_ACP,0,text,-1,wbuf,512);
-        font.DrawText(x,y,color,wbuf,0,0.0f);
-	}
 
 static bool FileExistsA(const char* path){
     DWORD a = GetFileAttributesA(path);
@@ -164,17 +198,7 @@ static void DrawLabelFittedOrMarquee(CXBFont& font,
         }
     }
 }
-
-
-    // Center a one-line ANSI string horizontally in a span.
-    inline void DrawAnsiCenteredX(CXBFont& font, FLOAT left, FLOAT width, FLOAT y, DWORD color, const char* text){
-        WCHAR wbuf[512];
-        MultiByteToWideChar(CP_ACP,0,text,-1,wbuf,512);
-        FLOAT tw=0, th=0; font.GetTextExtent(wbuf, &tw, &th);
-        const FLOAT x = Snap(left + (width - tw) * 0.5f);
-        font.DrawText(x, y, color, wbuf, 0, 0.0f);
-    }
-
+    // very inefficient
     // Measure ANSI string (after ACP->UTF16 conversion).
     inline void MeasureTextWH(CXBFont& font, const char* s, FLOAT& outW, FLOAT& outH){
         WCHAR wbuf[512];
@@ -1393,21 +1417,11 @@ void FileBrowserApp::DrawProgressOverlay(){
 
     // hint (right) — red "B:" + gray "Cancel"
 	{
-		const char* pre = "\x81";
-		const char* gap = " ";
-		const char* suf = "Cancel";
-
-		FLOAT pw, ph, gw, gh, sw, sh;
-		MeasureTextWH(m_font, pre, pw, ph);
-		MeasureTextWH(m_font, gap, gw, gh);
-		MeasureTextWH(m_font, suf, sw, sh);
-
-		const FLOAT totalW = pw + gw + sw;
-		const FLOAT startX = x + w - margin - totalW;
-
-		DrawAnsi(m_font, startX,            titleY, 0xFFFF4040, pre);  // red
-		DrawAnsi(m_font, startX + pw,       titleY, 0xFFCCCCCC, gap);  // space
-		DrawAnsi(m_font, startX + pw + gw,  titleY, 0xFFCCCCCC, suf);  // gray
+        char* text = "\x81 Cancel";
+        FLOAT tw, th;
+        MeasureTextWH(m_font, text, tw, th);
+        const FLOAT startX = x + w - margin - tw;
+        DrawAnsi(m_font, startX, titleY, 0xFFCCCCCC, text);
 	}
 
     // Split current label into folder + file parts
@@ -1522,7 +1536,7 @@ HRESULT FileBrowserApp::Render(){
 
             char fitted[256];
             LeftEllipsizeToFit(m_font, base, footerW - 10.0f, fitted, sizeof(fitted));
-            DrawAnsiCenteredX(m_font, footerX, footerW, footerY + 4.0f, 0xFFCCCCCC, fitted);
+            DrawAnsiCentered(m_font, footerX, footerW, footerY + 4.0f, NULL, 0xFFCCCCCC, fitted);
         } else {
             const char* curPath = m_pane[m_active].curPath;
             char       leftLabel[16] = "Free";
@@ -1554,7 +1568,7 @@ HRESULT FileBrowserApp::Render(){
 
             char fitted[420];
             LeftEllipsizeToFit(m_font, bar, footerW - 10.0f, fitted, sizeof(fitted));
-            DrawAnsiCenteredX(m_font, footerX, footerW, footerY + 4.0f, 0xFFCCCCCC, fitted);
+            DrawAnsiCentered(m_font, footerX, footerW, footerY + 4.0f, NULL, 0xFFCCCCCC, fitted);
         }
 
         // ---- status toast (also centered and fitted) ----
@@ -1562,7 +1576,7 @@ HRESULT FileBrowserApp::Render(){
         if (now < m_statusUntilMs && m_status[0]){
             char fitted[256];
             LeftEllipsizeToFit(m_font, m_status, footerW - 10.0f, fitted, sizeof(fitted));
-            DrawAnsiCenteredX(m_font, footerX, footerW, footerY + 25.0f, 0xFFBBDDEE, fitted);
+            DrawAnsiCentered(m_font, footerX, footerW, footerY + 25.0f, NULL, 0xFFBBDDEE, fitted);
         }
     }
 

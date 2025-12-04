@@ -1,6 +1,7 @@
 #include "ContextMenu.h"
 #include "GfxPrims.h"
 #include <wchar.h>
+#include "FileBrowserApp.h"
 
 /*
 ===============================================================================
@@ -142,10 +143,7 @@ void ContextMenu::OpenAt(float x, float y, float width, float rowH){
 void ContextMenu::Close(){ m_open=false; }
 
 // --- tiny ANSI->wide draw helpers (XDK fonts are wide) ----------------------
-void ContextMenu::DrawAnsi(CXBFont& font, FLOAT x, FLOAT y, DWORD color, const char* text){
-    WCHAR wbuf[512]; MultiByteToWideChar(CP_ACP,0,text,-1,wbuf,512);
-    font.DrawText(x,y,color,wbuf,0,0.0f);
-}
+// This should not be per-class either
 void ContextMenu::DrawRect(LPDIRECT3DDEVICE8 dev, float x,float y,float w,float h,D3DCOLOR c){
     DrawSolidRect(dev, x, y, w, h, c);
 }
