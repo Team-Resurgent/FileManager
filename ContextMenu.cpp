@@ -2,6 +2,7 @@
 #include "GfxPrims.h"
 #include <wchar.h>
 #include "FileBrowserApp.h"
+#include "TextUtils.h"
 
 /*
 ===============================================================================
@@ -202,7 +203,7 @@ void ContextMenu::Draw(CXBFont& font, LPDIRECT3DDEVICE8 dev) const {
 
     // Header
     if (drawHeader) {
-        DrawAnsi(font, x + 10.0f, y + headerTopPad, 0xFFFFFFFF, m_label);
+        DrawAnsi(font, x + 10.0f, y + headerTopPad, 0xFFFFFFFF, DefaultColorMap, m_label);
         DrawRect(dev, x, lineY, menuW, 1.0f, 0x60FFFFFF);
     }
 
@@ -234,7 +235,7 @@ void ContextMenu::Draw(CXBFont& font, LPDIRECT3DDEVICE8 dev) const {
         }
         const FLOAT textY = rowY + (rowH - th) * 0.5f;
 
-        DrawAnsi(font, x + 16.0f, textY, col, it.label);
+        DrawAnsi(font, x + 16.0f, textY, col, DefaultColorMap, it.label);
     }
 }
 

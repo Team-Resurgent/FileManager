@@ -9,6 +9,7 @@
 #include <xgraphics.h> 
 #include "font_xpr.h"
 #include "DebugPrint.h"
+#include "TextUtils.h"
 /*
 ===============================================================================
  FileBrowserApp
@@ -21,44 +22,7 @@
 
 // putting this here for now. NOTE TO SELF: Make colors DEFINES
 // These type of functions should be in their own .cpp
-void DrawAnsi(CXBFont& font, FLOAT x, FLOAT y, DWORD c, const char* text) {
 
-    // Colorize
-    for (int i = 0; i < strlen(text); ++i) {
-        DWORD color;
-        char ch = text[i];
-        switch (ch) {
-            case '\x80': color = 0xFF3CB54A; break;
-            case '\x81': color = 0xFFD32B2B; break;
-            case '\x82': color = 0xFF1C6FBD; break;
-            case '\x83': color = 0xFFF2D10A; break;
-            default: color = c; break;
-        }
-        WCHAR wbuf[2];
-        MultiByteToWideChar(CP_ACP, 0, &ch, 1, wbuf, 2);
-        wbuf[1] = '\0';
-        font.DrawText(x, y, color, wbuf, 0, 0.0f);
-
-        x += font.GetTextWidth(wbuf);
-    }
-}
-
-inline FLOAT Snap(FLOAT v) { return (FLOAT)((int)(v + 0.5f)); } // pixel-align
-
-// putting this here for now. Replaces DrawAnsiCenteredX - more flexible
-// Pass NULL for w or h to only center in one axis
-void DrawAnsiCentered(CXBFont& f, FLOAT x, FLOAT w, FLOAT y, FLOAT h, DWORD c, const char* s) {
-    WCHAR* wbuf = (WCHAR*)malloc(sizeof(WCHAR) * (strlen(s) + 1));
-    MultiByteToWideChar(CP_ACP, 0, s, -1, wbuf, strlen(s) + 1);
-    FLOAT tw, th;
-    f.GetTextExtent(wbuf, &tw, &th);
-    free(wbuf);
-
-    if (w != NULL) x = Snap(x + (w - tw) * 0.5f);
-    if (h != NULL) y = Snap(y + (h - th) * 0.5f);
-
-    DrawAnsi(f, x, y, c, s);
-}
 
 // Simple getter used by overlay/status timers.
 DWORD FileBrowserApp::StatusUntilMs() const { return m_statusUntilMs; }
@@ -1413,7 +1377,7 @@ void FileBrowserApp::DrawProgressOverlay(){
     const FLOAT barW    = w - margin*2.0f;
 
     // title
-    DrawAnsi(m_font, x + margin, titleY, 0xFFFFFFFF, m_prog.label[0] ? m_prog.label : "Working...");
+    DrawAnsi(m_font, x + margin, titleY, 0xFFFFFFFF, DefaultColorMap, m_prog.label[0] ? m_prog.label : "Working...");
 
     // hint (right) — red "B:" + gray "Cancel"
 	{
@@ -1421,7 +1385,7 @@ void FileBrowserApp::DrawProgressOverlay(){
         FLOAT tw, th;
         MeasureTextWH(m_font, text, tw, th);
         const FLOAT startX = x + w - margin - tw;
-        DrawAnsi(m_font, startX, titleY, 0xFFCCCCCC, text);
+        DrawAnsi(m_font, startX, titleY, 0xFFCCCCCC, DefaultColorMap, text);
 	}
 
     // Split current label into folder + file parts
@@ -1464,7 +1428,7 @@ void FileBrowserApp::DrawProgressOverlay(){
     FLOAT tw=0, th=0; MeasureTextWH(m_font, t, tw, th);
     const FLOAT tx = Snap(barX + barW - tw);
     const FLOAT ty = Snap(barY + (barH - th) * 0.5f);
-    DrawAnsi(m_font, tx, ty, 0xFFEEEEEE, t);
+    DrawAnsi(m_font, tx, ty, 0xFFEEEEEE, DefaultColorMap, t);
 }
 
 // ----- main render ----------------------------------------------------------
@@ -1536,7 +1500,7 @@ HRESULT FileBrowserApp::Render(){
 
             char fitted[256];
             LeftEllipsizeToFit(m_font, base, footerW - 10.0f, fitted, sizeof(fitted));
-            DrawAnsiCentered(m_font, footerX, footerW, footerY + 4.0f, NULL, 0xFFCCCCCC, fitted);
+            DrawAnsiCentered(m_font, footerX, footerW, footerY + 4.0f, NULL, 0xFFCCCCCC, DefaultColorMap, fitted);
         } else {
             const char* curPath = m_pane[m_active].curPath;
             char       leftLabel[16] = "Free";
@@ -1568,7 +1532,7 @@ HRESULT FileBrowserApp::Render(){
 
             char fitted[420];
             LeftEllipsizeToFit(m_font, bar, footerW - 10.0f, fitted, sizeof(fitted));
-            DrawAnsiCentered(m_font, footerX, footerW, footerY + 4.0f, NULL, 0xFFCCCCCC, fitted);
+            DrawAnsiCentered(m_font, footerX, footerW, footerY + 4.0f, NULL, 0xFFCCCCCC, DefaultColorMap, fitted);
         }
 
         // ---- status toast (also centered and fitted) ----
@@ -1576,7 +1540,7 @@ HRESULT FileBrowserApp::Render(){
         if (now < m_statusUntilMs && m_status[0]){
             char fitted[256];
             LeftEllipsizeToFit(m_font, m_status, footerW - 10.0f, fitted, sizeof(fitted));
-            DrawAnsiCentered(m_font, footerX, footerW, footerY + 25.0f, NULL, 0xFFBBDDEE, fitted);
+            DrawAnsiCentered(m_font, footerX, footerW, footerY + 25.0f, NULL, 0xFFBBDDEE, DefaultColorMap, fitted);
         }
     }
 

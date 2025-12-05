@@ -29,6 +29,7 @@
     <ClCompile Include="OnScreenKeyboard.cpp" />
     <ClCompile Include="PaneRenderer.cpp" />
     <ClCompile Include="RXDKResolves.cpp" />
+    <ClCompile Include="TextUtils.cpp" />
     <ClCompile Include="xpatchlibUtil.cpp" />
     <ClCompile Include="unzipLIBUtil.cpp" />
     <ClCompile Include="unzipLIB\src\adler32.c" />
@@ -47,6 +48,7 @@
     <ClInclude Include="AppActions.h" />
     <ClInclude Include="ContextMenu.h" />
     <ClInclude Include="DebugPrint.h" />
+    <ClInclude Include="Configuration.h" />
     <ClInclude Include="FileBrowserApp.h" />
     <ClInclude Include="font_xpr.h" />
     <ClInclude Include="FsUtil.h" />
@@ -55,6 +57,7 @@
     <ClInclude Include="OnScreenKeyboard.h" />
     <ClInclude Include="PaneModel.h" />
     <ClInclude Include="PaneRenderer.h" />
+    <ClInclude Include="TextUtils.h" />
     <ClInclude Include="unzipLIBUtil.h" />
     <ClInclude Include="unzipLIB\src\crc32.h" />
     <ClInclude Include="unzipLIB\src\gzguts.h" />
