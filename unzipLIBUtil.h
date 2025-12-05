@@ -1,5 +1,4 @@
-#ifndef UNZIPLIBUTIL_H
-#define UNZIPLIBUTIL_H
+#pragma once
 
 #include "unzipLIB.h"
 #include "FileBrowserApp.h"
@@ -21,5 +20,3 @@ int32_t ZipFile_Seek(void* p, int32_t position, int iType);
 int ExtractCurrentFileWithProgress(UNZIP* zip, const char* dst, bool overwrite);
 
 void FreeUnZipBuffer();
-
-#endif // UNZIPLIBUTIL_H

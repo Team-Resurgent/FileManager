@@ -1,5 +1,4 @@
-#ifndef FILEBROWSERAPP_H
-#define FILEBROWSERAPP_H
+#pragma once
 
 /*
 ===============================================================================
@@ -182,5 +181,3 @@ private:
     FLOAT kPaddingX;      // left/right text padding inside pane
     FLOAT kScrollBarW;    // scrollbar track width
 };
-
-#endif // FILEBROWSERAPP_H

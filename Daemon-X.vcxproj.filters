@@ -197,9 +197,6 @@
     <ClInclude Include="font_xpr.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="font_xpr.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="TextUtils.h">
       <Filter>Header Files</Filter>
     </ClInclude>

@@ -1,5 +1,4 @@
-#ifndef PANERENDERER_H
-#define PANERENDERER_H
+#pragma once
 
 #include <xtl.h>
 #include "XBFont.h"
@@ -108,5 +107,3 @@ private:
     // Shared width backing field
     static FLOAT s_sharedSizeColW;
 };
-
-#endif // PANERENDERER_H

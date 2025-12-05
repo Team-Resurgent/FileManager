@@ -50,10 +50,8 @@
     <ClInclude Include="DebugPrint.h" />
     <ClInclude Include="Configuration.h" />
     <ClInclude Include="FileBrowserApp.h" />
-    <ClInclude Include="font_xpr.h" />
     <ClInclude Include="FsUtil.h" />
     <ClInclude Include="GfxPrims.h" />
-    <ClInclude Include="font_xpr.h" />
     <ClInclude Include="OnScreenKeyboard.h" />
     <ClInclude Include="PaneModel.h" />
     <ClInclude Include="PaneRenderer.h" />

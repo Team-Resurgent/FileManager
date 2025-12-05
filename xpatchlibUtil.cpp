@@ -4,13 +4,12 @@
 // ------------------------------------------------------------------
 // CreateBak function with added prog (src-dev)
 // ------------------------------------------------------------------
-int UpdateBakProgress(ULONGLONG wb) {
-	
+bool UpdateBakProgress(ULONGLONG wb) {
 	if (CopyProgress::g_copyProgFn) {
 		if (!CopyProgress::g_copyProgFn(-wb, NULL, NULL, CopyProgress::g_copyProgUser)) {
-			return -1;
+			return false;
 		}
-		return 0;
+		return true;
 	}
-
+	return false;
 }

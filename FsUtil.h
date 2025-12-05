@@ -1,5 +1,5 @@
-#ifndef FSUTIL_H
-#define FSUTIL_H
+#pragma once
+
 /*
 ============================================================================
  FsUtil
@@ -125,5 +125,3 @@ DWORD DvdGetDriveStateOneShot(void);
 
 // Drop old CDFS instance and remap D: cleanly; touches D:\ to force a fresh view.
 void  DvdColdRemount();
-
-#endif // FSUTIL_H

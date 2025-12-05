@@ -2,7 +2,7 @@
 #include <StdLib.h>
 #include <String.h>
 
-int CreateBak(const char* src, bool ovr, int (*Upd)(unsigned long long)) {
+int CreateBak(const char* src, bool ovr, bool (*cb)(unsigned long long)) {
     char dst[512];
 
     strcpy(dst, src);
@@ -42,8 +42,9 @@ int CreateBak(const char* src, bool ovr, int (*Upd)(unsigned long long)) {
             return E_FWRITE_DST;
         }
 
-        if (Upd) {
-            if (Upd(wb) != 0) {
+        if (cb) {
+            if (!cb(wb)) {
+                free(buf);
                 break;
             }
         }

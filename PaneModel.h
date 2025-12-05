@@ -1,5 +1,4 @@
-#ifndef PANEMODEL_H
-#define PANEMODEL_H
+#pragma once
 
 #include <vector>
 #include "FsUtil.h"
@@ -13,5 +12,3 @@ struct Pane {
     int   scroll;
     Pane(){ curPath[0]=0; mode=0; sel=0; scroll=0; }
 };
-
-#endif // PANEMODEL_H

@@ -1,4 +1,5 @@
 #pragma once
+
 #include <xtl.h>
 #include "XBFont.h"
 #include "XBInput.h"

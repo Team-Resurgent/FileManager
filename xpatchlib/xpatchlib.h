@@ -1,5 +1,4 @@
-#ifndef XPATCHLIB_H
-#define XPATCHLIB_H
+#pragma once
 
 #include <StdIO.h>
 
@@ -25,8 +24,6 @@ typedef enum {
 	E_OUT_OF_MEMORY,
 } ErrorCode;
 
-int CreateBak(const char* src, bool ovr, int (*Upd)(unsigned long long));
-int RestoreBak(const char* src, bool ovr);
+int CreateBak(const char* source, bool overwrite, bool (*Callback)(unsigned long long));
+int RestoreBak(const char* source, bool overwrite);
 int ReadVarInt(FILE* fp, unsigned int* ui);
-
-#endif // XPATCHLIB_H

@@ -1,4 +1,5 @@
 #pragma once
+
 #include <xtl.h>
 
 // Transformed/lit vertex for solid rects
