@@ -38,7 +38,7 @@ void ColorMap::PopulateWithDefaults() {
     m_colors[0x9F] = FOLDER_COLOR;       // Folder
 }
 
-void DrawAnsi(CXBFont& font, FLOAT x, FLOAT y, DWORD color, ColorMap* colors, const char* text) {
+FLOAT DrawAnsi(CXBFont& font, FLOAT x, FLOAT y, DWORD color, ColorMap* colors, const char* text) {
     x = Snap(x);
     y = Snap(y);
 
@@ -46,6 +46,8 @@ void DrawAnsi(CXBFont& font, FLOAT x, FLOAT y, DWORD color, ColorMap* colors, co
         WCHAR* wbuf = (WCHAR*)malloc(sizeof(WCHAR) * (strlen(text) + 1));
         MultiByteToWideChar(CP_ACP, 0, text, -1, wbuf, strlen(text) + 1);
         font.DrawText(x, y, color, wbuf);
+
+        return x + font.GetTextWidth(wbuf);
     }
     else {
         int l = strlen(text);
@@ -59,23 +61,27 @@ void DrawAnsi(CXBFont& font, FLOAT x, FLOAT y, DWORD color, ColorMap* colors, co
             font.DrawText(x, y, c, wbuf, 0, 0.0f);
             x += font.GetTextWidth(wbuf);
         }
+        
+        return x;
     }
 }
 
-void DrawAnsiCentered(CXBFont& font, FLOAT x, FLOAT y, DWORD color, ColorMap* colors, const char* text, FLOAT w, FLOAT h) {
+FLOAT DrawAnsiCentered(CXBFont& font, FLOAT x, FLOAT y, DWORD color, ColorMap* colors, const char* text, FLOAT w, FLOAT h) {
     FLOAT tw, th;
     GetAnsiWH(font, text, &tw, &th);
     
     if (w != NULL) x = x + (w - tw) * 0.5f;
     if (h != NULL) y = y + (h - th) * 0.5f;
 
-    DrawAnsi(font, x, y, color, colors, text);
+    return DrawAnsi(font, x, y, color, colors, text);
 }
 
-void DrawAnsiFromRight(CXBFont& font, FLOAT x, FLOAT y, DWORD color, ColorMap* colors, const char* text, FLOAT h) {
+FLOAT DrawAnsiFromRight(CXBFont& font, FLOAT x, FLOAT y, DWORD color, ColorMap* colors, const char* text, FLOAT h) {
     FLOAT tw = GetAnsiW(font, text);
     if (h != NULL) DrawAnsiCentered(font, x - tw, y, color, colors, text, NULL, h);
     else DrawAnsi(font, x - tw, y, color, colors, text);
+
+    return x - tw;
 }
 
 FLOAT GetAnsiW(CXBFont& font, const char* text) {

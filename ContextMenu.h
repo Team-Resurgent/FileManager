@@ -1,6 +1,6 @@
 #pragma once
 
-#include <xtl.h>
+#include <XTL.h>    
 #include "XBFont.h"
 #include "XBInput.h"
 #include "AppActions.h"
@@ -44,7 +44,7 @@ public:
     void OpenAt(float x, float y, float width, float rowH);
 
     // Close the menu
-    void Close();
+    void Close() { m_open = false; }
 
     // Query: is the menu currently visible?
     bool IsOpen() const { return m_open; }

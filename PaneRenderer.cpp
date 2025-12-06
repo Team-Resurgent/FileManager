@@ -132,7 +132,7 @@ void PaneRenderer::DrawNameFittedOrMarquee(CXBFont& font, FLOAT x, FLOAT y, FLOA
 
     // Current start index
     int startIdx = (int)M.px;
-    startIdx = max(lastStart, max(startIdx, 0));
+    startIdx = max(0, min(startIdx, lastStart));
 
     // Longest substring from s+startIdx that fits into fitW
     const char* startPtr = s + startIdx;
@@ -174,7 +174,7 @@ void PaneRenderer::DrawNameFittedOrMarquee(CXBFont& font, FLOAT x, FLOAT y, FLOA
 }
 
 // LOOPING MARQUEE: header path
-void PaneRenderer::DrawHeaderFittedOrMarquee(CXBFont& font, FLOAT x, FLOAT y, FLOAT maxW, DWORD color, const char* text, int paneIndex) {
+void PaneRenderer::DrawHeaderFittedOrMarquee(CXBFont& font, FLOAT x, FLOAT y, FLOAT h, FLOAT maxW, DWORD color, const char* text, int paneIndex) {
     const char* s = text ? text : ""; // Safety
     const int len = strlen(s);
     const FLOAT fitW_now = floorf(((maxW > kRightGuardPx) ? (maxW - kRightGuardPx) : 0.0f) + 0.5f);
@@ -191,7 +191,7 @@ void PaneRenderer::DrawHeaderFittedOrMarquee(CXBFont& font, FLOAT x, FLOAT y, FL
     // Fits (with slack)? Draw and bail.
     FLOAT tw = GetAnsiW(font, s);
     if (tw <= fitW_now + kMeasureFudgePx + kNearFitSlackPx){
-        DrawAnsi(font, x, y, color, &DefaultColors, s);
+        DrawAnsiCentered(font, x, y, color, &DefaultColors, s, NULL, h);
         m_hdrMarq[paneIndex] = MarqueeState();
         return;
     }
@@ -215,7 +215,7 @@ void PaneRenderer::DrawHeaderFittedOrMarquee(CXBFont& font, FLOAT x, FLOAT y, FL
     const int lastStart = (lo > len) ? len : lo;
 
     int startIdx = (int)M.px;
-    startIdx = max(lastStart, max(startIdx, 0));
+    startIdx = max(0, min(startIdx, lastStart));
 
     // Longest substring from s+startIdx that fits
     const char* startPtr = s + startIdx;
@@ -233,21 +233,23 @@ void PaneRenderer::DrawHeaderFittedOrMarquee(CXBFont& font, FLOAT x, FLOAT y, FL
 
     char vis[512];
     _snprintf(vis, sizeof(vis), "%.*s", lo2, startPtr);
-    DrawAnsi(font, x, y, color, &DefaultColors, vis);
+    DrawAnsiCentered(font, x, y, color, &DefaultColors, vis, NULL, h);
 
     // Step/pause/reset
-    if (now >= M.nextTick){
-        if (M.resetPause){
-            M.px        = 0.0f;
-            M.resetPause= 0;
-            M.nextTick  = now + kMarqInitPauseMs;
-        } else {
-            if (startIdx >= lastStart){
-                M.px        = (FLOAT)lastStart;
-                M.resetPause= now + kMarqEndPauseMs;
-                M.nextTick  = M.resetPause;
-            } else {
-                M.px       = (FLOAT)(startIdx + kMarqStepChars);
+    if (now >= M.nextTick) {
+        if (M.resetPause) {
+            M.px = 0.0f;
+            M.resetPause = 0;
+            M.nextTick = now + kMarqInitPauseMs;
+        }
+        else {
+            if (startIdx >= lastStart) {
+                M.px = (FLOAT)lastStart;
+                M.resetPause = now + kMarqEndPauseMs;
+                M.nextTick = M.resetPause;
+            }
+            else {
+                M.px = (FLOAT)(startIdx + kMarqStepChars);
                 M.nextTick = now + kMarqStepMs;
             }
         }
@@ -265,22 +267,18 @@ void PaneRenderer::DrawPane(CXBFont& font, LPDIRECT3DDEVICE8 dev, FLOAT baseX, c
     hdr[sizeof(hdr) - 1] = 0;
 
     // Center vertically
-    FLOAT tw = 0, th = 0;
-    GetAnsiWH(font, hdr, &tw, &th);
-    const FLOAT titleY = Snap(st.hdrY + (st.hdrH - th) * 0.5f);
     const FLOAT headerLeft = baseX + 6.0f;
     const FLOAT headerMaxW = st.listW - 12.0f;
 
     // Draw header (fit or marquee)
-    FLOAT tW, tH; 
-    GetAnsiWH(font, hdr, &tW, &tH);
+    FLOAT tW = GetAnsiW(font, hdr);
     const FLOAT fitHdrW = (headerMaxW > kRightGuardPx) ? (headerMaxW - kRightGuardPx) : 0.0f;
     if (tW <= fitHdrW + kMeasureFudgePx + kNearFitSlackPx) {
         const FLOAT cx = Snap(headerLeft + (fitHdrW - tW) * 0.5f);
-        DrawAnsiCentered(font, cx, titleY, 0xFFFFFFFF, &DefaultColors, hdr, NULL, st.hdrY);
+        DrawAnsiCentered(font, cx, st.hdrY, 0xFFFFFFFF, &DefaultColors, hdr, NULL, st.hdrH);
         m_hdrMarq[paneIndex] = MarqueeState();
     } 
-    else DrawHeaderFittedOrMarquee(font, headerLeft, titleY, headerMaxW, 0xFFFFFFFF, hdr, paneIndex);
+    else DrawHeaderFittedOrMarquee(font, headerLeft, st.hdrY, st.hdrH, headerMaxW, 0xFFFFFFFF, hdr, paneIndex);
 
     // size column metrics (shared)
     const FLOAT sizeRight = baseX + st.listW - (st.scrollBarW + st.paddingX);
@@ -292,9 +290,9 @@ void PaneRenderer::DrawPane(CXBFont& font, LPDIRECT3DDEVICE8 dev, FLOAT baseX, c
     DrawSolidRect(dev, baseX, colHdrY, st.listW, colHdrH, 0x60333333);
 
     const char* sizeHdr = (p.mode == 0) ? "Free / Total" : "Size";
-    FLOAT nameH, sizeH;
-    GetAnsiWH(font, "Name", NULL, &nameH);
-    GetAnsiWH(font, sizeHdr, NULL, &sizeH);
+    FLOAT nameW, nameH, sizeW, sizeH;
+    GetAnsiWH(font, "Name", &nameW, &nameH);
+    GetAnsiWH(font, sizeHdr, &sizeW, &sizeH);
 
     const FLOAT nameY = colHdrY + (colHdrH - nameH) * 0.5f;
     const FLOAT sizeY = colHdrY + (colHdrH - sizeH) * 0.5f;

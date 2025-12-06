@@ -1,26 +1,16 @@
 #pragma once
 
-#include <xtl.h>
-#include <vector>
+#include <XTL.h>
 #include "XBApp.h"
-#include "XBFont.h"
 #include "XBInput.h"
-#include "FsUtil.h"
 #include "OnScreenKeyboard.h"
 #include "ContextMenu.h"
 #include "PaneRenderer.h"
 #include "AppActions.h"
-#include "GfxPrims.h"
 
 // Allow AppActions to call back into private helpers without exposing them.
 namespace AppActions { void Execute(Action, class FileBrowserApp&); }
 
-/*
-------------------------------------------------------------------------------
- ProgState
-  - Lightweight progress HUD state (used during copy/move).
-------------------------------------------------------------------------------
-*/
 struct ProgState {
     bool        active;         // overlay visible when true
     ULONGLONG   done;           // bytes completed so far
@@ -74,7 +64,6 @@ public:
 private:
     // --- UI helpers ---------------------------------------------------------
     static FLOAT HdrX(FLOAT baseX){ return baseX - 15.0f; } // header left offset
-    void  DrawHLine(float x,float y,float w,D3DCOLOR c){ DrawSolidRect(m_pd3dDevice,x,y,w,1.0f,c); }
 
     // --- Data refresh / navigation -----------------------------------------
     void  EnsureListing(Pane& p);                  // clamp indices and items

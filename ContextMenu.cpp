@@ -1,6 +1,5 @@
 #include "ContextMenu.h"
 #include "GfxPrims.h"
-#include <wchar.h>
 #include "FileBrowserApp.h"
 #include "TextUtils.h"
 
@@ -99,16 +98,18 @@ int ContextMenu::FindNextSelectable(int start, int dir) const{
 // Also snaps the selection onto a valid (selectable) row and
 // arms a small "wait for release" window so the A/X that opened
 // the menu doesn’t immediately trigger a choose/close here.
-void ContextMenu::OpenAt(float x, float y, float width, float rowH){
+void ContextMenu::OpenAt(float x, float y, float width, float rowH) {
     m_x=x; m_y=y; 
     m_w=width; m_rowH=rowH;
+
+    int count = m_count + 1; // Quick fix, but why?
 
     if (m_dev) {
         D3DVIEWPORT8 vp;
         m_dev->GetViewport(&vp);
 
         float screenW = (float)vp.Width;
-        float screenH = (float)vp.Height;
+        float screenH = (float)vp.Height - 30.0f; // Safety, but why?
 
         // Right clamp
         if (m_x + m_w > screenW) m_x = screenW - m_w;
@@ -117,14 +118,14 @@ void ContextMenu::OpenAt(float x, float y, float width, float rowH){
         if (m_x < 0) m_x = 0;
 
         // Bottom clamp
-        if (m_y + (m_count * m_rowH) > screenH) m_y = screenH - (m_count * m_rowH);
+        if (m_y + (count * m_rowH) > screenH) m_y = screenH - (count * m_rowH);
 
         // Top clamp
         if (m_y < 0) m_y = 0;
     }
 
     if (m_sel < 0) m_sel = 0;
-    if (m_sel >= m_count) m_sel = (m_count>0)?(m_count-1):0;
+    if (m_sel >= count) m_sel = (count > 0) ? (count - 1) : 0;
 
     // If current selection is not selectable, try forward then backward.
     if (!IsSelectable(m_sel)){
@@ -141,8 +142,6 @@ void ContextMenu::OpenAt(float x, float y, float width, float rowH){
     m_prevButtons = 0;
 }
 
-void ContextMenu::Close(){ m_open=false; }
-
 // Render the menu panel + rows. Separators are drawn as thin centered lines.
 // Disabled rows are dimmed and cannot be focused via navigation.
 void ContextMenu::Draw(CXBFont& font, LPDIRECT3DDEVICE8 dev) const {
@@ -151,11 +150,10 @@ void ContextMenu::Draw(CXBFont& font, LPDIRECT3DDEVICE8 dev) const {
     bool drawHeader = false;
     if (m_label[0] != '\0') drawHeader = true;
 
-    FLOAT tw = 0.0f;                       // This should be reused. Lots of overhead for min width calc
+    FLOAT tw = 0.0f;
     for (int i = 0; i < m_count; ++i) {
         const Item& it = m_items[i];
-        FLOAT cw, ch;
-        GetAnsiWH(font, it.label, &cw, &ch);
+        FLOAT cw = GetAnsiW(font, it.label);
         tw = (tw > cw) ? tw : cw;
     }
 
@@ -175,13 +173,13 @@ void ContextMenu::Draw(CXBFont& font, LPDIRECT3DDEVICE8 dev) const {
     const FLOAT headerTopPad    = 8.0f;
     FLOAT headerBottomPad = 6.0f;
     if (!drawHeader) headerBottomPad = 3.0f; //inelegant solution to size correctly without the header
-    const FLOAT bottomPad       = 12.0f;
+    const FLOAT bottomPad       = 10.0f;
 
     const FLOAT x = m_x;
     const FLOAT y = m_y;
 
     const FLOAT lineY   = y + headerTopPad + hdrH + headerBottomPad; // divider Y
-    const FLOAT listTop = lineY + 6.0f;                               // first row Y
+    const FLOAT listTop = lineY + 6.0f;                              // first row Y
     const FLOAT menuH   = (listTop - y) + (m_count * rowH) + bottomPad;
 
     // Frame/background
@@ -199,7 +197,7 @@ void ContextMenu::Draw(CXBFont& font, LPDIRECT3DDEVICE8 dev) const {
         const FLOAT rowY = listTop + i * rowH;
         const Item& it = m_items[i];
 
-        if (it.separator){
+        if (it.separator) {
             // Non-selectable divider line centered within the row box
             DrawSolidRect(dev, x + 10.0f, rowY + rowH * 0.5f, menuW - 20.0f, 1.0f, 0x50FFFFFF);
             continue;
@@ -213,19 +211,14 @@ void ContextMenu::Draw(CXBFont& font, LPDIRECT3DDEVICE8 dev) const {
         // Text color: normal/selected/disabled
         DWORD col = it.enabled ? (sel ? 0xFF202020 : 0xFFE0E0E0) : 0xFF7A7A7A;
 
-        FLOAT tw, th;
-        GetAnsiWH(font, it.label, &tw, &th);
-
-        const FLOAT textY = rowY + (rowH - th) * 0.5f;
-
-        DrawAnsi(font, x + 16.0f, textY, col, &DefaultColors, it.label);
+        DrawAnsiCentered(font, x + 16.0f, rowY, col, &DefaultColors, it.label, NULL, rowH);
     }
 }
 
 // Handle controller input for the menu.
 // Returns CHOSEN with an Action when A is pressed on a selectable row,
 // CLOSED when B or X is pressed, or NOOP if nothing to do this frame.
-ContextMenu::Result ContextMenu::OnPad(const XBGAMEPAD& pad, Action& outAct){
+ContextMenu::Result ContextMenu::OnPad(const XBGAMEPAD& pad, Action& outAct) {
     outAct = ACT_OPEN;   // harmless default
     if (!m_open) return NOOP;
 
@@ -235,7 +228,7 @@ ContextMenu::Result ContextMenu::OnPad(const XBGAMEPAD& pad, Action& outAct){
     unsigned char x = pad.bAnalogButtons[XINPUT_GAMEPAD_X];
 
     // Debounce: absorb the input that opened the menu (prevents immediate choose/close)
-    if (m_waitRelease){
+    if (m_waitRelease) {
         bool held = (a>30)||(b>30)||(x>30)||
                     (btn & XINPUT_GAMEPAD_START)||
                     (btn & XINPUT_GAMEPAD_DPAD_UP)||
@@ -251,11 +244,11 @@ ContextMenu::Result ContextMenu::OnPad(const XBGAMEPAD& pad, Action& outAct){
     bool up    = ((btn & XINPUT_GAMEPAD_DPAD_UP)   && !(m_prevButtons & XINPUT_GAMEPAD_DPAD_UP))   || (pad.sThumbLY >  16000);
     bool down  = ((btn & XINPUT_GAMEPAD_DPAD_DOWN) && !(m_prevButtons & XINPUT_GAMEPAD_DPAD_DOWN)) || (pad.sThumbLY < -16000);
 
-    if (up){
+    if (up) {
         int i = FindNextSelectable(m_sel - 1, -1);
         if (i >= 0) m_sel = i;
     }
-    if (down){
+    if (down) {
         int i = FindNextSelectable(m_sel + 1, +1);
         if (i >= 0) m_sel = i;
     }
@@ -272,7 +265,7 @@ ContextMenu::Result ContextMenu::OnPad(const XBGAMEPAD& pad, Action& outAct){
     m_prevBlack = pad.bAnalogButtons[XINPUT_GAMEPAD_BLACK];
 
     // Choose / close behavior
-    if (aTrig){
+    if (aTrig) {
         const Item& it = m_items[m_sel];
 
         if (it.child != NULL) {
@@ -283,9 +276,14 @@ ContextMenu::Result ContextMenu::OnPad(const XBGAMEPAD& pad, Action& outAct){
 
             return SUBMENU_OPENED;
         }
-        if (IsSelectable(m_sel)){ outAct = it.act; return CHOSEN; }
+        if (IsSelectable(m_sel)) {
+            outAct = it.act; 
+            return CHOSEN; 
+        }
+
         return NOOP; // ignore A on non-selectable (e.g., separator)
     }
+
     if (bTrig || xTrig) return CLOSED;
 
     return NOOP;

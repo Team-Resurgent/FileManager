@@ -8,6 +8,7 @@
 #include <xgraphics.h> 
 #include "Font.h"
 #include "TextUtils.h"
+#include "GfxPrims.h"
 
 // Simple getter used by overlay/status timers.
 DWORD FileBrowserApp::StatusUntilMs() const { return m_statusUntilMs; }
@@ -31,10 +32,7 @@ static bool WriteAllA(const char* path, const void* data, DWORD size){
 
 
 	// Footer geometry used everywhere
-	inline FLOAT FooterBandPx(FLOAT screenH)   { return max(48.0f, screenH * 0.09f); }
-	// Always keep a little gap above the footer so rows don't "kiss" it.
-	inline FLOAT FooterSpacerPx(FLOAT screenH) { return max(6.0f,  screenH * 0.012f); }
-		
+	inline FLOAT FooterBandPx(FLOAT screenH)   { return max(52.0f, screenH * 0.09f); }
 
 	// ---- character-step marquee (same tuning as panes/OSK) ---------------------
 static const DWORD kProgInitPauseMs = 900;
@@ -60,11 +58,7 @@ struct ProgMarquee {
 };
 
 // Draw one line at (x,y) clipped to maxW using a character-step marquee.
-static void DrawLabelFittedOrMarquee(CXBFont& font,
-                                     FLOAT x, FLOAT y, FLOAT maxW,
-                                     DWORD color, const char* text,
-                                     ProgMarquee& M)
-{
+static void DrawLabelFittedOrMarquee(CXBFont& font, FLOAT x, FLOAT y, FLOAT maxW, DWORD color, const char* text, ProgMarquee& M) {
     if (!text) text = "";
 
     // right guard + tolerance like OSK
@@ -455,6 +449,8 @@ void FileBrowserApp::SelectItemInPane(Pane& p, const char* name){
 }
 
 void FileBrowserApp::BuildZipSubMenu() {
+    m_zipSubMenu.SetLabel("Select destination");
+
     Pane& p = m_pane[m_active];
     Pane& p2 = m_pane[1 - m_active];
     bool inDir = (p.mode == 1);
@@ -605,8 +601,9 @@ void FileBrowserApp::OpenMenu(){
     if (x < safeInset) x = safeInset;
     if (x + menuW > (FLOAT)vp.Width - safeInset) x = (FLOAT)vp.Width - safeInset - menuW;
 
-    // A bit below the list header (vertical fit is fine; menu is much shorter than the pane)
-    const FLOAT y = kListY + 20.0f;
+    const FLOAT listTop = kListY + kLineH - 10.0f; // Why -10.0f?
+    const int visibleIndex = m_pane[m_active].sel - m_pane[m_active].scroll;
+    const FLOAT y = listTop + (visibleIndex - 1) * kLineH;
 
     m_ctx.OpenAt(x, y, menuW, rowH);
 
@@ -1381,14 +1378,13 @@ void FileBrowserApp::DrawProgressOverlay(){
         if (pct < 0) pct = 0; if (pct > 1) pct = 1;
     }
 
-    DrawSolidRect(m_pd3dDevice, barX, barY, barW,       barH, 0xFF0E0E0E);
+    DrawSolidRect(m_pd3dDevice, barX, barY, barW, barH, 0xFF0E0E0E);
     DrawSolidRect(m_pd3dDevice, barX, barY, barW * pct, barH, 0x90FFFF00);
 
-    char t[32]; _snprintf(t, sizeof(t), "%u%%", (unsigned int)(pct*100.0f + 0.5f)); t[sizeof(t)-1]=0;
-    FLOAT tw=0, th=0; GetAnsiWH(m_font, t, &tw, &th);
-    const FLOAT tx = Snap(barX + barW - tw);
-    const FLOAT ty = Snap(barY + (barH - th) * 0.5f);
-    DrawAnsi(m_font, tx, ty, 0xFFEEEEEE, &DefaultColors, t);
+    char t[32];
+    _snprintf(t, sizeof(t), "%u%%", (unsigned int)(pct * 100.0f + 0.5f)); 
+    t[sizeof(t) - 1] = 0;
+    DrawAnsiFromRight(m_font, barX + barW - 4.0f, barY, 0xFFEEEEEE, &DefaultColors, t, barH);
 }
 
 // ----- main render ----------------------------------------------------------
@@ -1439,69 +1435,69 @@ HRESULT FileBrowserApp::Render(){
 	const FLOAT footerW      = min(kHdrW * 2.0f + kPaneGap, (FLOAT)vp2.Width - footerMargin * 2.0f);
 	const FLOAT footerX      = floorf(((FLOAT)vp2.Width - footerW) * 0.5f);
 	const FLOAT footerY      = (FLOAT)vp2.Height - FooterBandPx((FLOAT)vp2.Height);  // <-- unified
-
+    const FLOAT footerH      = 28.0f;
 
     // footer bar
     DrawSolidRect(m_pd3dDevice, footerX, footerY, footerW, 28.0f, 0x802A2A2A);
 
-    // --- (unchanged) footer text building and status toast follow here ---
-    {
-        const Pane& ap   = m_pane[m_active];
-        const Item* cur  = (ap.items.empty()? NULL : &ap.items[ap.sel]);
-        const char* yLab = (cur && !cur->isUpEntry && cur->marked) ? "Unmark" : "Mark";
+    const Pane& ap   = m_pane[m_active];
+    const Item* cur  = (ap.items.empty()? NULL : &ap.items[ap.sel]);
+    const char* yLab = (cur && !cur->isUpEntry && cur->marked) ? "Unmark" : "Mark";
 
-		const bool isLowRes = (vp2.Height < 700); // 480i/p or 576i count as "small"
-		const bool smallFooter = (isLowRes || footerW <= 620.0f);
+	const bool isLowRes = (vp2.Height < 700); // 480i/p or 576i count as "small"
+	const bool smallFooter = (isLowRes || footerW <= 620.0f);
 
-        if (m_pane[m_active].mode == 0){
-            const char* hintsVerbose = "\x8A Move  |  \x89 Switch pane  |  \x80 Enter  |  \x82 Menu  |  \x87 / \x86 Page";
-            const char* hintsCompact = "\x8A Move | \x89 Pane | \x80 Enter | \x82 Menu | \x87 / \x86 Pg";
-            const char* base = smallFooter ? hintsCompact : hintsVerbose;
+    if (m_pane[m_active].mode == 0) {
+        const char* hintsVerbose = "\x8A Move  |  \x89 Switch pane  |  \x80 Enter  |  \x82 Menu  |  \x87 / \x86 Page";
+        const char* hintsCompact = "\x8A Move | \x89 Pane | \x80 Enter | \x82 Menu | \x87 / \x86 Pg";
+        const char* base = smallFooter ? hintsCompact : hintsVerbose;
 
-            char fitted[256];
-            LeftEllipsizeToFit(m_font, base, footerW - 10.0f, fitted, sizeof(fitted));
-            DrawAnsiCentered(m_font, footerX, footerY + 4.0f, 0xFFCCCCCC, &DefaultColors, fitted, footerW);
-        } else {
-            const char* curPath = m_pane[m_active].curPath;
-            char       leftLabel[16] = "Free";
-            ULONGLONG  leftVal = 0, rightVal = 0;
-            if (IsDPath(curPath) && m_dvdHaveStats) {
-                strcpy(leftLabel, "Size");
-                leftVal  = m_dvdUsedBytes;
-                rightVal = m_dvdTotalBytes;
-            } else {
-                ULONGLONG fb=0, tb=0; GetDriveFreeTotal(curPath, fb, tb);
-                leftVal  = fb; rightVal = tb;
-            }
-
-            char leftStr[64], rightStr[64];
-            FormatSize(leftVal,  leftStr,  sizeof(leftStr));
-            FormatSize(rightVal, rightStr, sizeof(rightStr));
-
-            char bar[420];
-            if (smallFooter) {
-                _snprintf(bar, sizeof(bar),
-                    "Active:%s | \x81 Up | %s:%s/%s | \x82 Menu | \x83 %s | Pg \x87 / \x86",
-                    (m_active==0 ? "L" : "R"), leftLabel, leftStr, rightStr, yLab);
-            } else {
-                _snprintf(bar, sizeof(bar),
-                    "Active: %s   |   \x81 Up   |   %s: %s / Total: %s   |   \x82 Menu   |   \x83 %s   |   \x87 / \x86 Page",
-                    (m_active==0 ? "Left" : "Right"), leftLabel, leftStr, rightStr, yLab);
-            }
-            bar[sizeof(bar)-1] = 0;
-
-            char fitted[420];
-            LeftEllipsizeToFit(m_font, bar, footerW - 10.0f, fitted, sizeof(fitted));
-            DrawAnsiCentered(m_font, footerX, footerY + 4.0f, 0xFFCCCCCC, &DefaultColors, fitted, footerW);
+        char fitted[256];
+        LeftEllipsizeToFit(m_font, base, footerW - 10.0f, fitted, sizeof(fitted));
+        DrawAnsiCentered(m_font, footerX, footerY, 0xFFCCCCCC, &DefaultColors, fitted, footerW, footerH);
+    }
+    else {
+        const char* curPath = m_pane[m_active].curPath;
+        char       leftLabel[16] = "Free";
+        ULONGLONG  leftVal = 0, rightVal = 0;
+        if (IsDPath(curPath) && m_dvdHaveStats) {
+            strcpy(leftLabel, "Size");
+            leftVal  = m_dvdUsedBytes;
+            rightVal = m_dvdTotalBytes;
+        }
+        else {
+            ULONGLONG fb=0, tb=0; GetDriveFreeTotal(curPath, fb, tb);
+            leftVal  = fb; rightVal = tb;
         }
 
-        // ---- status toast (also centered and fitted) ----
-        DWORD now = GetTickCount();
-        if (now < m_statusUntilMs && m_status[0]){
-            char fitted[256];
-            LeftEllipsizeToFit(m_font, m_status, footerW - 10.0f, fitted, sizeof(fitted));
-            DrawAnsiCentered(m_font, footerX, footerY + 25.0f, 0xFFBBDDEE, &DefaultColors, fitted, footerW);
+        char leftStr[64], rightStr[64];
+        FormatSize(leftVal,  leftStr,  sizeof(leftStr));
+        FormatSize(rightVal, rightStr, sizeof(rightStr));
+
+        char bar[420];
+        if (smallFooter) {
+            _snprintf(bar, sizeof(bar),
+                "\x81 Up | %s: %s / %s | \x82 Menu | \x83 %s | Pg \x87 / \x86",
+                (m_active==0 ? "L" : "R"), leftLabel, leftStr, rightStr, yLab);
         }
+        else {
+            _snprintf(bar, sizeof(bar),
+                "Active: %s   |   \x81 Up   |   %s: %s / Total: %s   |   \x82 Menu   |   \x83 %s   |   \x87 / \x86 Page",
+                (m_active==0 ? "Left" : "Right"), leftLabel, leftStr, rightStr, yLab);
+        }
+        bar[sizeof(bar)-1] = 0;
+
+        char fitted[420];
+        LeftEllipsizeToFit(m_font, bar, footerW - 10.0f, fitted, sizeof(fitted));
+        DrawAnsiCentered(m_font, footerX, footerY, 0xFFCCCCCC, &DefaultColors, fitted, footerW, 28.0f);
+    }
+
+    // ---- status toast (also centered and fitted) ----
+    DWORD now = GetTickCount();
+    if (now < m_statusUntilMs && m_status[0]) {
+        char fitted[256];
+        LeftEllipsizeToFit(m_font, m_status, footerW - 10.0f, fitted, sizeof(fitted));
+        DrawAnsiCentered(m_font, footerX, footerY + footerH + 2.0f, 0xFFBBDDEE, &DefaultColors, fitted, footerW);
     }
 
     // ---- overlays ----

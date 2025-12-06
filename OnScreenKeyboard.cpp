@@ -1,9 +1,7 @@
 #include "OnScreenKeyboard.h"
 #include "GfxPrims.h"
-#include <stdio.h>
-#include <string.h>
-#include <wchar.h>   // for MultiByteToWideChar used by helpers
 #include "TextUtils.h"
+#include <StdIO.h>
 
 /*
 ============================================================================
@@ -26,8 +24,6 @@ struct KB_Marquee {
     KB_Marquee() : px(0.0f), fitWLock(0.0f), nextTick(0), resetPause(0) { last[0] = 0; }
 };
 static KB_Marquee g_kbMarq;
-
-
 
 // Draw the header path centered vertically in a band [x,y,w,h].
 // Fixed "In:" label + path. When the path is too long: character-step marquee
@@ -147,7 +143,6 @@ static void KB_DrawHeaderPath_FixedLabel(
     }
 }
 
-
 // ------------------ Local keyboard layouts ------------------
 // Alpha/number layer (your original). Rows target 10 keys each.
 namespace {
@@ -189,9 +184,7 @@ static bool IsGlyphSupported(char c) {
 // Returns number of characters copied.
 static int BuildVisibleRow(const char* raw, char* out, int cap) {
     int n = 0;
-    for (const char* p = raw; *p && n < cap - 1; ++p) {
-        if (IsGlyphSupported(*p)) out[n++] = *p;
-    }
+    for (const char* p = raw; *p && n < cap - 1; ++p) if (IsGlyphSupported(*p)) out[n++] = *p;
     out[n] = 0;
     return n;
 }
@@ -331,9 +324,7 @@ char OnScreenKeyboard::KbCharAt(int row, int col) const{
         char rows[5][16];
         int  cols[5];
         BuildSymbolRowsNormalized(rows, cols);
-        if (col >= 0 && col < cols[row]) {
-            return rows[row][col];
-        }
+        if (col >= 0 && col < cols[row]) return rows[row][col];
         return 0;
     } else {
         if (row < 0 || row > 3) return 0;
@@ -454,7 +445,7 @@ void OnScreenKeyboard::Draw(CXBFont& font, LPDIRECT3DDEVICE8 dev, FLOAT lineH){
         "Done",
         m_shiftOnce ? "Shift*" : "Shift",
         m_lower ? "Caps \x8F" : "Caps \x8F*",
-        m_symbols ? "ABC \x90" : "Symbols \x90"
+        m_symbols ? "ABC \x90" : "#+= \x90"
     };
     for (int r=0;r<4;++r){
         const FLOAT sx = x + padX;
@@ -522,9 +513,7 @@ void OnScreenKeyboard::Draw(CXBFont& font, LPDIRECT3DDEVICE8 dev, FLOAT lineH){
             }
 
             char s[2] = { c, 0 };
-            FLOAT tw, th; GetAnsiWH(font, s, &tw, &th);
-            DrawAnsi(font, Snap(drawX + (drawW - tw) * 0.5f),
-                Snap(rowY  + (cellH - th) * 0.5f), 0xFFE0E0E0, &DefaultColors, s);
+            DrawAnsiCentered(font, drawX, rowY, 0xFFE0E0E0, &DefaultColors, s, drawW, cellH);
         }
     }
 
@@ -543,35 +532,24 @@ void OnScreenKeyboard::Draw(CXBFont& font, LPDIRECT3DDEVICE8 dev, FLOAT lineH){
 		const FLOAT bx = e0 + gapX * 0.5f;
 		const FLOAT bw = (e1 - e0) - gapX;
 		const bool  selBack = (!m_sideFocus && m_row == charRows && m_col == 0);
-        DrawSolidRect(dev, bx, bottomY, bw, cellH, selBack ? 0x60FFFF00 : 0x30202020);
 
-		FLOAT tw, th; GetAnsiWH(font, "Backspace", &tw, &th);
-		DrawAnsi(font,
-            Snap(bx + (bw - tw) * 0.5f),
-            Snap(bottomY + (cellH - th) * 0.5f),
-				0xFFE0E0E0, &DefaultColors, "Backspace \x82");
+        DrawSolidRect(dev, bx, bottomY, bw, cellH, selBack ? 0x60FFFF00 : 0x30202020);
+        FLOAT nx = DrawAnsiCentered(font, bx, bottomY, 0xFFE0E0E0, &DefaultColors, "Backspace", bw, cellH);
+        DrawAnsiCentered(font, nx, bottomY, 0xFFE0E0E0, &DefaultColors, " \x82", NULL, cellH);
 
 		// Space cell
 		const FLOAT sx = e1 + gapX * 0.5f;
 		const FLOAT sw = (e2 - e1) - gapX;
 		const bool  selSpace = (!m_sideFocus && m_row == charRows && m_col == 1);
+
         DrawSolidRect(dev, sx, bottomY, sw, cellH, selSpace ? 0x60FFFF00 : 0x30202020);
-
-		GetAnsiWH(font, "Space", &tw, &th);
-		DrawAnsi(font,
-            Snap(sx + (sw - tw) * 0.5f),
-            Snap(bottomY + (cellH - th) * 0.5f),
-				0xFFE0E0E0, &DefaultColors, "Space \x83");
+        nx = DrawAnsiCentered(font, sx, bottomY, 0xFFE0E0E0, &DefaultColors, "Space", sw, cellH);
+        DrawAnsiCentered(font, nx, bottomY, 0xFFE0E0E0, &DefaultColors, " \x83", NULL, cellH);
 	}
-
-
-
 
     // Footer hints (centered)
     const char* hints = "\x80 Select   \x81 Cancel   \x85 Done   \x91 \x92 Move Cursor";
-    FLOAT hintsW = GetAnsiW(font, hints);
-    FLOAT hintsX = Snap(x + (panelW - hintsW) * 0.5f);
-    DrawAnsi(font, hintsX, y + panelH - 25, 0xFFBBBBBB, &DefaultColors, hints);
+    DrawAnsiCentered(font, x, y + panelH - 25, 0xFFBBBBBB, &DefaultColors, hints, panelW);
 }
 
 // ------------------ input ------------------

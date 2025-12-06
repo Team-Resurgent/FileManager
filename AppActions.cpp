@@ -1,48 +1,26 @@
 #include "AppActions.h"
 #include "FileBrowserApp.h"
-#include "FsUtil.h"
-#include "XBInput.h"   // XBInput_GetInput, g_Gamepads
 
 #include "xips.h"
 #include "xpatchlibUtil.h"
-#include "unzipLIB.h"
 #include "unzipLIBUtil.h"
 
-#include <stdio.h>
-#include <string.h>
-#include <ctype.h>   // toupper
-
-/*
-============================================================================
- AppActions
-  - Centralized execution of menu actions for FileBrowserApp
-  - Cancel-aware copy/move with a "press B twice to cancel" toast window
-  - Uses FsUtil.* helpers for I/O and FileBrowserApp methods for UI refresh
-============================================================================
-*/
-
-// ---- Cancel-aware progress context + thunk ---------------------------------
-// CopyProgCtx: tracks progress, cancel state, and the 2-press B confirmation.
 // The "toast window" behavior:
 //   1) First B press shows "Press B again to cancel" and arms a window.
 //   2) If the second B happens while the toast is still visible, we cancel.
 //   3) If toast expires before second B, the next B just re-arms the window.
 struct CopyProgCtx {
     FileBrowserApp* app;
-    ULONGLONG base;        // bytes completed from previous items (offset)
-    bool      canceled;    // set when user confirms cancel
+    ULONGLONG base;     // bytes completed from previous items (offset)
+    bool canceled;      // set when user confirms cancel
 
-    // confirmation state (toast window)
-    bool      confirmArmed;   // true after the first B press
-    DWORD     confirmUntil;   // snapshot of when the toast will expire (informational)
-    bool      prevB;          // for rising-edge detection of B
+    bool confirmArmed;  // true after the first B press
+    DWORD confirmUntil; // snapshot of when the toast will expire (informational)
+    bool prevB;         // for rising-edge detection of B
 };
 
-// Progress callback used by file copy/move loops.
-// - Pumps gamepad input to detect B presses
-// - Updates the app's progress overlay
-// - Implements the "press B twice" cancel logic
-static bool CopyProgThunk(LONGLONG done, LONGLONG total, const char* label, void* user){
+// Progress callback used by file copy/move loops
+static bool CopyProgThunk(LONGLONG done, LONGLONG total, const char* label, void* user) {
     CopyProgCtx* ctx = (CopyProgCtx*)user;
     FileBrowserApp* app = ctx->app;
 
@@ -54,7 +32,7 @@ static bool CopyProgThunk(LONGLONG done, LONGLONG total, const char* label, void
     }
     else done += ctx->base;
 
-    if (total == LLONG_MIN) total = 0;
+    total = (total == LLONG_MIN) ? 0 : total;
 
     // Poll controller to read B presses while copying
     XBInput_GetInput();
@@ -62,7 +40,6 @@ static bool CopyProgThunk(LONGLONG done, LONGLONG total, const char* label, void
     const bool  bNow = (pad.bAnalogButtons[XINPUT_GAMEPAD_B] > 30);
     const DWORD now  = GetTickCount();
 
-    // Paint progress (done is per-current-item, base is previous items)
     app->UpdateProgress(done, total, label);
 
     // Rising-edge B?
@@ -85,23 +62,19 @@ static bool CopyProgThunk(LONGLONG done, LONGLONG total, const char* label, void
     }
 
     // Disarm if toast has expired
-    if (ctx->confirmArmed && now >= app->StatusUntilMs()){
-        ctx->confirmArmed = false;
-    }
+    if (ctx->confirmArmed && now >= app->StatusUntilMs()) ctx->confirmArmed = false;
 
     ctx->prevB = bNow;
-    return true; // keep going
+    return true; // continue
 }
 
-// ---- local helpers ----------------------------------------------------------
-
-// Return 1 if both paths are on the same drive letter (case-insensitive).
+// Return 1 if both paths are on the same drive letter (case-insensitive)
 static int SameDriveLetter(const char* a, const char* b){
     if (!a || !b || !a[0] || !b[0]) return 0;
     return toupper((unsigned char)a[0]) == toupper((unsigned char)b[0]);
 }
 
-// Ensure trailing backslash on non-empty strings (local, VC7.1-safe).
+// Ensure trailing backslash on non-empty strings
 static void NormalizeSlashEndLocal(char* s, size_t cap){
     size_t n = s ? strlen(s) : 0;
     if (n && s[n-1] != '\\' && n+1 < cap){ s[n] = '\\'; s[n+1] = 0; }
@@ -117,7 +90,7 @@ static int IsSubPathCaseI(const char* parent, const char* child){
     return _strnicmp(p, c, (int)strlen(p)) == 0; // child starts with parent?
 }
 
-// Basename (pointer into input string), e.g., "E:\A\B\C" -> "C".
+// Basename (pointer into input string), e.g., "E:\A\B\C" -> "C"
 static const char* BaseNameOf(const char* path){
     const char* s = path ? strrchr(path, '\\') : 0;
     return s ? (s+1) : path;
@@ -192,8 +165,8 @@ void Execute(Action act, FileBrowserApp& app) {
         }
 	}
 
-    switch (act)
-    {
+    switch (act) {
+
         // ---- Open / Enter / Launch --------------------------------------------
     case ACT_OPEN:
     {

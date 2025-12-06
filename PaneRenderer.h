@@ -40,7 +40,7 @@ public:
 
 private:
     void DrawNameFittedOrMarquee(CXBFont& font, FLOAT x, FLOAT y, FLOAT h, FLOAT maxW, DWORD color, const char* name, bool isSelected, int paneIndex, int rowIndex);
-    void DrawHeaderFittedOrMarquee(CXBFont& font, FLOAT x, FLOAT y, FLOAT maxW, DWORD color, const char* text, int paneIndex);
+    void DrawHeaderFittedOrMarquee(CXBFont& font, FLOAT x, FLOAT y, FLOAT h, FLOAT maxW, DWORD color, const char* text, int paneIndex);
 
     static FLOAT NameColX(FLOAT baseX,const PaneStyle& st){ return baseX + st.gutterW + st.paddingX; }
     

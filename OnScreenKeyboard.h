@@ -1,8 +1,6 @@
 #pragma once
 
-#include <xtl.h>
-#include <wchar.h>
-#include <string.h>
+#include <XTL.h>
 #include "XBFont.h"
 #include "XBInput.h"
 

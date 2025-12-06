@@ -1,21 +1,7 @@
 #pragma once
 
-/*
-============================================================================
- FsUtil
-  - Drive-letter mapping (C/E/F/G/X/Y/Z/D) via IoCreateSymbolicLink
-  - Drive discovery + building drive-list items
-  - Directory listing + path utilities
-  - Basic file/dir ops (delete, mkdir-if-needed, size, free space)
-  - Copy-with-progress infrastructure
-  - FATX cache partition formatting (X/Y/Z)
-  - .xbe launching (remap D: and call XLaunchNewImageA)
-  - DVD helpers (tray/media polling & safe remount) — app uses only functions
-============================================================================
-*/
-
-#include <xtl.h>
-#include <vector>
+#include <XTL.h>
+#include <Vector>
 
 #ifndef INVALID_FILE_ATTRIBUTES
 #define INVALID_FILE_ATTRIBUTES 0xFFFFFFFF

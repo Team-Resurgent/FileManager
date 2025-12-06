@@ -1,9 +1,6 @@
 #include "FsUtil.h"
 
-#include <algorithm>
-#include <string.h>
-#include <ctype.h>
-#include <stdio.h>  // _snprintf
+#include <Algorithm>
 
 /*
 ============================================================================
@@ -285,7 +282,7 @@ void BuildDriveItems(std::vector<Item>& out){
         int i = g_presentIdx[j];
         Item it; ZeroMemory(&it, sizeof(it));
         strncpy(it.name, kRoots[i], 255); it.name[255]=0;
-        it.isDir=true; it.size=0; it.isUpEntry=false; it.marked=false;
+        it.isDir = true; it.size = 0; it.isUpEntry = false; it.marked = false;
         out.push_back(it);
     }
 }
@@ -295,25 +292,26 @@ void BuildDriveItems(std::vector<Item>& out){
 // ============================================================================
 
 void EnsureTrailingSlash(char* s,size_t cap){
-    size_t n=strlen(s);
-    if(n && s[n-1]!='\\' && n+1<cap){ s[n]='\\'; s[n+1]=0; }
+    size_t n = strlen(s);
+    if(n && s[n-1] != '\\' && n + 1 < cap) { s[n] = '\\'; s[n+1] = 0; }
 }
 
 // JoinPath does not normalize components; input must be well-formed.
-void JoinPath(char* dst,size_t cap,const char* base,const char* name){
-    size_t bl=strlen(base);
-    if(bl && base[bl-1]=='\\') _snprintf(dst,(int)cap,"%s%s",base,name);
-    else                        _snprintf(dst,(int)cap,"%s\\%s",base,name);
-    dst[cap-1]=0;
+void JoinPath(char* dst, size_t cap, const char* base, const char* name){
+    size_t bl = strlen(base);
+    if(bl && base[bl-1] == '\\') _snprintf(dst, (int)cap, "%s%s", base, name);
+    else _snprintf(dst, (int)cap, "%s\\%s", base, name);
+    dst[cap-1] = 0;
 }
 
 void ParentPath(char* path){
-    size_t n=strlen(path);
+    size_t n = strlen(path);
     if (n <= 3) { path[0]=0; return; }
     while (n && path[n-1]=='\\') { path[--n]=0; }
     char* p = strrchr(path,'\\');
-    if (!p) { path[0]=0; return; }
-    if (p == path+2) *(p+1)=0; else *p=0;
+    if (!p) { path[0] = 0; return; }
+    if (p == path+2) *(p+1) = 0;
+    else *p = 0;
 }
 
 bool IsDriveRoot(const char* p){
@@ -338,11 +336,11 @@ static bool ItemLess(const Item& a,const Item& b){
 //  - Prepends a synthetic ".." entry for non-root folders.
 //  - Sorts (dirs first, then by name) while keeping the ".." at index 0.
 // ============================================================================
-bool ListDirectory(const char* path,std::vector<Item>& out){
+bool ListDirectory(const char* path,std::vector<Item>& out) {
     out.clear();
 
     // For non-root, push ".." to allow going up.
-    if(strlen(path)>3){
+    if (strlen(path)>3) {
         Item up; ZeroMemory(&up,sizeof(up));
         strncpy(up.name,"..\\",3); up.isDir=true; up.size=0; up.isUpEntry=true; up.marked=false; out.push_back(up);
     }
@@ -352,18 +350,19 @@ bool ListDirectory(const char* path,std::vector<Item>& out){
 
     WIN32_FIND_DATAA fd; ZeroMemory(&fd,sizeof(fd));
     HANDLE h=FindFirstFileA(mask,&fd); if(h==INVALID_HANDLE_VALUE) return false;
-    do{
-        const char* n=fd.cFileName; if(!strcmp(n,".")||!strcmp(n,"..")) continue;
-        Item it; ZeroMemory(&it,sizeof(it));
-        strncpy(it.name,n,255); it.name[255]=0;
-        it.isDir=(fd.dwFileAttributes&FILE_ATTRIBUTE_DIRECTORY)!=0;
-        it.size=(((ULONGLONG)fd.nFileSizeHigh)<<32)|fd.nFileSizeLow; it.isUpEntry=false; it.marked=false;
+    do {
+        const char* n = fd.cFileName; 
+        if (!strcmp(n,".") || !strcmp(n,"..")) continue;
+        Item it; ZeroMemory(&it, sizeof(it));
+        strncpy(it.name, n, 255); it.name[255] = 0;
+        it.isDir = (fd.dwFileAttributes&FILE_ATTRIBUTE_DIRECTORY) != 0;
+        it.size = (((ULONGLONG)fd.nFileSizeHigh) << 32) | fd.nFileSizeLow; it.isUpEntry=false; it.marked=false;
         out.push_back(it);
-    }while(FindNextFileA(h,&fd));
+    } while (FindNextFileA(h, &fd));
     FindClose(h);
 
-    size_t start=(strlen(path)>3)?1:0; // keep ".." in place
-    if(out.size()>start+1) std::sort(out.begin()+(int)start,out.end(),ItemLess);
+    size_t start = (strlen(path) > 3) ? 1 : 0; // keep ".." in place
+    if (out.size() > start + 1) std::sort(out.begin() + (int)start, out.end(), ItemLess);
     return true;
 }
 
@@ -371,8 +370,7 @@ bool ListDirectory(const char* path,std::vector<Item>& out){
 // Misc info helpers
 // ============================================================================
 
-void FormatSize(ULONGLONG bytes, char* out, size_t cap)
-{
+void FormatSize(ULONGLONG bytes, char* out, size_t cap) {
     if (!out || cap == 0) return;
     out[0] = 0;
 
@@ -403,9 +401,7 @@ void FormatSize(ULONGLONG bytes, char* out, size_t cap)
 // For D:, CDFS reports "free=0". To match the UI label "Free / Total" and avoid
 // confusion, we intentionally return "0 / <used_on_disc>" for DVDs.
 // We recompute <used_on_disc> only when the volume serial changes.
-void GetDriveFreeTotal(const char* anyPathInDrive,
-                       ULONGLONG& freeBytes, ULONGLONG& totalBytes)
-{
+void GetDriveFreeTotal(const char* anyPathInDrive, ULONGLONG& freeBytes, ULONGLONG& totalBytes) {
     freeBytes = 0; totalBytes = 0;
     if (!anyPathInDrive || !anyPathInDrive[0]) return;
 
@@ -443,12 +439,12 @@ void GetDriveFreeTotal(const char* anyPathInDrive,
 // Basic FS ops
 // ============================================================================
 
-bool DirExistsA(const char* path){
+bool DirExistsA(const char* path) {
     DWORD a = GetFileAttributesA(path);
     return (a != INVALID_FILE_ATTRIBUTES) && (a & FILE_ATTRIBUTE_DIRECTORY);
 }
 
-bool EnsureDirA(const char* path){
+bool EnsureDirA(const char* path) {
     DWORD a = GetFileAttributesA(path);
     if (a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY)) return true;
     return CreateDirectoryA(path, NULL) ? true : false;
@@ -459,7 +455,7 @@ bool EnsureDirA(const char* path){
 //  - Refuses read-only volumes (CDFS / cache)
 //  - Clears READONLY/SYSTEM/HIDDEN before delete
 //  - Continues on child failures; tiny retry on RemoveDirectoryA
-bool DeleteRecursiveA(const char* path){
+bool DeleteRecursiveA(const char* path) {
     if (!path || !path[0]) { SetLastError(ERROR_INVALID_PARAMETER); return false; }
     if (IsDriveRoot(path)) { SetLastError(ERROR_ACCESS_DENIED);     return false; }
     if (IsReadOnlyVolumeA(path)) { SetLastError(ERROR_WRITE_PROTECT); return false; }
@@ -470,12 +466,12 @@ bool DeleteRecursiveA(const char* path){
     // Make the target itself writable so final delete can succeed.
     StripROSysHiddenA(path);
 
-    if (a & FILE_ATTRIBUTE_DIRECTORY){
+    if (a & FILE_ATTRIBUTE_DIRECTORY) {
         // Enumerate children
         char mask[512]; JoinPath(mask, sizeof(mask), path, "*");
         WIN32_FIND_DATAA fd; HANDLE h = FindFirstFileA(mask, &fd);
-        if (h != INVALID_HANDLE_VALUE){
-            do{
+        if (h != INVALID_HANDLE_VALUE) {
+            do {
                 if (!strcmp(fd.cFileName,".") || !strcmp(fd.cFileName,"..")) continue;
 
                 char sub[512]; JoinPath(sub, sizeof(sub), path, fd.cFileName);
@@ -492,15 +488,16 @@ bool DeleteRecursiveA(const char* path){
         }
 
         // Try removing the (now empty) directory (with a tiny retry)
-        if (!RemoveDirectoryA(path)){
+        if (!RemoveDirectoryA(path)) {
             Sleep(1);
             StripROSysHiddenA(path);
             return RemoveDirectoryA(path) ? true : false;
         }
         return true;
-    }else{
+    }
+    else {
         // File: clear attributes then delete (retry once)
-        if (!DeleteFileA(path)){
+        if (!DeleteFileA(path)) {
             StripROSysHiddenA(path);
             return DeleteFileA(path) ? true : false;
         }
