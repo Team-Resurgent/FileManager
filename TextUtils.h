@@ -12,12 +12,14 @@ private:
     void PopulateWithDefaults();
 };
 
-extern ColorMap DefaultColorMap;
+extern ColorMap DefaultColors;
 
 inline FLOAT Snap(FLOAT v) { return (FLOAT)((int)(v + 0.5f)); } // pixel-align
 
-void DrawAnsi(CXBFont& font, FLOAT x, FLOAT y, DWORD color, ColorMap& colors, const char* text);
+void DrawAnsi(CXBFont& font, FLOAT x, FLOAT y, DWORD color, ColorMap* colors, const char* text);
+void DrawAnsiCentered(CXBFont& font, FLOAT x, FLOAT y, DWORD color, ColorMap* colors, const char* text, FLOAT width, FLOAT height = NULL);
+void DrawAnsiFromRight(CXBFont& font, FLOAT x, FLOAT y, DWORD color, ColorMap* colors, const char* text, FLOAT height = NULL);
 
-// Pass NULL for w or h to center in one axis
-void DrawAnsiCentered(CXBFont& font, FLOAT x, FLOAT w, FLOAT y, FLOAT h, DWORD color, ColorMap& colors, const char* text);
+FLOAT GetAnsiW(CXBFont& font, const char* text);
+void GetAnsiWH(CXBFont& font, const char* text, FLOAT* width, FLOAT* height);
 

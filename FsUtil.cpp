@@ -344,7 +344,7 @@ bool ListDirectory(const char* path,std::vector<Item>& out){
     // For non-root, push ".." to allow going up.
     if(strlen(path)>3){
         Item up; ZeroMemory(&up,sizeof(up));
-        strncpy(up.name,"..",3); up.isDir=true; up.size=0; up.isUpEntry=true; up.marked=false; out.push_back(up);
+        strncpy(up.name,"..\\",3); up.isDir=true; up.size=0; up.isUpEntry=true; up.marked=false; out.push_back(up);
     }
 
     char base[512]; _snprintf(base,sizeof(base),"%s",path); base[sizeof(base)-1]=0; EnsureTrailingSlash(base,sizeof(base));

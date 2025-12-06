@@ -143,12 +143,6 @@ void ContextMenu::OpenAt(float x, float y, float width, float rowH){
 
 void ContextMenu::Close(){ m_open=false; }
 
-// --- tiny ANSI->wide draw helpers (XDK fonts are wide) ----------------------
-// This should not be per-class either
-void ContextMenu::DrawRect(LPDIRECT3DDEVICE8 dev, float x,float y,float w,float h,D3DCOLOR c){
-    DrawSolidRect(dev, x, y, w, h, c);
-}
-
 // Render the menu panel + rows. Separators are drawn as thin centered lines.
 // Disabled rows are dimmed and cannot be focused via navigation.
 void ContextMenu::Draw(CXBFont& font, LPDIRECT3DDEVICE8 dev) const {
@@ -159,21 +153,14 @@ void ContextMenu::Draw(CXBFont& font, LPDIRECT3DDEVICE8 dev) const {
 
     FLOAT tw = 0.0f;                       // This should be reused. Lots of overhead for min width calc
     for (int i = 0; i < m_count; ++i) {
-        FLOAT cw = 0.0f, ch = 0.0f;
         const Item& it = m_items[i];
-        WCHAR wbuf[256];
-        MultiByteToWideChar(CP_ACP, 0, it.label, -1, wbuf, 256);
-        font.GetTextExtent(wbuf, &cw, &ch);
+        FLOAT cw, ch;
+        GetAnsiWH(font, it.label, &cw, &ch);
         tw = (tw > cw) ? tw : cw;
     }
 
-    // --- measure header text height (ANSI -> wide, then GetTextExtent) ---
-    FLOAT hdrW = 0.0f, hdrH = 0.0f;
-    {
-        WCHAR wbuf[128];
-        MultiByteToWideChar(CP_ACP, 0, m_label, -1, wbuf, 128);
-        font.GetTextExtent(wbuf, &hdrW, &hdrH);
-    }
+    FLOAT hdrW, hdrH;
+    GetAnsiWH(font, m_label, &hdrW, &hdrH);
 
     tw = (tw > hdrW) ? tw : hdrW;
     tw = (tw > m_mw) ? tw : m_mw;
@@ -198,13 +185,13 @@ void ContextMenu::Draw(CXBFont& font, LPDIRECT3DDEVICE8 dev) const {
     const FLOAT menuH   = (listTop - y) + (m_count * rowH) + bottomPad;
 
     // Frame/background
-    DrawRect(dev, x - 4.5f, y - 4.5f, menuW + 9.0f, menuH + 9.0f, 0xA0101010);
-    DrawRect(dev, x, y, menuW, menuH, 0xE0222222);
+    DrawSolidRect(dev, x - 4.5f, y - 4.5f, menuW + 9.0f, menuH + 9.0f, 0xA0101010);
+    DrawSolidRect(dev, x, y, menuW, menuH, 0xE0222222);
 
     // Header
     if (drawHeader) {
-        DrawAnsi(font, x + 10.0f, y + headerTopPad, 0xFFFFFFFF, DefaultColorMap, m_label);
-        DrawRect(dev, x, lineY, menuW, 1.0f, 0x60FFFFFF);
+        DrawAnsi(font, x + 10.0f, y + headerTopPad, 0xFFFFFFFF, &DefaultColors, m_label);
+        DrawSolidRect(dev, x, lineY, menuW, 1.0f, 0x60FFFFFF);
     }
 
     // Rows
@@ -214,28 +201,24 @@ void ContextMenu::Draw(CXBFont& font, LPDIRECT3DDEVICE8 dev) const {
 
         if (it.separator){
             // Non-selectable divider line centered within the row box
-            DrawRect(dev, x + 10.0f, rowY + rowH * 0.5f, menuW - 20.0f, 1.0f, 0x50FFFFFF);
+            DrawSolidRect(dev, x + 10.0f, rowY + rowH * 0.5f, menuW - 20.0f, 1.0f, 0x50FFFFFF);
             continue;
         }
 
         // Selection highlight (only meaningful on selectable rows)
         bool sel = (i == m_sel);
         D3DCOLOR row = sel ? 0x60FFFF00 : 0x20202020;
-        DrawRect(dev, x + 6.0f, rowY - 2.0f, menuW - 12.0f, rowH, row);
+        DrawSolidRect(dev, x + 6.0f, rowY - 2.0f, menuW - 12.0f, rowH, row);
 
         // Text color: normal/selected/disabled
         DWORD col = it.enabled ? (sel ? 0xFF202020 : 0xFFE0E0E0) : 0xFF7A7A7A;
 
-        // Measure label height for vertical centering
-        FLOAT tw = 0.0f, th = 0.0f;
-        {
-            WCHAR wbuf[256];
-            MultiByteToWideChar(CP_ACP, 0, it.label, -1, wbuf, 256);
-            font.GetTextExtent(wbuf, &tw, &th);
-        }
+        FLOAT tw, th;
+        GetAnsiWH(font, it.label, &tw, &th);
+
         const FLOAT textY = rowY + (rowH - th) * 0.5f;
 
-        DrawAnsi(font, x + 16.0f, textY, col, DefaultColorMap, it.label);
+        DrawAnsi(font, x + 16.0f, textY, col, &DefaultColors, it.label);
     }
 }
 

@@ -1,28 +1,14 @@
 #include "FileBrowserApp.h"
 #include "AppActions.h"
-#include "GfxPrims.h"
 #include "FsUtil.h"
 #include <wchar.h>
 #include <stdarg.h>
 #include <algorithm>
 #include <stdio.h> // _snprintf
 #include <xgraphics.h> 
-#include "font_xpr.h"
+#include "Font.h"
 #include "DebugPrint.h"
 #include "TextUtils.h"
-/*
-===============================================================================
- FileBrowserApp
-  - Main application controller for the dual-pane file browser.
-  - Owns input routing, pane state, context menu, OSD keyboard, progress HUD,
-    and the high-level render loop.
-  - Keeps allocations minimal and uses ACP->UTF-16 conversions for fonts.
-===============================================================================
-*/
-
-// putting this here for now. NOTE TO SELF: Make colors DEFINES
-// These type of functions should be in their own .cpp
-
 
 // Simple getter used by overlay/status timers.
 DWORD FileBrowserApp::StatusUntilMs() const { return m_statusUntilMs; }
@@ -30,10 +16,6 @@ DWORD FileBrowserApp::StatusUntilMs() const { return m_statusUntilMs; }
 // ---- local helpers (no header pollution) -----------------------------------
 // These helpers are file-local to avoid leaking symbols into headers/other TUs.
 namespace {
-    // Small math/layout helpers
-    inline FLOAT MaxF(FLOAT a, FLOAT b){ return (a>b)?a:b; }
-	inline FLOAT MinF(FLOAT a, FLOAT b) { return (a < b) ? a : b; }
-    inline int   MaxI (int a,   int b){ return (a>b)?a:b; }
 
 
 static bool FileExistsA(const char* path){
@@ -50,9 +32,9 @@ static bool WriteAllA(const char* path, const void* data, DWORD size){
 
 
 	// Footer geometry used everywhere
-	inline FLOAT FooterBandPx(FLOAT screenH)   { return MaxF(48.0f, screenH * 0.09f); }
+	inline FLOAT FooterBandPx(FLOAT screenH)   { return max(48.0f, screenH * 0.09f); }
 	// Always keep a little gap above the footer so rows don't "kiss" it.
-	inline FLOAT FooterSpacerPx(FLOAT screenH) { return MaxF(6.0f,  screenH * 0.012f); }
+	inline FLOAT FooterSpacerPx(FLOAT screenH) { return max(6.0f,  screenH * 0.012f); }
 		
 
 	// ---- character-step marquee (same tuning as panes/OSK) ---------------------
@@ -65,7 +47,7 @@ static const int   kProgStepChars   = 1;
 inline FLOAT SafeMarginX(FLOAT screenW, FLOAT screenH){
     const bool isSD = (screenH <= 600.0f);       // 480/576
     const FLOAT pct = isSD ? 0.065f : 0.03f;      // 5% each side on SD, 3% on HD
-    return MaxF(24.0f, screenW * pct);           // never smaller than 24px
+    return max(24.0f, screenW * pct);           // never smaller than 24px
 }
 
 
@@ -92,13 +74,12 @@ static void DrawLabelFittedOrMarquee(CXBFont& font,
 
     const FLOAT fitW_now = (maxW > kRightGuard) ? (maxW - kRightGuard) : 0.0f;
 
-    // Measure full once
-    WCHAR wfull[768]; MultiByteToWideChar(CP_ACP, 0, text, -1, wfull, 768);
-    FLOAT fullW=0, fullH=0; font.GetTextExtent(wfull, &fullW, &fullH);
+    FLOAT fullW, fullH;
+    GetAnsiWH(font, text, &fullW, &fullH);
 
     // If it fits, draw + reset
     if (fullW <= fitW_now + kTol){
-        font.DrawText((FLOAT)((int)(x+0.5f)), (FLOAT)((int)(y+0.5f)), color, wfull, 0, 0.0f);
+        DrawAnsi(font, x, y, color, &DefaultColors, text);
         M = ProgMarquee();
         return;
     }
@@ -119,8 +100,8 @@ static void DrawLabelFittedOrMarquee(CXBFont& font,
     int lo = 0, hi = len;
     while (lo < hi){
         const int mid = (lo + hi) / 2;
-        WCHAR wtmp[768]; MultiByteToWideChar(CP_ACP, 0, s + mid, -1, wtmp, 768);
-        FLOAT tw=0, th=0; font.GetTextExtent(wtmp, &tw, &th);
+        FLOAT tw, th;
+        GetAnsiWH(font, s + mid, &tw, &th);
         if (tw <= fitW + kTol) hi = mid; else lo = mid + 1;
     }
     const int lastStart = (lo > len) ? len : lo;
@@ -135,14 +116,13 @@ static void DrawLabelFittedOrMarquee(CXBFont& font,
     while (lo2 < hi2){
         const int mid = (lo2 + hi2 + 1) / 2;
         char tmp[768]; _snprintf(tmp, sizeof(tmp), "%.*s", mid, startPtr);
-        WCHAR wtmp[768]; MultiByteToWideChar(CP_ACP, 0, tmp, -1, wtmp, 768);
-        FLOAT tw=0, th=0; font.GetTextExtent(wtmp, &tw, &th);
+        FLOAT tw, th;
+        GetAnsiWH(font, tmp, &tw, &th);
         if (tw <= fitW + kTol) lo2 = mid; else hi2 = mid - 1;
     }
 
     char vis[768]; _snprintf(vis, sizeof(vis), "%.*s", lo2, startPtr); vis[sizeof(vis)-1]=0;
-    WCHAR wvis[768]; MultiByteToWideChar(CP_ACP, 0, vis, -1, wvis, 768);
-    font.DrawText((FLOAT)((int)(x+0.5f)), (FLOAT)((int)(y+0.5f)), color, wvis, 0, 0.0f);
+    DrawAnsi(font, x, y, color, &DefaultColors, vis);
 
     // step/pause/reset
     if (now >= M.nextTick){
@@ -162,19 +142,12 @@ static void DrawLabelFittedOrMarquee(CXBFont& font,
         }
     }
 }
-    // very inefficient
-    // Measure ANSI string (after ACP->UTF16 conversion).
-    inline void MeasureTextWH(CXBFont& font, const char* s, FLOAT& outW, FLOAT& outH){
-        WCHAR wbuf[512];
-        MultiByteToWideChar(CP_ACP, 0, s ? s : "", -1, wbuf, 512);
-        font.GetTextExtent(wbuf, &outW, &outH);
-    }
 
     // Ellipsize the left side to fit maxW, keeping the tail (useful for paths).
     inline void LeftEllipsizeToFit(CXBFont& font, const char* src, FLOAT maxW,
                                    char* out, size_t cap){
         if (!src) { out[0]=0; return; }
-        FLOAT w=0,h=0; MeasureTextWH(font, src, w, h);
+        FLOAT w=0,h=0; GetAnsiWH(font, src, &w, &h);
         if (w <= maxW){ _snprintf(out, (int)cap, "%s", src); out[cap-1]=0; return; }
 
         const char* tail = src + strlen(src);
@@ -185,7 +158,7 @@ static void DrawLabelFittedOrMarquee(CXBFont& font,
             if (p == src) break;
             --p;
             _snprintf(buf, sizeof(buf), "...%s", p);
-            MeasureTextWH(font, buf, w, h);
+            GetAnsiWH(font, buf, &w, &h);
             if (w > maxW){
                 ++p; // last good char is one ahead
                 break;
@@ -195,21 +168,16 @@ static void DrawLabelFittedOrMarquee(CXBFont& font,
         out[cap-1]=0;
     }
 
-    // Marquee helpers for progress overlay
-    inline void MbToW(const char* s, WCHAR* w, int capW){
-        MultiByteToWideChar(CP_ACP, 0, s ? s : "", -1, w, capW);
-    }
-
     // Return first byte index whose rendered width reaches px (for marquee).
     static const char* SkipToPixelOffset(CXBFont& font, const char* s, FLOAT px, FLOAT& skippedW){
         skippedW = 0.0f;
         if (!s || px <= 0.0f) return s ? s : "";
         const char* p = s;
-        WCHAR wtmp[256]; FLOAT tw=0, th=0;
+        FLOAT tw=0, th=0;
         while (*p){
             int len = (int)(p - s + 1); if (len > 255) len = 255;
             char tmp[256]; _snprintf(tmp, sizeof(tmp), "%.*s", len, s);
-            MbToW(tmp, wtmp, 256); font.GetTextExtent(wtmp, &tw, &th);
+            GetAnsiWH(font, tmp, &tw, &th);
             if (tw >= px) break;
             ++p;
         }
@@ -255,8 +223,8 @@ void FileBrowserApp::ComputeResponsiveLayout()
 
     // ---- outer geometry ----
     const FLOAT margin = SafeMarginX((FLOAT)vp.Width, (FLOAT)vp.Height);
-	const FLOAT gap    = MaxF(24.0f,  vp.Width * 0.035f);
-	const FLOAT paneW  = MaxF(260.0f, (vp.Width - (margin * 2.0f) - gap) * 0.5f);
+	const FLOAT gap    = max(24.0f,  vp.Width * 0.035f);
+	const FLOAT paneW  = max(260.0f, (vp.Width - (margin * 2.0f) - gap) * 0.5f);
 
     kPaneGap  = gap;
     kListX_L  = margin;
@@ -264,24 +232,24 @@ void FileBrowserApp::ComputeResponsiveLayout()
 
     // header band
     kHdrW     = kListW;
-    kHdrY     = MaxF(12.0f, vp.Height * 0.03f);
-    kHdrH     = MaxF(22.0f, vp.Height * 0.04f);
+    kHdrY     = max(12.0f, vp.Height * 0.03f);
+    kHdrH     = max(22.0f, vp.Height * 0.04f);
 
     // row height
-    kLineH    = MaxF(22.0f, vp.Height * 0.036f);
+    kLineH    = max(22.0f, vp.Height * 0.036f);
 
     // keep kListY as the "pane body top" (what the rest of the code expects)
-    const FLOAT headerGap = MaxF(6.0f, kHdrH * 0.35f);
+    const FLOAT headerGap = max(6.0f, kHdrH * 0.35f);
     kListY = kHdrY + kHdrH + headerGap;
 
     // ---- visible rows (match PaneRenderer::DrawPane vertical math) ----
     // DrawPane uses: listTop = (kListY) + colHdrH
-    const FLOAT colHdrH = MaxF(22.0f, kLineH);
+    const FLOAT colHdrH = max(22.0f, kLineH);
     const FLOAT listTopInRenderer = kListY + colHdrH;
 
     // leave room for the footer band + a small spacer at every resolution
-    const FLOAT footerBand   = MaxF(48.0f, vp.Height * 0.09f);
-    const FLOAT footerSpacer = MaxF(6.0f,  vp.Height * 0.012f);
+    const FLOAT footerBand   = max(48.0f, vp.Height * 0.09f);
+    const FLOAT footerSpacer = max(6.0f,  vp.Height * 0.012f);
     const FLOAT bottomY      = (FLOAT)vp.Height - footerBand - footerSpacer;
 
     FLOAT usableH = bottomY - listTopInRenderer;
@@ -292,7 +260,7 @@ void FileBrowserApp::ComputeResponsiveLayout()
     if (m_visible > 30) m_visible = 30;
 
     // fixed micro-metrics
-    kGutterW    = 18.0f;
+    kGutterW    = 24.0f;
     kPaddingX   = 6.0f;
     kScrollBarW = 3.0f;
 }
@@ -374,14 +342,6 @@ FileBrowserApp::FileBrowserApp(){
 
 }
 
-
-
-
-// ----- draw prims ------------------------------------------------------------
-// Small wrapper to match project primitive helpers.
-void FileBrowserApp::DrawRect(float x,float y,float w,float h,D3DCOLOR c){
-    DrawSolidRect(m_pd3dDevice, x, y, w, h, c);
-}
 // --- Exit helper ------------------------------------------------------------
 // Jump to dashboard via XLaunchNewImage (fallback)
 void FileBrowserApp::ExitNow(){
@@ -419,7 +379,7 @@ void FileBrowserApp::RefreshPane(Pane& p){
         if (prevSel < 0) prevSel = 0;
         p.sel = prevSel;
 
-        int maxScroll = MaxI(0, (int)p.items.size() - m_visible);
+        int maxScroll = max(0, (int)p.items.size() - m_visible);
         if (prevScroll > maxScroll) prevScroll = maxScroll;
         if (prevScroll < 0) prevScroll = 0;
         p.scroll = prevScroll;
@@ -636,7 +596,7 @@ void FileBrowserApp::OpenMenu(){
 
     // Max width we can draw while keeping the frame fully inside the safe band
     const FLOAT maxWInsideSafe = (FLOAT)vp.Width - safeInset*2.0f - 12.0f; // -12 for the outer frame
-    const FLOAT menuW          = MaxF(220.0f, MinF(desiredW, MinF(kListW, maxWInsideSafe)));
+    const FLOAT menuW          = max(220.0f, min(desiredW, min(kListW, maxWInsideSafe)));
 
     // Center over the active pane first...
     const FLOAT paneX = (m_active==0) ? kListX_L : (kListX_L + kListW + kPaneGap);
@@ -913,7 +873,7 @@ void FileBrowserApp::OnPad(const XBGAMEPAD& pad){
 			return;
 		} else {
 			m_backConfirmArmed = true;
-			SetStatus("Press Back again to exit");
+			SetStatus("Press \x84 again to exit");
 			m_backConfirmUntil = m_statusUntilMs; // optional snapshot
 		}
 	}
@@ -1132,7 +1092,7 @@ void FileBrowserApp::EnsureListing(Pane& p){
     if (p.sel < 0) p.sel = 0;
 
     if (p.scroll > p.sel) p.scroll = p.sel;
-    int maxScroll = MaxI(0, (int)p.items.size() - m_visible);
+    int maxScroll = max(0, (int)p.items.size() - m_visible);
     if (p.scroll > maxScroll) p.scroll = maxScroll;
 }
 
@@ -1235,7 +1195,7 @@ void FileBrowserApp::UpOne(Pane& p){
 // ----------------------------------------------------------------------------
 HRESULT FileBrowserApp::Initialize(){
     const char* userFont  = "D:\\Media\\Font.xpr";
-    const char* titleFont = "T:\\Daemon-X_Font.xpr"; // title-scoped cache
+    const char* titleFont = "T:\\Font.xpr"; // title-scoped cache
     bool fontOk = false;
 
     XBUtil_DebugPrint("Init: starting FileBrowserApp::Initialize");
@@ -1261,8 +1221,8 @@ HRESULT FileBrowserApp::Initialize(){
             // If cached file is bad/corrupt, rewrite it from the embedded bytes.
             if (!fontOk) {
                 XBUtil_DebugPrint("Init: Cached font load failed, rewriting from embedded (%lu bytes)",
-                                  (unsigned long)g_FontXprSize);
-                const BOOL wrote = WriteAllA(titleFont, g_FontXpr, (size_t)g_FontXprSize);
+                                  (unsigned long)FontSize);
+                const BOOL wrote = WriteAllA(titleFont, Font, (size_t)FontSize);
                 XBUtil_DebugPrint("Init: WriteAllA('%s') -> %s", titleFont, wrote ? "OK" : "FAIL");
                 if (wrote) {
                     HRESULT hr2 = m_font.Create(titleFont, 0);
@@ -1273,8 +1233,8 @@ HRESULT FileBrowserApp::Initialize(){
         } else {
             // 3) No cached file: write embedded once and load it
             XBUtil_DebugPrint("Init: No cached font; writing embedded to %s (%lu bytes)",
-                              titleFont, (unsigned long)g_FontXprSize);
-            const BOOL wrote = WriteAllA(titleFont, g_FontXpr, (size_t)g_FontXprSize);
+                              titleFont, (unsigned long)FontSize);
+            const BOOL wrote = WriteAllA(titleFont, Font, (size_t)FontSize);
             XBUtil_DebugPrint("Init: WriteAllA('%s') -> %s", titleFont, wrote ? "OK" : "FAIL");
             if (wrote) {
                 HRESULT hr = m_font.Create(titleFont, 0);
@@ -1302,6 +1262,7 @@ HRESULT FileBrowserApp::Initialize(){
 
     m_ctx.SetDevice(m_pd3dDevice);
     m_zipSubMenu.SetDevice(m_pd3dDevice);
+    m_confirmDelSubMenu.SetDevice(m_pd3dDevice);
 
     return S_OK;
 }
@@ -1354,18 +1315,18 @@ void FileBrowserApp::DrawProgressOverlay(){
 
     // Ensure filename line has room for about 42 glyphs at current font size
     char fortyTwo[64]; for (int i=0;i<42;++i) fortyTwo[i]='W'; fortyTwo[42]=0;
-    FLOAT fileW=0, fileH=0; MeasureTextWH(m_font, fortyTwo, fileW, fileH);
+    FLOAT fileW=0, fileH=0; GetAnsiWH(m_font, fortyTwo, &fileW, &fileH);
 
     const FLOAT margin = 18.0f;
-    FLOAT w = MaxF(MaxF(420.0f, vp.Width * 0.50f), fileW + margin*2.0f);
+    FLOAT w = max(max(420.0f, vp.Width * 0.50f), fileW + margin*2.0f);
     if (w > vp.Width - margin*2.0f) w = vp.Width - margin*2.0f;
 
     const FLOAT h = 116.0f;
     const FLOAT x = Snap((vp.Width  - w)*0.5f);
     const FLOAT y = Snap((vp.Height - h)*0.5f);
 
-    DrawRect(x-6, y-6, w+12, h+12, 0xA0101010);
-    DrawRect(x,   y,   w,    h,    0xE0222222);
+    DrawSolidRect(m_pd3dDevice, x-6, y-6, w+12, h+12, 0xA0101010);
+    DrawSolidRect(m_pd3dDevice, x,   y,   w,    h,    0xE0222222);
 
     // layout lines
     const FLOAT titleY  = y + 10.0f;
@@ -1377,15 +1338,15 @@ void FileBrowserApp::DrawProgressOverlay(){
     const FLOAT barW    = w - margin*2.0f;
 
     // title
-    DrawAnsi(m_font, x + margin, titleY, 0xFFFFFFFF, DefaultColorMap, m_prog.label[0] ? m_prog.label : "Working...");
+    DrawAnsi(m_font, x + margin, titleY, 0xFFFFFFFF, &DefaultColors, m_prog.label[0] ? m_prog.label : "Working...");
 
     // hint (right) — red "B:" + gray "Cancel"
 	{
         char* text = "\x81 Cancel";
         FLOAT tw, th;
-        MeasureTextWH(m_font, text, tw, th);
+        GetAnsiWH(m_font, text, &tw, &th);
         const FLOAT startX = x + w - margin - tw;
-        DrawAnsi(m_font, startX, titleY, 0xFFCCCCCC, DefaultColorMap, text);
+        DrawAnsi(m_font, startX, titleY, 0xFFCCCCCC, &DefaultColors, text);
 	}
 
     // Split current label into folder + file parts
@@ -1421,14 +1382,14 @@ void FileBrowserApp::DrawProgressOverlay(){
         if (pct < 0) pct = 0; if (pct > 1) pct = 1;
     }
 
-    DrawRect(barX, barY, barW,       barH, 0xFF0E0E0E);
-    DrawRect(barX, barY, barW * pct, barH, 0x90FFFF00);
+    DrawSolidRect(m_pd3dDevice, barX, barY, barW,       barH, 0xFF0E0E0E);
+    DrawSolidRect(m_pd3dDevice, barX, barY, barW * pct, barH, 0x90FFFF00);
 
     char t[32]; _snprintf(t, sizeof(t), "%u%%", (unsigned int)(pct*100.0f + 0.5f)); t[sizeof(t)-1]=0;
-    FLOAT tw=0, th=0; MeasureTextWH(m_font, t, tw, th);
+    FLOAT tw=0, th=0; GetAnsiWH(m_font, t, &tw, &th);
     const FLOAT tx = Snap(barX + barW - tw);
     const FLOAT ty = Snap(barY + (barH - th) * 0.5f);
-    DrawAnsi(m_font, tx, ty, 0xFFEEEEEE, DefaultColorMap, t);
+    DrawAnsi(m_font, tx, ty, 0xFFEEEEEE, &DefaultColors, t);
 }
 
 // ----- main render ----------------------------------------------------------
@@ -1458,9 +1419,9 @@ HRESULT FileBrowserApp::Render(){
     st.visibleRows = m_visible;
 
 	// ---- panes ----
-	PaneRenderer::BeginFrameSharedCols();                         // reset per frame
-	m_renderer.PrimeSharedSizeColW(m_font, m_pane[0], st);        // prime from left
-	m_renderer.PrimeSharedSizeColW(m_font, m_pane[1], st);        // prime from right
+    m_renderer.ResetSharedSizeColW();                      // reset per frame
+	m_renderer.PrimeSharedSizeColW(m_font, m_pane[0], st); // prime from left
+	m_renderer.PrimeSharedSizeColW(m_font, m_pane[1], st); // prime from right
 
 	// Symmetric base X for panes: [margin] [left] [gap] [right] [margin]
 	const FLOAT leftX  = kListX_L;
@@ -1476,13 +1437,13 @@ HRESULT FileBrowserApp::Render(){
 
     // Footer matches the combined pane area (two panes + gap), centered.
 	const FLOAT footerMargin = SafeMarginX((FLOAT)vp2.Width, (FLOAT)vp2.Height);
-	const FLOAT footerW      = MinF(kHdrW * 2.0f + kPaneGap, (FLOAT)vp2.Width - footerMargin * 2.0f);
+	const FLOAT footerW      = min(kHdrW * 2.0f + kPaneGap, (FLOAT)vp2.Width - footerMargin * 2.0f);
 	const FLOAT footerX      = floorf(((FLOAT)vp2.Width - footerW) * 0.5f);
 	const FLOAT footerY      = (FLOAT)vp2.Height - FooterBandPx((FLOAT)vp2.Height);  // <-- unified
 
 
     // footer bar
-    DrawRect(footerX, footerY, footerW, 28.0f, 0x802A2A2A);
+    DrawSolidRect(m_pd3dDevice, footerX, footerY, footerW, 28.0f, 0x802A2A2A);
 
     // --- (unchanged) footer text building and status toast follow here ---
     {
@@ -1494,13 +1455,13 @@ HRESULT FileBrowserApp::Render(){
 		const bool smallFooter = (isLowRes || footerW <= 620.0f);
 
         if (m_pane[m_active].mode == 0){
-            const char* hintsVerbose = "D-Pad: Move  |  Left/Right: Switch pane  |  \x80 Enter  |  \x82 Menu  |  Black/White: Page";  // \x80 = A, \x81 = B \x82 = X \x83 = Y
-            const char* hintsCompact = "DPad:Move | L/R:Pane | \x80 Enter | \x82 Menu | Pg:Blk/Wht";
+            const char* hintsVerbose = "\x8A Move  |  \x89 Switch pane  |  \x80 Enter  |  \x82 Menu  |  \x87 / \x86 Page";
+            const char* hintsCompact = "\x8A Move | \x89 Pane | \x80 Enter | \x82 Menu | \x87 / \x86 Pg";
             const char* base = smallFooter ? hintsCompact : hintsVerbose;
 
             char fitted[256];
             LeftEllipsizeToFit(m_font, base, footerW - 10.0f, fitted, sizeof(fitted));
-            DrawAnsiCentered(m_font, footerX, footerW, footerY + 4.0f, NULL, 0xFFCCCCCC, DefaultColorMap, fitted);
+            DrawAnsiCentered(m_font, footerX, footerY + 4.0f, 0xFFCCCCCC, &DefaultColors, fitted, footerW);
         } else {
             const char* curPath = m_pane[m_active].curPath;
             char       leftLabel[16] = "Free";
@@ -1521,18 +1482,18 @@ HRESULT FileBrowserApp::Render(){
             char bar[420];
             if (smallFooter) {
                 _snprintf(bar, sizeof(bar),
-                    "Active:%s | \x81 Up | %s:%s/%s | \x82 Menu | \x83 %s | Pg:Blk/Wht",
+                    "Active:%s | \x81 Up | %s:%s/%s | \x82 Menu | \x83 %s | Pg \x87 / \x86",
                     (m_active==0 ? "L" : "R"), leftLabel, leftStr, rightStr, yLab);
             } else {
                 _snprintf(bar, sizeof(bar),
-                    "Active: %s   |   \x81 Up   |   %s: %s / Total: %s   |   \x82 Menu   |   \x83 %s   |   Black/White: Page",
+                    "Active: %s   |   \x81 Up   |   %s: %s / Total: %s   |   \x82 Menu   |   \x83 %s   |   \x87 / \x86 Page",
                     (m_active==0 ? "Left" : "Right"), leftLabel, leftStr, rightStr, yLab);
             }
             bar[sizeof(bar)-1] = 0;
 
             char fitted[420];
             LeftEllipsizeToFit(m_font, bar, footerW - 10.0f, fitted, sizeof(fitted));
-            DrawAnsiCentered(m_font, footerX, footerW, footerY + 4.0f, NULL, 0xFFCCCCCC, DefaultColorMap, fitted);
+            DrawAnsiCentered(m_font, footerX, footerY + 4.0f, 0xFFCCCCCC, &DefaultColors, fitted, footerW);
         }
 
         // ---- status toast (also centered and fitted) ----
@@ -1540,7 +1501,7 @@ HRESULT FileBrowserApp::Render(){
         if (now < m_statusUntilMs && m_status[0]){
             char fitted[256];
             LeftEllipsizeToFit(m_font, m_status, footerW - 10.0f, fitted, sizeof(fitted));
-            DrawAnsiCentered(m_font, footerX, footerW, footerY + 25.0f, NULL, 0xFFBBDDEE, DefaultColorMap, fitted);
+            DrawAnsiCentered(m_font, footerX, footerY + 25.0f, 0xFFBBDDEE, &DefaultColors, fitted, footerW);
         }
     }
 

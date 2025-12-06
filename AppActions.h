@@ -1,18 +1,6 @@
 #pragma once
 
-#include "PaneModel.h"
 #include "FsUtil.h"
-
-/*
-============================================================================
- AppActions
-  - Declares the central action enum and the single dispatch entrypoint.
-  - FileBrowserApp declares AppActions::Execute as a friend so Execute()
-    can call private helpers (e.g., SelectItemInPane, RefreshPane, etc.).
-  - Actions are triggered from the context menu and from other UI events.
-  - VS2003/XDK friendly: plain C++98 headers only.
-============================================================================
-*/
 
 // Forward declare to avoid circular include with FileBrowserApp
 class FileBrowserApp;

@@ -114,18 +114,15 @@
     <ClCompile Include="xpatchlib\xips.cpp">
       <Filter>xpatchlib</Filter>
     </ClCompile>
-    <ClCompile Include="font_xpr.c">
+    <ClCompile Include="TextUtils.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="TextUtils.cpp">
+    <ClCompile Include="Font.c">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="OnScreenKeyboard.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="PaneModel.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="PaneRenderer.h">
@@ -194,13 +191,13 @@
     <ClInclude Include="xpatchlib\xips.h">
       <Filter>xpatchlib</Filter>
     </ClInclude>
-    <ClInclude Include="font_xpr.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="TextUtils.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Configuration.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Font.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

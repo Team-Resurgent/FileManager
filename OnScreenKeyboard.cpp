@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <wchar.h>   // for MultiByteToWideChar used by helpers
+#include "TextUtils.h"
 
 /*
 ============================================================================
@@ -14,10 +15,6 @@
   - FATX-safe length (42) enforced
 ============================================================================
 */
-
-// ---------- local draw/measure helpers for the header path (marquee) ----------
-static inline FLOAT KB_Snap(FLOAT v){ return (FLOAT)((int)(v + 0.5f)); }
-
 
 // ------------------ Marquee for the path area ------------------
 struct KB_Marquee {
@@ -62,11 +59,9 @@ static void KB_DrawHeaderPath_FixedLabel(
     // ---- draw the fixed "In:" label ----
     FLOAT inW=0, inH=0;
     {
-        WCHAR wIn[16];
-        MultiByteToWideChar(CP_ACP, 0, "In:", -1, wIn, 16);
-        font.GetTextExtent(wIn, &inW, &inH);
-        const FLOAT ty = KB_Snap(y + (h - inH) * 0.5f + kBiasDown);
-        font.DrawText(KB_Snap(bandX), ty, color, wIn, 0, 0.0f);
+        GetAnsiWH(font, "In:", &inW, &inH);
+        const FLOAT ty = Snap(y + (h - inH) * 0.5f + kBiasDown);
+        DrawAnsi(font, bandX, ty, color, &DefaultColors, "In:");
     }
 
     // ---- path draw area (to the right of "In:") ----
@@ -76,15 +71,13 @@ static void KB_DrawHeaderPath_FixedLabel(
 
     const FLOAT fitW_now = (pathW > kRightGuard) ? (pathW - kRightGuard) : 0.0f;
 
-    // Measure full path once
-    WCHAR wPath[1024];
-    MultiByteToWideChar(CP_ACP, 0, parentPath, -1, wPath, 1024);
-    FLOAT fullW=0, fullH=0; font.GetTextExtent(wPath, &fullW, &fullH);
-    const FLOAT ty = KB_Snap(y + (h - fullH) * 0.5f + kBiasDown);
+    FLOAT fullW, fullH;
+    GetAnsiWH(font, parentPath, &fullW, &fullH);
+    const FLOAT ty = Snap(y + (h - fullH) * 0.5f + kBiasDown);
 
     // If it fits (or nearly fits), draw and reset
     if (fullW <= fitW_now + kTol){
-        font.DrawText(KB_Snap(pathX), ty, color, wPath, 0, 0.0f);
+        DrawAnsi(font, pathX, ty, color, &DefaultColors, parentPath);
         g_kbMarq = KB_Marquee(); // zero it
         return;
     }
@@ -133,7 +126,7 @@ static void KB_DrawHeaderPath_FixedLabel(
     // Draw visible slice
     char vis[1024]; _snprintf(vis, sizeof(vis), "%.*s", lo2, startPtr); vis[sizeof(vis)-1]=0;
     WCHAR wvis[1024]; MultiByteToWideChar(CP_ACP, 0, vis, -1, wvis, 1024);
-    font.DrawText(KB_Snap(pathX), ty, color, wvis, 0, 0.0f);
+    font.DrawText(Snap(pathX), ty, color, wvis, 0, 0.0f);
 
     // Step/pause/reset (exactly like PaneRenderer)
     if (now >= g_kbMarq.nextTick){
@@ -365,28 +358,6 @@ char OnScreenKeyboard::KbCharAt(int row, int col) const{
     }
 }
 
-// ANSI -> wide convenience; avoids repeating conversion boilerplate.
-void OnScreenKeyboard::DrawAnsi(CXBFont& font, FLOAT x, FLOAT y, DWORD color, const char* text){
-    WCHAR wbuf[512];
-    MultiByteToWideChar(CP_ACP,0,text,-1,wbuf,512);
-    font.DrawText(x,y,color,wbuf,0,0.0f);
-}
-
-// Simple filled rectangle using shared gfx primitive.
-void OnScreenKeyboard::DrawRect(LPDIRECT3DDEVICE8 dev, float x,float y,float w,float h,D3DCOLOR c){
-    DrawSolidRect(dev, x, y, w, h, c);  // from GfxPrims.h
-}
-
-// Text measurement helpers (ANSI inputs, wide for CXBFont).
-void OnScreenKeyboard::MeasureTextWH(CXBFont& font, const char* s, FLOAT& outW, FLOAT& outH){
-    WCHAR wbuf[256];
-    MultiByteToWideChar(CP_ACP, 0, s, -1, wbuf, 256);
-    font.GetTextExtent(wbuf, &outW, &outH);
-}
-FLOAT OnScreenKeyboard::MeasureTextW(CXBFont& font, const char* s){
-    FLOAT w=0,h=0; MeasureTextWH(font, s, w, h); return w;
-}
-
 // ------------------ draw ------------------
 void OnScreenKeyboard::Draw(CXBFont& font, LPDIRECT3DDEVICE8 dev, FLOAT lineH){
     if (!m_active) return;
@@ -420,17 +391,17 @@ void OnScreenKeyboard::Draw(CXBFont& font, LPDIRECT3DDEVICE8 dev, FLOAT lineH){
     const FLOAT maxH = vp.Height - 20.0f; // breathing room so frame fits
     if (panelH > maxH) panelH = maxH;
 
-    const FLOAT x = KB_Snap((vp.Width  - panelW) * 0.55f);
-    const FLOAT y = KB_Snap((vp.Height - panelH) * 0.5f);
+    const FLOAT x = Snap((vp.Width  - panelW) * 0.55f);
+    const FLOAT y = Snap((vp.Height - panelH) * 0.5f);
 
     // frame
-    DrawRect(dev, x-8, y-8, panelW+16, panelH+16, 0xA0101010);
-    DrawRect(dev, x,   y,   panelW,    panelH,    0xE0222222);
+    DrawSolidRect(dev, x-8, y-8, panelW+16, panelH+16, 0xA0101010);
+    DrawSolidRect(dev, x,   y,   panelW,    panelH,    0xE0222222);
 
     // --- header ---
-    FLOAT titleW, titleH; MeasureTextWH(font, "Rename", titleW, titleH);
-    const FLOAT titleY = KB_Snap(y + (headerH - titleH) * 0.5f);
-    DrawAnsi(font, x + 12, titleY, 0xFFFFFFFF, "Rename");
+    FLOAT titleW, titleH; GetAnsiWH(font, "Rename", &titleW, &titleH);
+    const FLOAT titleY = Snap(y + (headerH - titleH) * 0.5f);
+    DrawAnsi(font, x + 12, titleY, 0xFFFFFFFF, &DefaultColors, "Rename");
 
     {
         int len = (int)strlen(m_buf);
@@ -442,36 +413,36 @@ void OnScreenKeyboard::Draw(CXBFont& font, LPDIRECT3DDEVICE8 dev, FLOAT lineH){
         if (len >= kFatxMaxName)        cntCol = 0xFFFF6060;
         else if (len >= kFatxMaxName-4) cntCol = 0xFFEED060;
 
-        FLOAT cntW = MeasureTextW(font, cnt);
-        DrawAnsi(font, KB_Snap(x + panelW - 12.0f - cntW), titleY, cntCol, cnt);
+        FLOAT cntW = GetAnsiW(font, cnt);
+        DrawAnsi(font, Snap(x + panelW - 12.0f - cntW), titleY, cntCol, &DefaultColors, cnt);
     }
 
     // Divider under header
-    DrawRect(dev, x, y + headerH, panelW, 1.0f, 0x60FFFFFF);
+    DrawSolidRect(dev, x, y + headerH, panelW, 1.0f, 0x60FFFFFF);
 
     // ----- Path band ("In: <parent>") with safe-fit + end-stop marquee -----
-    const FLOAT infoY      = KB_Snap(y + headerH + afterLinePad);
+    const FLOAT infoY      = Snap(y + headerH + afterLinePad);
     const FLOAT infoBandW  = panelW - 24.0f;                      // x+12 .. x+panelW-12
     KB_DrawHeaderPath_FixedLabel(font, x + 12.0f, infoY, infoBandW, infoBandH,
                                  0xFFCCCCCC, m_parent);
 
     // Input box
-    const FLOAT boxY = KB_Snap(infoY + infoBandH + labelToBoxPad);
-    DrawRect(dev, x+12, boxY, panelW-24, boxH, 0xFF0E0E0E);
+    const FLOAT boxY = Snap(infoY + infoBandH + labelToBoxPad);
+    DrawSolidRect(dev, x+12, boxY, panelW-24, boxH, 0xFF0E0E0E);
 
     // Current name text
-    DrawAnsi(font, x+18, boxY+4, 0xFFFFFF00, m_buf);
+    DrawAnsi(font, x+18, boxY+4, 0xFFFFFF00, &DefaultColors, m_buf);
 
     // Caret at current insertion point
     char tmp = m_buf[m_cursor]; m_buf[m_cursor]=0;
-    FLOAT caretX = KB_Snap(x+18 + MeasureTextW(font, m_buf));
+    FLOAT caretX = Snap(x+18 + GetAnsiW(font, m_buf));
     m_buf[m_cursor]=tmp;
-    DrawRect(dev, caretX, boxY+4, 2.0f, boxH-8.0f, 0x90FFFF00);
+    DrawSolidRect(dev, caretX, boxY+4, 2.0f, boxH-8.0f, 0x90FFFF00);
 
     // Grid layout (side column + key grid)
     const FLOAT padX     = 12.0f;
     const FLOAT contentW = panelW - 2.0f*padX;
-    const FLOAT gridTop  = KB_Snap(boxY + boxH + gridTopGap);
+    const FLOAT gridTop  = Snap(boxY + boxH + gridTopGap);
 
     // Side column width uses ~2 of 12 columns
     const FLOAT colW12_full = contentW / 12.0f;
@@ -482,26 +453,26 @@ void OnScreenKeyboard::Draw(CXBFont& font, LPDIRECT3DDEVICE8 dev, FLOAT lineH){
     const char* sideLbl[4] = {
         "Done",
         m_shiftOnce ? "Shift*" : "Shift",
-        m_lower ? "Caps (LS)" : "Caps (LS)*",
-        m_symbols ? "ABC (RS)" : "Symbols (RS)"
+        m_lower ? "Caps \x8F" : "Caps \x8F*",
+        m_symbols ? "ABC \x90" : "Symbols \x90"
     };
     for (int r=0;r<4;++r){
         const FLOAT sx = x + padX;
         const FLOAT sw = sideW;
-        const FLOAT sy = KB_Snap(gridTop + r*(cellH + gapY));
+        const FLOAT sy = Snap(gridTop + r*(cellH + gapY));
 
         const bool disabled = (m_symbols && (r == 1 || r == 2));
         const bool sel      = (!disabled && m_sideFocus && m_sideRow == r);
 
         D3DCOLOR bg = sel ? 0x60FFFF00 : 0x30202020;
-        DrawRect(dev, sx, sy, sw, cellH, bg);
+        DrawSolidRect(dev, sx, sy, sw, cellH, bg);
 
-        FLOAT tw, th; MeasureTextWH(font, sideLbl[r], tw, th);
-        const FLOAT tx = KB_Snap(sx + (sw - tw) * 0.5f);
-        const FLOAT ty = KB_Snap(sy + (cellH - th) * 0.5f);
+        FLOAT tw, th; GetAnsiWH(font, sideLbl[r], &tw, &th);
+        const FLOAT tx = Snap(sx + (sw - tw) * 0.5f);
+        const FLOAT ty = Snap(sy + (cellH - th) * 0.5f);
 
         DWORD textCol = disabled ? 0xFF7A7A7A : 0xFFE0E0E0;
-        DrawAnsi(font, tx, ty, textCol, sideLbl[r]);
+        DrawAnsi(font, tx, ty, textCol, &DefaultColors, sideLbl[r]);
     }
 
     // ---- character rows (alpha: 4 rows, symbols: 5 rows) ----
@@ -512,7 +483,7 @@ void OnScreenKeyboard::Draw(CXBFont& font, LPDIRECT3DDEVICE8 dev, FLOAT lineH){
     if (m_symbols) BuildSymbolRowsNormalized(symRows, symCols);
 
     for (int row = 0; row < charRows; ++row) {
-        const FLOAT rowY = KB_Snap(gridTop + row * (cellH + gapY));
+        const FLOAT rowY = Snap(gridTop + row * (cellH + gapY));
 
         const char* visChars;
         int cols;
@@ -534,13 +505,13 @@ void OnScreenKeyboard::Draw(CXBFont& font, LPDIRECT3DDEVICE8 dev, FLOAT lineH){
         const FLOAT colW = (cols > 0) ? (keysW / (FLOAT)cols) : keysW;
 
         for (int col = 0; col < cols; ++col) {
-            const FLOAT x0 = KB_Snap(keysX + col * colW);
-            const FLOAT x1 = KB_Snap(keysX + (col + 1) * colW);
+            const FLOAT x0 = Snap(keysX + col * colW);
+            const FLOAT x1 = Snap(keysX + (col + 1) * colW);
             const FLOAT drawX = x0 + gapX * 0.5f;
             const FLOAT drawW = (x1 - x0) - gapX;
             const bool  sel   = (!m_sideFocus && m_row == row && m_col == col);
 
-            DrawRect(dev, drawX, rowY, drawW, cellH, sel ? 0x60FFFF00 : 0x30202020);
+            DrawSolidRect(dev, drawX, rowY, drawW, cellH, sel ? 0x60FFFF00 : 0x30202020);
 
             // Visualize applied case on alpha rows
             char c = visChars[col];
@@ -551,56 +522,56 @@ void OnScreenKeyboard::Draw(CXBFont& font, LPDIRECT3DDEVICE8 dev, FLOAT lineH){
             }
 
             char s[2] = { c, 0 };
-            FLOAT tw, th; MeasureTextWH(font, s, tw, th);
-            DrawAnsi(font, KB_Snap(drawX + (drawW - tw) * 0.5f),
-                           KB_Snap(rowY  + (cellH - th) * 0.5f), 0xFFE0E0E0, s);
+            FLOAT tw, th; GetAnsiWH(font, s, &tw, &th);
+            DrawAnsi(font, Snap(drawX + (drawW - tw) * 0.5f),
+                Snap(rowY  + (cellH - th) * 0.5f), 0xFFE0E0E0, &DefaultColors, s);
         }
     }
 
     // ---- bottom row: Backspace | Space (use same grid math as other rows) ----
-	const FLOAT bottomY = KB_Snap(gridTop + charRows * (cellH + gapY));
+	const FLOAT bottomY = Snap(gridTop + charRows * (cellH + gapY));
 	{
 		const int   colsB  = 2;
 		const FLOAT colWB  = keysW / (FLOAT)colsB;
 
 		// snapped cell edges (exactly like x0/x1 in normal rows)
-		const FLOAT e0 = KB_Snap(keysX + 0 * colWB);
-		const FLOAT e1 = KB_Snap(keysX + 1 * colWB);
-		const FLOAT e2 = KB_Snap(keysX + 2 * colWB);
+		const FLOAT e0 = Snap(keysX + 0 * colWB);
+		const FLOAT e1 = Snap(keysX + 1 * colWB);
+		const FLOAT e2 = Snap(keysX + 2 * colWB);
 
 		// Backspace cell
 		const FLOAT bx = e0 + gapX * 0.5f;
 		const FLOAT bw = (e1 - e0) - gapX;
 		const bool  selBack = (!m_sideFocus && m_row == charRows && m_col == 0);
-		DrawRect(dev, bx, bottomY, bw, cellH, selBack ? 0x60FFFF00 : 0x30202020);
+        DrawSolidRect(dev, bx, bottomY, bw, cellH, selBack ? 0x60FFFF00 : 0x30202020);
 
-		FLOAT tw, th; MeasureTextWH(font, "Backspace", tw, th);
+		FLOAT tw, th; GetAnsiWH(font, "Backspace", &tw, &th);
 		DrawAnsi(font,
-				KB_Snap(bx + (bw - tw) * 0.5f),
-				KB_Snap(bottomY + (cellH - th) * 0.5f),
-				0xFFE0E0E0, "Backspace (X)");
+            Snap(bx + (bw - tw) * 0.5f),
+            Snap(bottomY + (cellH - th) * 0.5f),
+				0xFFE0E0E0, &DefaultColors, "Backspace \x82");
 
 		// Space cell
 		const FLOAT sx = e1 + gapX * 0.5f;
 		const FLOAT sw = (e2 - e1) - gapX;
 		const bool  selSpace = (!m_sideFocus && m_row == charRows && m_col == 1);
-		DrawRect(dev, sx, bottomY, sw, cellH, selSpace ? 0x60FFFF00 : 0x30202020);
+        DrawSolidRect(dev, sx, bottomY, sw, cellH, selSpace ? 0x60FFFF00 : 0x30202020);
 
-		MeasureTextWH(font, "Space", tw, th);
+		GetAnsiWH(font, "Space", &tw, &th);
 		DrawAnsi(font,
-				KB_Snap(sx + (sw - tw) * 0.5f),
-				KB_Snap(bottomY + (cellH - th) * 0.5f),
-				0xFFE0E0E0, "Space (Y)");
+            Snap(sx + (sw - tw) * 0.5f),
+            Snap(bottomY + (cellH - th) * 0.5f),
+				0xFFE0E0E0, &DefaultColors, "Space \x83");
 	}
 
 
 
 
     // Footer hints (centered)
-    const char* hints = "A: Select   B: Cancel   Start: Done   LT/RT Move Cursor";
-    FLOAT hintsW = MeasureTextW(font, hints);
-    FLOAT hintsX = KB_Snap(x + (panelW - hintsW) * 0.5f);
-    DrawAnsi(font, hintsX, y + panelH - 25, 0xFFBBBBBB, hints);
+    const char* hints = "\x80 Select   \x81 Cancel   \x85 Done   \x91 \x92 Move Cursor";
+    FLOAT hintsW = GetAnsiW(font, hints);
+    FLOAT hintsX = Snap(x + (panelW - hintsW) * 0.5f);
+    DrawAnsi(font, hintsX, y + panelH - 25, 0xFFBBBBBB, &DefaultColors, hints);
 }
 
 // ------------------ input ------------------

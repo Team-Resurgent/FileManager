@@ -1,5 +1,4 @@
 #include <xtl.h>
-
 #include "FileBrowserApp.h"
 
 int __cdecl main()

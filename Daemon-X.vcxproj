@@ -22,7 +22,7 @@
     <ClCompile Include="ContextMenu.cpp" />
     <ClCompile Include="DebugPrint.cpp" />
     <ClCompile Include="FileBrowserApp.cpp" />
-    <ClCompile Include="font_xpr.c" />
+    <ClCompile Include="Font.c" />
     <ClCompile Include="FsUtil.cpp" />
     <ClCompile Include="GfxPrims.cpp" />
     <ClCompile Include="main.cpp" />
@@ -50,10 +50,10 @@
     <ClInclude Include="DebugPrint.h" />
     <ClInclude Include="Configuration.h" />
     <ClInclude Include="FileBrowserApp.h" />
+    <ClInclude Include="Font.h" />
     <ClInclude Include="FsUtil.h" />
     <ClInclude Include="GfxPrims.h" />
     <ClInclude Include="OnScreenKeyboard.h" />
-    <ClInclude Include="PaneModel.h" />
     <ClInclude Include="PaneRenderer.h" />
     <ClInclude Include="TextUtils.h" />
     <ClInclude Include="unzipLIBUtil.h" />

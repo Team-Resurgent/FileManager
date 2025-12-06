@@ -42,10 +42,6 @@ public:
 private:
     // Small math/drawing helpers (inline for VS2003).
     static FLOAT MaxF(FLOAT a, FLOAT b){ return (a>b)?a:b; }
-    static void  DrawAnsi(CXBFont& font, FLOAT x, FLOAT y, DWORD color, const char* text);
-    void         DrawRect(LPDIRECT3DDEVICE8 dev, float x,float y,float w,float h,D3DCOLOR c);
-    void         MeasureTextWH(CXBFont& font, const char* s, FLOAT& outW, FLOAT& outH);
-    FLOAT        MeasureTextW (CXBFont& font, const char* s);
     char         KbCharAt(int row, int col) const;
 
 private:
