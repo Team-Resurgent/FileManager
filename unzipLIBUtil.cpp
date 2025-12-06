@@ -2,9 +2,7 @@
 
 char* unZipBuffer = NULL;
 
-// ------------------------------------------------------------------
 // unzipLIB filesystem callbacks
-// ------------------------------------------------------------------
 void* ZipFile_Open(const char* filename, int32_t* size) {
     FILE* f = fopen(filename, "rb");
     fseek(f, 0L, SEEK_END);
@@ -46,9 +44,7 @@ int32_t ZipFile_Seek(void* p, int32_t position, int iType) {
     return fseek(f, l + position, SEEK_CUR);
 }
 
-// ------------------------------------------------------------------
-// ExtractCurrentFileWithProgress & helper functions (CrunchBite)
-// ------------------------------------------------------------------
+// ExtractCurrentFileWithProgress & helper functions
 char* strrepl(char* Str, size_t BufSiz, char* OldStr, char* NewStr) {
     int OldLen, NewLen;
     char* p, * q;

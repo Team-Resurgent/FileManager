@@ -173,7 +173,7 @@ void PaneRenderer::DrawNameFittedOrMarquee(CXBFont& font, FLOAT x, FLOAT y, FLOA
     }
 }
 
-// --- LOOPING MARQUEE: header path ------------------------------------------
+// LOOPING MARQUEE: header path
 void PaneRenderer::DrawHeaderFittedOrMarquee(CXBFont& font, FLOAT x, FLOAT y, FLOAT maxW, DWORD color, const char* text, int paneIndex) {
     const char* s = text ? text : ""; // Safety
     const int len = strlen(s);

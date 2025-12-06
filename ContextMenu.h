@@ -5,18 +5,6 @@
 #include "XBInput.h"
 #include "AppActions.h"
 
-/*
-============================================================================
- ContextMenu
- A lightweight context menu component.
- Handles:
-   - A list of selectable items (text + Action ID)
-   - Optional visual separators (non-selectable rows)
-   - Drawing the menu with basic styling
-   - Navigation + selection via gamepad (A = select, B/X = close)
-============================================================================
-*/
-
 class ContextMenu {
 public:
     // Return codes from OnPad()

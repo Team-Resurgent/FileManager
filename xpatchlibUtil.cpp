@@ -1,9 +1,7 @@
 #include "xpatchlibUtil.h"
 #include "xpatchlib.h"
 
-// ------------------------------------------------------------------
-// CreateBak function with added prog (src-dev)
-// ------------------------------------------------------------------
+// CreateBak callback function
 bool UpdateBakProgress(ULONGLONG wb) {
 	if (CopyProgress::g_copyProgFn) {
 		if (!CopyProgress::g_copyProgFn(-wb, NULL, NULL, CopyProgress::g_copyProgUser)) {
@@ -11,5 +9,4 @@ bool UpdateBakProgress(ULONGLONG wb) {
 		}
 		return true;
 	}
-	return false;
 }

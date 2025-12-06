@@ -1,14 +1,5 @@
 #pragma once
 
-/*
-===============================================================================
- FileBrowserApp
-  - Core app header for the dual-pane file browser (OG Xbox, XDK, VS2003).
-  - Owns UI state, input routing, drawing, and delegates file operations to
-    helpers in FsUtil.* and AppActions.*.
-===============================================================================
-*/
-
 #include <xtl.h>
 #include <vector>
 #include "XBApp.h"

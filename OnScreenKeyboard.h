@@ -6,18 +6,6 @@
 #include "XBFont.h"
 #include "XBInput.h"
 
-/*
-============================================================================
- OnScreenKeyboard
-  Modal on-screen keyboard for OG Xbox.
-  - Two layouts: Alpha (QWERTY+digits) and Symbols
-  - Side column actions: Done, Shift (one-shot), Caps, ABC/Symbols
-  - Bottom action row: Backspace | Space
-  - FATX name length respected in .cpp (42 chars)
-  - Uses CXBFont for text and simple D3D8 rects for UI
-============================================================================
-*/
-
 class OnScreenKeyboard {
 public:
     enum Result { NONE, ACCEPTED, CANCELED };

@@ -2,7 +2,5 @@
 
 #include "FileBrowserApp.h"
 
-// ------------------------------------------------------------------
-// CreateBak function with added progress (src-dev)
-// ------------------------------------------------------------------
+// CreateBak callback function
 bool UpdateBakProgress(ULONGLONG wb);
