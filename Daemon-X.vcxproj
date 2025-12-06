@@ -28,7 +28,7 @@
     <ClCompile Include="main.cpp" />
     <ClCompile Include="OnScreenKeyboard.cpp" />
     <ClCompile Include="PaneRenderer.cpp" />
-    <ClCompile Include="RXDKResolves.cpp" />
+    <ClCompile Include="RxdkStubs.cpp" />
     <ClCompile Include="TextUtils.cpp" />
     <ClCompile Include="xpatchlibUtil.cpp" />
     <ClCompile Include="unzipLIBUtil.cpp" />

@@ -48,7 +48,7 @@
     <ClCompile Include="main.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="RXDKResolves.cpp">
+    <ClCompile Include="RxdkStubs.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\..\..\..\..\Program Files (x86)\Microsoft Xbox SDK\Samples\Xbox\Common\Src\sjis2unicode.cpp">
