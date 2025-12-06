@@ -290,15 +290,9 @@ void PaneRenderer::DrawPane(CXBFont& font, LPDIRECT3DDEVICE8 dev, FLOAT baseX, c
     DrawSolidRect(dev, baseX, colHdrY, st.listW, colHdrH, 0x60333333);
 
     const char* sizeHdr = (p.mode == 0) ? "Free / Total" : "Size";
-    FLOAT nameW, nameH, sizeW, sizeH;
-    GetAnsiWH(font, "Name", &nameW, &nameH);
-    GetAnsiWH(font, sizeHdr, &sizeW, &sizeH);
 
-    const FLOAT nameY = colHdrY + (colHdrH - nameH) * 0.5f;
-    const FLOAT sizeY = colHdrY + (colHdrH - sizeH) * 0.5f;
-
-    DrawAnsi(font, NameColX(baseX, st), nameY, 0xFFDDDDDD, &DefaultColors, "Name");
-    DrawAnsiFromRight(font, sizeRight, sizeY, 0xFFDDDDDD, &DefaultColors, sizeHdr);
+    DrawAnsiCentered(font, NameColX(baseX, st), colHdrY, HEADER_TEXT_COLOR, &DefaultColors, "Name", NULL, colHdrH);
+    DrawAnsiFromRight(font, sizeRight, colHdrY, HEADER_TEXT_COLOR, &DefaultColors, sizeHdr, colHdrH);
 
     // underline + vertical divider
     DrawSolidRect(dev, baseX, colHdrY + colHdrH, st.listW, 1.0f, 0x80444444);
@@ -326,23 +320,23 @@ void PaneRenderer::DrawPane(CXBFont& font, LPDIRECT3DDEVICE8 dev, FLOAT baseX, c
     // selection highlight
     if (!p.items.empty() && p.sel >= p.scroll && p.sel < end) {
         int selRow = p.sel - p.scroll;
-        DrawSolidRect(dev, baseX, listTop + selRow*st.lineH, st.listW, st.lineH, active?0x60FFFF00:0x30FFFF00);
+        DrawSolidRect(dev, baseX, listTop + selRow*st.lineH, st.listW, st.lineH, active ? ACTIVE_HIGHLIGHTED_ROW_COLOR : HIGHLIGHTED_ROW_COLOR);
     }
 
     // rows
     FLOAT y = listTop;
     for (int i = p.scroll, r = 0; i < end; ++i, ++r) {
         const Item& it = p.items[i];
-        DWORD nameCol = (i == p.sel) ? 0xFFFFFF00 : 0xFFE0E0E0;
-        DWORD sizeCol = (i == p.sel) ? 0xFFFFFF00 : 0xFFB0B0B0;
+        DWORD nameCol = (i == p.sel) ? HIGHLIGHTED_TEXT_COLOR : 0xFFE0E0E0;
+        DWORD sizeCol = (i == p.sel) ? HIGHLIGHTED_TEXT_COLOR : 0xFFB0B0B0;
 
         // icon gutter
         const FLOAT gutterX = baseX + 4.0f;
         const FLOAT gutterW = st.gutterW;
         const FLOAT gutterH = st.lineH;
 
-        const char* glyph = it.isUpEntry ? "\x9D" : (it.isDir ? "\x9F" : "\x9E");
-        DrawAnsiCentered(font, gutterX, y, 0xFFFF4040, (it.marked ? NULL : &DefaultColors), glyph, gutterW, gutterH);
+        const char glyph[2] = { it.icon, 0 };
+        DrawAnsiCentered(font, gutterX, y, MARKED_ITEM_COLOR, (it.marked ? NULL : &DefaultColors), glyph, gutterW, gutterH);
 
         // filename area (compute available width once)
         char nameBuf[300];

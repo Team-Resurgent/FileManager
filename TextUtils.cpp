@@ -1,4 +1,5 @@
 #include "TextUtils.h"
+
 #include "Configuration.h"
 
 ColorMap DefaultColors(true);
@@ -26,13 +27,13 @@ void ColorMap::PopulateWithDefaults() {
     m_colors[0x93] = L_STICK_COLOR;      // Left Stick
     m_colors[0x94] = R_STICK_COLOR;      // Right Stick
     //       0x95                        // Unused
-    //       0x96                        // Unused
-    //       0x97                        // Unused
-    //       0x98                        // Unused
-    //       0x99                        // Unused
-    //       0x9A                        // Unused
-    //       0x9B                        // Unused
-    //       0x9C                        // Unused
+    m_colors[0x96] = PATCH_FILE_COLOR;   // Unused
+    m_colors[0x97] = XBE_FILE_COLOR;     // XBE File
+    m_colors[0x98] = CONFIG_FILE_COLOR;  // Config File
+    m_colors[0x99] = ZIP_FILE_COLOR;     // Zip File
+    m_colors[0x9A] = PARTITION_COLOR;    // Partition
+    m_colors[0x9B] = HDD_COLOR;          // HDD
+    m_colors[0x9C] = DISC_COLOR;         // Disc
     //       0x9D                        // Full Blank Space
     m_colors[0x9E] = FILE_COLOR;         // File
     m_colors[0x9F] = FOLDER_COLOR;       // Folder

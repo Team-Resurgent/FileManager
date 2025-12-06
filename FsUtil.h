@@ -29,6 +29,7 @@ struct Item {
     ULONGLONG   size;        // File size (0 for dirs/roots/"..")
     bool        isUpEntry;   // True only for synthetic ".." row
     bool        marked;      // UI mark flag
+    char        icon;
 };
 
 // ===== Drive mapping / discovery ============================================
@@ -111,3 +112,6 @@ DWORD DvdGetDriveStateOneShot(void);
 
 // Drop old CDFS instance and remap D: cleanly; touches D:\ to force a fresh view.
 void  DvdColdRemount();
+
+bool FileExistsA(const char* path);
+bool WriteAllA(const char* path, const void* data, DWORD size);

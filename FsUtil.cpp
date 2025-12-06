@@ -278,11 +278,17 @@ void RescanDrives(){
 // Build drive items (e.g., "E:\") into 'out'.
 void BuildDriveItems(std::vector<Item>& out){
     out.clear();
-    for (int j=0;j<g_presentCount;++j){
+    for (int j=0; j<g_presentCount; ++j){
         int i = g_presentIdx[j];
-        Item it; ZeroMemory(&it, sizeof(it));
-        strncpy(it.name, kRoots[i], 255); it.name[255]=0;
-        it.isDir = true; it.size = 0; it.isUpEntry = false; it.marked = false;
+        Item it; 
+        ZeroMemory(&it, sizeof(it));
+        strncpy(it.name, kRoots[i], 255);
+        it.name[255]=0;
+        it.isDir = true;
+        it.size = 0;
+        it.isUpEntry = false;
+        it.marked = false;
+        it.icon = (it.name[0] == 'D') ? '\x9C' : '\x9A';
         out.push_back(it);
     }
 }
@@ -336,33 +342,59 @@ static bool ItemLess(const Item& a,const Item& b){
 //  - Prepends a synthetic ".." entry for non-root folders.
 //  - Sorts (dirs first, then by name) while keeping the ".." at index 0.
 // ============================================================================
-bool ListDirectory(const char* path,std::vector<Item>& out) {
+bool ListDirectory(const char* path, std::vector<Item>& out) {
     out.clear();
 
-    // For non-root, push ".." to allow going up.
-    if (strlen(path)>3) {
-        Item up; ZeroMemory(&up,sizeof(up));
-        strncpy(up.name,"..\\",3); up.isDir=true; up.size=0; up.isUpEntry=true; up.marked=false; out.push_back(up);
+    // For non-root, push "..\" to allow going up.
+    if (strlen(path) > 3) {
+        Item up; 
+        ZeroMemory(&up, sizeof(up));
+        strncpy(up.name, "..\\", 3); 
+        up.isDir = true; 
+        up.size = 0; 
+        up.isUpEntry = true; 
+        up.marked = false; 
+        up.icon = '\x9D';
+        out.push_back(up);
     }
 
-    char base[512]; _snprintf(base,sizeof(base),"%s",path); base[sizeof(base)-1]=0; EnsureTrailingSlash(base,sizeof(base));
-    char mask[512]; _snprintf(mask,sizeof(mask),"%s*",base); mask[sizeof(mask)-1]=0;
+    char base[512]; 
+    _snprintf(base,sizeof(base), "%s", path); 
+    base[sizeof(base) - 1] = 0; 
+    EnsureTrailingSlash(base, sizeof(base));
+    char mask[512]; 
+    _snprintf(mask, sizeof(mask), "%s*", base); 
+    mask[sizeof(mask) - 1] = 0;
 
-    WIN32_FIND_DATAA fd; ZeroMemory(&fd,sizeof(fd));
-    HANDLE h=FindFirstFileA(mask,&fd); if(h==INVALID_HANDLE_VALUE) return false;
+    WIN32_FIND_DATAA fd; 
+    ZeroMemory(&fd, sizeof(fd));
+    HANDLE h = FindFirstFileA(mask, &fd); 
+    if (h == INVALID_HANDLE_VALUE) return false;
     do {
         const char* n = fd.cFileName; 
-        if (!strcmp(n,".") || !strcmp(n,"..")) continue;
-        Item it; ZeroMemory(&it, sizeof(it));
-        strncpy(it.name, n, 255); it.name[255] = 0;
-        it.isDir = (fd.dwFileAttributes&FILE_ATTRIBUTE_DIRECTORY) != 0;
-        it.size = (((ULONGLONG)fd.nFileSizeHigh) << 32) | fd.nFileSizeLow; it.isUpEntry=false; it.marked=false;
+        if (!strcmp(n, ".") || !strcmp(n, "..")) continue;
+        Item it; 
+        ZeroMemory(&it, sizeof(it));
+        strncpy(it.name, n, 255); 
+        it.name[255] = 0;
+        bool isZip = false;
+        if (strlen(n) >= 4 && _memicmp(".zip", n + strlen(n) - 4, 4) == 0) isZip = true;
+        bool isXbe = false;
+        if (strlen(n) >= 4 && _memicmp(".xbe", n + strlen(n) - 4, 4) == 0) isXbe = true;
+        bool isPatch = false;
+        if (strlen(n) >= 4 && _memicmp(".ips", n + strlen(n) - 4, 4) == 0) isPatch = true;
+        it.isDir = (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+        it.size = (((ULONGLONG)fd.nFileSizeHigh) << 32) | fd.nFileSizeLow; 
+        it.isUpEntry = false; 
+        it.marked = false;
+        it.icon = (it.isDir) ? '\x9F' : (isZip) ? '\x99' : (isXbe) ? '\x97' : (isPatch) ? '\x96' : '\x9E';
         out.push_back(it);
+
     } while (FindNextFileA(h, &fd));
     FindClose(h);
 
     size_t start = (strlen(path) > 3) ? 1 : 0; // keep ".." in place
-    if (out.size() > start + 1) std::sort(out.begin() + (int)start, out.end(), ItemLess);
+    if (out.size() > start + 1) std::sort(out.begin() + start, out.end(), ItemLess);
     return true;
 }
 
@@ -881,4 +913,16 @@ bool FormatCacheXYZ(unsigned long bytesPerCluster, bool alsoClearECACHE)
         EnsureDirA("E:\\CACHE");
     }
     return okX && okY && okZ;
+}
+
+bool FileExistsA(const char* path) {
+    DWORD a = GetFileAttributesA(path);
+    return (a != INVALID_FILE_ATTRIBUTES) && !(a & FILE_ATTRIBUTE_DIRECTORY);
+}
+
+bool WriteAllA(const char* path, const void* data, DWORD size) {
+    HANDLE h = CreateFileA(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h == INVALID_HANDLE_VALUE) return false;
+    DWORD wrote = 0; BOOL ok = WriteFile(h, data, size, &wrote, NULL); CloseHandle(h);
+    return ok && wrote == size;
 }

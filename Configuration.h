@@ -1,6 +1,6 @@
 #pragma once
 
-// Symbol color codes
+// Symbol colors
 #define A_BUTTON_COLOR     0xFF3CB54A
 #define B_BUTTON_COLOR     0xFFD32B2B
 #define X_BUTTON_COLOR     0xFF1C6FBD
@@ -14,7 +14,14 @@
 #define R_STICK_COLOR      0X00000000 // default
 #define L_TRIGGER_COLOR    0x00000000 // default
 #define R_TRIGGER_COLOR    0x00000000 // default
-#define FILE_COLOR         0xFF89D07E
+#define PATCH_FILE_COLOR   0xFFF4CACA
+#define XBE_FILE_COLOR     0xFFCCEED0
+#define CONFIG_FILE_COLOR  0xFFF5F5F5
+#define ZIP_FILE_COLOR     0xFFCBC3E3
+#define PARTITION_COLOR    0xFFDBDBDC
+#define HDD_COLOR          0xFFDBDBDC
+#define DISC_COLOR         0xFFDBDBDC
+#define FILE_COLOR         0xFFF5F5F5
 #define FOLDER_COLOR       0xFF5EA4FF
 
 // Marquee
@@ -22,3 +29,10 @@
 #define MARQUEE_END_PAUSE     1200 // pause before restart
 #define MARQUEE_STEP          150  // time between steps
 #define MARQUEE_STEP_CHARS    1    // characters per advancement
+
+// Colors
+#define MARKED_ITEM_COLOR            0xFFFF4040
+#define HIGHLIGHTED_TEXT_COLOR       0xFFFFFF00
+#define HIGHLIGHTED_ROW_COLOR        0x30FFFF00
+#define ACTIVE_HIGHLIGHTED_ROW_COLOR 0x60FFFF00
+#define HEADER_TEXT_COLOR            0xFFDDDDDD

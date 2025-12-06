@@ -1,6 +1,6 @@
 #include "AppActions.h"
-#include "FileBrowserApp.h"
 
+#include "FileBrowserApp.h"
 #include "xips.h"
 #include "xpatchlibUtil.h"
 #include "unzipLIBUtil.h"
