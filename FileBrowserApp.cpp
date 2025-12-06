@@ -7,7 +7,6 @@
 #include <stdio.h> // _snprintf
 #include <xgraphics.h> 
 #include "Font.h"
-#include "DebugPrint.h"
 #include "TextUtils.h"
 
 // Simple getter used by overlay/status timers.
