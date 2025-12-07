@@ -4,6 +4,7 @@
 #include "Font.h"
 #include "TextUtils.h"
 #include "GfxPrims.h"
+#include "network.h"
 
 // Simple getter used by overlay/status timers.
 DWORD FileBrowserApp::StatusUntilMs() const { return m_statusUntilMs; }
@@ -1234,6 +1235,8 @@ HRESULT FileBrowserApp::Initialize() {
     m_ctx.SetDevice(m_pd3dDevice);
     m_zipSubMenu.SetDevice(m_pd3dDevice);
     m_confirmDelSubMenu.SetDevice(m_pd3dDevice);
+
+    network::init();
 
     return S_OK;
 }

@@ -22,6 +22,9 @@
     <Filter Include="xpatchlib">
       <UniqueIdentifier>{65cd9862-e97e-4f45-8d2d-4f30b57f4020}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Ftp">
+      <UniqueIdentifier>{6e6100af-8804-440e-a800-34c0d03d0ced}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="FileBrowserApp.cpp">
@@ -117,6 +120,36 @@
     <ClCompile Include="Font.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="Ftp\ftpServer.cpp">
+      <Filter>Ftp</Filter>
+    </ClCompile>
+    <ClCompile Include="Ftp\socketUtility.cpp">
+      <Filter>Ftp</Filter>
+    </ClCompile>
+    <ClCompile Include="Ftp\driveManager.cpp">
+      <Filter>Ftp</Filter>
+    </ClCompile>
+    <ClCompile Include="Ftp\utils.cpp">
+      <Filter>Ftp</Filter>
+    </ClCompile>
+    <ClCompile Include="Ftp\fileSystem.cpp">
+      <Filter>Ftp</Filter>
+    </ClCompile>
+    <ClCompile Include="Ftp\stringUtility.cpp">
+      <Filter>Ftp</Filter>
+    </ClCompile>
+    <ClCompile Include="Ftp\drive.cpp">
+      <Filter>Ftp</Filter>
+    </ClCompile>
+    <ClCompile Include="Ftp\crc32.cpp">
+      <Filter>Ftp</Filter>
+    </ClCompile>
+    <ClCompile Include="Ftp\inputManager.cpp">
+      <Filter>Ftp</Filter>
+    </ClCompile>
+    <ClCompile Include="strdup.h">
+      <Filter>Ftp</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="OnScreenKeyboard.h">
@@ -193,6 +226,45 @@
     </ClInclude>
     <ClInclude Include="Font.h">
       <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Ftp\ftpServer.h">
+      <Filter>Ftp</Filter>
+    </ClInclude>
+    <ClInclude Include="Ftp\socketUtility.h">
+      <Filter>Ftp</Filter>
+    </ClInclude>
+    <ClInclude Include="Ftp\driveManager.h">
+      <Filter>Ftp</Filter>
+    </ClInclude>
+    <ClInclude Include="Ftp\utils.h">
+      <Filter>Ftp</Filter>
+    </ClInclude>
+    <ClInclude Include="Ftp\fileSystem.h">
+      <Filter>Ftp</Filter>
+    </ClInclude>
+    <ClInclude Include="Ftp\stringUtility.h">
+      <Filter>Ftp</Filter>
+    </ClInclude>
+    <ClInclude Include="Ftp\drive.h">
+      <Filter>Ftp</Filter>
+    </ClInclude>
+    <ClInclude Include="Ftp\xboxinternals.h">
+      <Filter>Ftp</Filter>
+    </ClInclude>
+    <ClInclude Include="Ftp\pointerVector.h">
+      <Filter>Ftp</Filter>
+    </ClInclude>
+    <ClInclude Include="Ftp\crc32.h">
+      <Filter>Ftp</Filter>
+    </ClInclude>
+    <ClInclude Include="Ftp\inputManager.h">
+      <Filter>Ftp</Filter>
+    </ClInclude>
+    <ClInclude Include="Ftp\pointerMap.h">
+      <Filter>Ftp</Filter>
+    </ClInclude>
+    <ClInclude Include="Ftp\extensions.h">
+      <Filter>Ftp</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

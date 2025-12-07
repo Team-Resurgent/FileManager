@@ -23,6 +23,17 @@
     <ClCompile Include="FileBrowserApp.cpp" />
     <ClCompile Include="Font.c" />
     <ClCompile Include="FsUtil.cpp" />
+    <ClCompile Include="Ftp\ftpCrc32.cpp" />
+    <ClCompile Include="Ftp\drive.cpp" />
+    <ClCompile Include="Ftp\driveManager.cpp" />
+    <ClCompile Include="Ftp\fileSystem.cpp" />
+    <ClCompile Include="Ftp\ftpServer.cpp">
+      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(ProjectDir)Ftp;$(ProjectDir)xpatchlib;C:\Program Files %28x86%29\Microsoft Xbox SDK\Samples\Xbox\Common\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <ClCompile Include="Ftp\network.cpp" />
+    <ClCompile Include="Ftp\socketUtility.cpp" />
+    <ClCompile Include="Ftp\stringUtility.cpp" />
+    <ClCompile Include="Ftp\utils.cpp" />
     <ClCompile Include="GfxPrims.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="OnScreenKeyboard.cpp" />
@@ -50,6 +61,18 @@
     <ClInclude Include="FileBrowserApp.h" />
     <ClInclude Include="Font.h" />
     <ClInclude Include="FsUtil.h" />
+    <ClInclude Include="Ftp\ftpCrc32.h" />
+    <ClInclude Include="Ftp\drive.h" />
+    <ClInclude Include="Ftp\driveManager.h" />
+    <ClInclude Include="Ftp\fileSystem.h" />
+    <ClInclude Include="Ftp\ftpServer.h" />
+    <ClInclude Include="Ftp\network.h" />
+    <ClInclude Include="Ftp\pointerMap.h" />
+    <ClInclude Include="Ftp\pointerVector.h" />
+    <ClInclude Include="Ftp\socketUtility.h" />
+    <ClInclude Include="Ftp\stringUtility.h" />
+    <ClInclude Include="Ftp\utils.h" />
+    <ClInclude Include="Ftp\xboxinternals.h" />
     <ClInclude Include="GfxPrims.h" />
     <ClInclude Include="OnScreenKeyboard.h" />
     <ClInclude Include="PaneRenderer.h" />
@@ -88,7 +111,7 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
-    <PlatformToolset>v142</PlatformToolset>
+    <PlatformToolset>v143</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
@@ -134,6 +157,7 @@
       <ConformanceMode>false</ConformanceMode>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <AdditionalIncludeDirectories>$(ProjectDir)xpatchlib;$(ProjectDir)unzipLIB\src;C:\Program Files %28x86%29\Microsoft Xbox SDK\Samples\Xbox\Common\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\Program Files %28x86%29\Microsoft Xbox SDK\Samples\Xbox\Common\Include;$(ProjectDir)Ftp;$(ProjectDir)xpatchlib;$(ProjectDir)unzipLIB\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <BufferSecurityCheck>false</BufferSecurityCheck>
       <ExceptionHandling>false</ExceptionHandling>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
@@ -147,7 +171,7 @@
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>xboxkrnl.lib;libcmtd.lib;xapilibd.lib;d3d8d.lib;d3dx8d.lib;xgraphicsd.lib;libcpmtd.lib</AdditionalDependencies>
+      <AdditionalDependencies>xboxkrnl.lib;libcmtd.lib;xapilibd.lib;d3d8d.lib;d3dx8d.lib;xgraphicsd.lib;libcpmtd.lib;xonlined.lib;xperf.lib;xbdm.lib;xvoiced.lib;xactengd.lib</AdditionalDependencies>
       <IgnoreAllDefaultLibraries>true</IgnoreAllDefaultLibraries>
       <BaseAddress>
       </BaseAddress>
@@ -187,26 +211,28 @@ MKDIR "$(OutDir)XISO" &gt;NUL 2&gt;&amp;1
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <FunctionLevelLinking>true</FunctionLevelLinking>
-      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <IntrinsicFunctions>false</IntrinsicFunctions>
       <SDLCheck>false</SDLCheck>
       <PreprocessorDefinitions>XBOX;_XBOX;NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>false</ConformanceMode>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
-      <AdditionalIncludeDirectories>
-      </AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\Program Files %28x86%29\Microsoft Xbox SDK\Samples\Xbox\Common\Include;$(ProjectDir)Ftp;$(ProjectDir)xpatchlib;$(ProjectDir)unzipLIB\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <BufferSecurityCheck>false</BufferSecurityCheck>
-      <ExceptionHandling>Sync</ExceptionHandling>
+      <ExceptionHandling>false</ExceptionHandling>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
-      <AdditionalOptions>/arch:SSE %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/arch:SSE /Zc:sizedDealloc- /Zc:threadSafeInit- %(AdditionalOptions)</AdditionalOptions>
       <ControlFlowGuard>false</ControlFlowGuard>
       <LanguageStandard>stdcpp17</LanguageStandard>
+      <Optimization>Disabled</Optimization>
+      <FloatingPointModel>Fast</FloatingPointModel>
+      <WholeProgramOptimization>false</WholeProgramOptimization>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>xboxkrnl.lib;libcmt.lib;xapilib.lib;d3d8.lib;d3dx8.lib</AdditionalDependencies>
+      <AdditionalDependencies>xboxkrnl.lib;libcmtd.lib;xapilibd.lib;d3d8d.lib;d3dx8d.lib;xgraphicsd.lib;libcpmtd.lib;xonlined.lib;xperf.lib;xbdm.lib;xvoiced.lib;xactengd.lib</AdditionalDependencies>
       <IgnoreAllDefaultLibraries>true</IgnoreAllDefaultLibraries>
       <BaseAddress>
       </BaseAddress>
@@ -219,11 +245,22 @@ MKDIR "$(OutDir)XISO" &gt;NUL 2&gt;&amp;1
     <PostBuildEvent>
       <Message>Creating Xbox Image...</Message>
       <Command>"$(RXDK_LIBS)bin\patchSubsystem.exe" -i="$(OutDir)$(TargetFileName)" -s=0x000E
-"$(RXDK_LIBS)bin\imagebld.exe" /in:"$(OutDir)$(TargetFileName)" /out:"$(OutDir)$(TargetName).xbe" /nologo /stack:65536 /debug /nolibwarn
-MKDIR "$(OutDir)Build\$(ProjectName)"
-COPY /Y "$(OutDir)$(TargetName).xbe" "$(OutDir)Build\$(ProjectName)\default.xbe"
-XCOPY /I /E /S /Y /F "$(ProjectDir)Media\*" "$(OutDir)Build\$(ProjectName)"
-MKDIR "$(OutDir)XISO"
+COPY /Y "$(ProjectDir)titleimage.png" "$(OutDir)titleimage.png" &gt;NUL
+ECHO Texture MyTex &gt; "$(OutDir)titleimage.rdf"
+ECHO { &gt;&gt; "$(OutDir)titleimage.rdf"
+ECHO Source titleimage.png &gt;&gt; "$(OutDir)titleimage.rdf"
+ECHO Format D3DFMT_DXT1 &gt;&gt; "$(OutDir)titleimage.rdf"
+ECHO Width 128 &gt;&gt; "$(OutDir)titleimage.rdf"
+ECHO Height 128 &gt;&gt; "$(OutDir)titleimage.rdf"
+ECHO } &gt;&gt; "$(OutDir)titleimage.rdf"
+"$(RXDK_LIBS)bin\bundler.exe" "$(OutDir)titleimage.rdf" -o "$(OutDir)titleimage.xbx"
+DEL /q "$(OutDir)titleimage.rdf"
+DEL /q "$(OutDir)titleimage.h"
+"$(RXDK_LIBS)bin\imagebld.exe" /in:"$(OutDir)$(TargetFileName)" /out:"$(OutDir)$(TargetName).xbe" /nologo /stack:65536 /debug /nolibwarn /testid:"0xDAE420" /testname:"Daemon-X" /titleimage:"$(OutDir)titleimage.xbx" /defaultsaveimage:"$(OutDir)titleimage.xbx"
+MKDIR "$(OutDir)Build\$(ProjectName)" &gt;NUL 2&gt;&amp;1
+COPY /Y "$(OutDir)$(TargetName).xbe" "$(OutDir)Build\$(ProjectName)\default.xbe" &gt;NUL
+XCOPY /C /Q /I /E /S /Y /F "$(ProjectDir)Media\*" "$(OutDir)Build\$(ProjectName)" &gt;NUL 2&gt;NUL
+MKDIR "$(OutDir)XISO" &gt;NUL 2&gt;&amp;1
 "$(RXDK_LIBS)bin\xdvdfs.exe" pack "$(OutDir)Build\$(ProjectName)" "$(OutDir)XISO\$(ProjectName).iso"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
