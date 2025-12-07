@@ -381,13 +381,11 @@ bool ListDirectory(const char* path, std::vector<Item>& out) {
         if (strlen(n) >= 4 && _memicmp(".zip", n + strlen(n) - 4, 4) == 0) isZip = true;
         bool isXbe = false;
         if (strlen(n) >= 4 && _memicmp(".xbe", n + strlen(n) - 4, 4) == 0) isXbe = true;
-        bool isPatch = false;
-        if (strlen(n) >= 4 && _memicmp(".ips", n + strlen(n) - 4, 4) == 0) isPatch = true;
         it.isDir = (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
         it.size = (((ULONGLONG)fd.nFileSizeHigh) << 32) | fd.nFileSizeLow; 
         it.isUpEntry = false; 
         it.marked = false;
-        it.icon = (it.isDir) ? '\x9F' : (isZip) ? '\x99' : (isXbe) ? '\x97' : (isPatch) ? '\x96' : '\x9E';
+        it.icon = (it.isDir) ? '\x9F' : (isZip) ? '\x99' : (isXbe) ? '\x95' : '\x9E';
         out.push_back(it);
 
     } while (FindNextFileA(h, &fd));

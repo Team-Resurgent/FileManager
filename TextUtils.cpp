@@ -26,10 +26,10 @@ void ColorMap::PopulateWithDefaults() {
     m_colors[0x92] = R_TRIGGER_COLOR;    // Right Trigger
     m_colors[0x93] = L_STICK_COLOR;      // Left Stick
     m_colors[0x94] = R_STICK_COLOR;      // Right Stick
-    //       0x95                        // Unused
-    m_colors[0x96] = PATCH_FILE_COLOR;   // Unused
-    m_colors[0x97] = XBE_FILE_COLOR;     // XBE File
-    m_colors[0x98] = CONFIG_FILE_COLOR;  // Config File
+    m_colors[0x95] = XBOX_LOGO_COLOR;    // X Logo
+    m_colors[0x96] = PATCH_FILE_COLOR;   // Path File
+    //       0x97                        // Unused
+    //       0x98                        // Unused
     m_colors[0x99] = ZIP_FILE_COLOR;     // Zip File
     m_colors[0x9A] = PARTITION_COLOR;    // Partition
     m_colors[0x9B] = HDD_COLOR;          // HDD

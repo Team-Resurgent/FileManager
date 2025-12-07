@@ -14,15 +14,14 @@
 #define R_STICK_COLOR      0X00000000 // default
 #define L_TRIGGER_COLOR    0x00000000 // default
 #define R_TRIGGER_COLOR    0x00000000 // default
-#define PATCH_FILE_COLOR   0xFFF4CACA
-#define XBE_FILE_COLOR     0xFFCCEED0
-#define CONFIG_FILE_COLOR  0xFFF5F5F5
-#define ZIP_FILE_COLOR     0xFFCBC3E3
+#define XBOX_LOGO_COLOR    0xFF3CB54A
+#define PATCH_FILE_COLOR   0xFFF5F5F5
+#define ZIP_FILE_COLOR     0xFFF5F5F5
 #define PARTITION_COLOR    0xFFDBDBDC
 #define HDD_COLOR          0xFFDBDBDC
 #define DISC_COLOR         0xFFDBDBDC
 #define FILE_COLOR         0xFFF5F5F5
-#define FOLDER_COLOR       0xFF5EA4FF
+#define FOLDER_COLOR       0xFFFFD23B //0xFF5EA4FF (Blue) 0xFFFFD23B (Yellow)
 
 // Marquee
 #define MARQUEE_INITIAL_PAUSE 900  // pause before first move
