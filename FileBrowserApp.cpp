@@ -1198,7 +1198,7 @@ HRESULT FileBrowserApp::Initialize() {
     m_zipSubMenu.SetDevice(m_pd3dDevice);
     m_confirmDelSubMenu.SetDevice(m_pd3dDevice);
 
-    //network::init();
+    network::init();
 
     return S_OK;
 }

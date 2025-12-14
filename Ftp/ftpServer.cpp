@@ -11,7 +11,7 @@
 #include <xtl.h>
 #include "ftpCrc32.h"
 
-#define SERVERID "Daemon-X FTP, welcome..."
+#include "../Configuration.h"
 
 namespace {
 
@@ -94,6 +94,20 @@ char* resolveRelative(const char* currentVirtual, const char* relativeVirtual) {
         char* result = cleanVirtualPath(relativeVirtual);
         return result;
     }
+}
+
+static bool IsDriveLetterPath(const char* path) {
+    // "/E:/something"
+    if ((path[0] == '/' || path[0] == '\\') && 
+       ((path[1] >= 'A' && path[1] <= 'Z') || (path[1] >= 'a' && path[1] <= 'z')) && 
+         path[2] == ':' && 
+        (path[3] == '/' || path[3] == '\\' || path[3] == '\0')) return true;
+    // "/E/something"
+    if ((path[0] == '/' || path[0] == '\\') && 
+       ((path[1] >= 'A' && path[1] <= 'Z') || (path[1] >= 'a' && path[1] <= 'z')) && 
+        (path[2] == '/' || path[2] == '\\' || path[2] == '\0')) return true;
+
+    return false;
 }
 
 pointerVector<fileSystem::FileInfoDetail*>* getDirectoryListing(const char* virtualPath) {
@@ -188,7 +202,7 @@ bool WINAPI ftpServer::connectionThread(uint64_t sCmd) {
         saiCmdPeer.sin_addr.S_un.S_un_b.s_b3, saiCmdPeer.sin_addr.S_un.S_un_b.s_b4);
 
     // Send greeting
-    socketSendString(sCmd, "220-%s\r\n220-You are connecting from %s:%u.\r\n220 Proceed with login.\r\n", SERVERID,
+    socketSendString(sCmd, "220-%s\r\n220-You are connecting from %s:%u.\r\n220 Proceed with login.\r\n", FTP_SERVER_ID,
         szPeerName, ntohs(saiCmdPeer.sin_port));
 
     socketUtility::getSocketName(sCmd, &saiCmd);
@@ -221,6 +235,25 @@ bool WINAPI ftpServer::connectionThread(uint64_t sCmd) {
             *(pszParam++) = 0;
         } else {
             pszParam = szCmd + strlen(szCmd);
+        }
+
+        // Check if IsDriveLetterPath
+        if (*pszParam) {
+            // All commands that legally accept paths
+            if (!_stricmp(szCmd, "CWD")  || !_stricmp(szCmd, "XCWD") ||
+                !_stricmp(szCmd, "LIST") || !_stricmp(szCmd, "NLST") ||
+                !_stricmp(szCmd, "STAT") || !_stricmp(szCmd, "RETR") ||
+                !_stricmp(szCmd, "STOR") || !_stricmp(szCmd, "APPE") ||
+                !_stricmp(szCmd, "SIZE") || !_stricmp(szCmd, "MDTM") ||
+                !_stricmp(szCmd, "RNFR") || !_stricmp(szCmd, "RNTO") ||
+                !_stricmp(szCmd, "MKD")  || !_stricmp(szCmd, "RMD")  ||
+                !_stricmp(szCmd, "DELE") || !_stricmp(szCmd, "XCRC")) {
+                if (IsDriveLetterPath(pszParam)) {
+                    utils::swapString(&currentVirtual, _strdup("/")); // Flush currentVirtual
+                    socketSendString(sCmd, "550 Invalid directory.\r\n");
+                    continue;
+                }
+            }
         }
 
         if (!_stricmp(szCmd, "USER")) {

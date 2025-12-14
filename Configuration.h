@@ -38,3 +38,6 @@
 
 // Filepaths
 #define FONT_XPR_FILEPATH "T:\\Font.xpr"
+
+// FTP
+#define FTP_SERVER_ID "Daemon-X FTP, welcome..."
