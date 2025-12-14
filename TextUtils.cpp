@@ -1,6 +1,7 @@
 #include "TextUtils.h"
 
 #include "Configuration.h"
+#include "FsUtil.h"
 
 ColorMap DefaultColors(true);
 
@@ -43,17 +44,22 @@ FLOAT DrawAnsi(CXBFont& font, FLOAT x, FLOAT y, DWORD color, ColorMap* colors, c
     x = Snap(x);
     y = Snap(y);
 
-    if (colors == NULL) {
-        WCHAR* wbuf = (WCHAR*)malloc(sizeof(WCHAR) * (strlen(text) + 1));
-        MultiByteToWideChar(CP_ACP, 0, text, -1, wbuf, strlen(text) + 1);
-        font.DrawText(x, y, color, wbuf);
+    // Print display root
+    char* dText = (char*)malloc(sizeof(char) * (strlen(text) + 1));
+    strcpy(dText, text);
+    if (IsRootedPath(text)) dText[0] = GetDisplayRoot(text);
 
-        return x + font.GetTextWidth(wbuf);
+    if (colors == NULL) {
+        WCHAR* wbuf = (WCHAR*)malloc(sizeof(WCHAR) * (strlen(dText) + 1));
+        MultiByteToWideChar(CP_ACP, 0, dText, -1, wbuf, strlen(dText) + 1);
+        font.DrawText(x, y, color, wbuf);
+        x += font.GetTextWidth(wbuf);
+        free(wbuf);
     }
     else {
-        int l = strlen(text);
+        int l = strlen(dText);
         for (int i = 0; i < l; i++) {
-            char ch = text[i];
+            char ch = dText[i];
             DWORD c = (colors->m_colors[(unsigned char)ch] != 0) ? colors->m_colors[(unsigned char)ch] : color;
 
             WCHAR wbuf[2];
@@ -62,9 +68,11 @@ FLOAT DrawAnsi(CXBFont& font, FLOAT x, FLOAT y, DWORD color, ColorMap* colors, c
             font.DrawText(x, y, c, wbuf, 0, 0.0f);
             x += font.GetTextWidth(wbuf);
         }
-        
-        return x;
     }
+
+    free(dText);
+
+    return x;
 }
 
 FLOAT DrawAnsiCentered(CXBFont& font, FLOAT x, FLOAT y, DWORD color, ColorMap* colors, const char* text, FLOAT w, FLOAT h) {

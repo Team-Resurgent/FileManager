@@ -5,6 +5,7 @@
 #include "TextUtils.h"
 #include "GfxPrims.h"
 #include "network.h"
+#include "Configuration.h"
 
 // Simple getter used by overlay/status timers.
 DWORD FileBrowserApp::StatusUntilMs() const { return m_statusUntilMs; }
@@ -458,6 +459,10 @@ void FileBrowserApp::BuildZipSubMenu() {
         strcat(unzipToOther, "\"");
         char path[512];
         strncpy(path, p2.curPath, sizeof(path) - 1);
+
+        // Print display root
+        if (IsRootedPath(path)) path[0] = GetDisplayRoot(path);
+
         if (strlen(path) > 33) {
             strncat(unzipToOther, path, 15);
             strcat(unzipToOther, "...");
@@ -1164,62 +1169,20 @@ void FileBrowserApp::UpOne(Pane& p) {
 // Create font, input, initial drive mapping, and compute responsive layout.
 // ----------------------------------------------------------------------------
 HRESULT FileBrowserApp::Initialize() {
-    const char* userFont  = "D:\\Media\\Font.xpr";
-    const char* titleFont = "T:\\Font.xpr"; // title-scoped cache
-    bool fontOk = false;
 
-    XBUtil_DebugPrint("Init: starting FileBrowserApp::Initialize");
+    if (FileExistsA(FONT_XPR_FILEPATH)) {
+        HRESULT hr = m_font.Create(FONT_XPR_FILEPATH, 0);
 
-    // 1) User-supplied override on D:
-    if (FileExistsA(userFont)) {
-        XBUtil_DebugPrint("Init: User font found at %s", userFont);
-        HRESULT hr = m_font.Create(userFont, 0);
-        XBUtil_DebugPrint("Init: m_font.Create(user) -> 0x%08lX", hr);
-        fontOk = SUCCEEDED(hr);
-    } else {
-        XBUtil_DebugPrint("Init: No user font at %s", userFont);
-    }
-
-    // 2) Otherwise, try cached copy on T:\ first (no rewrite if it already exists)
-    if (!fontOk) {
-        if (FileExistsA(titleFont)) {
-            XBUtil_DebugPrint("Init: found cached font at %s, loading", titleFont);
-            HRESULT hr = m_font.Create(titleFont, 0);
-            XBUtil_DebugPrint("Init: m_font.Create(cached) -> 0x%08lX", hr);
-            fontOk = SUCCEEDED(hr);
-
-            // If cached file is bad/corrupt, rewrite it from the embedded bytes.
-            if (!fontOk) {
-                XBUtil_DebugPrint("Init: Cached font load failed, rewriting from embedded (%lu bytes)",
-                                  (unsigned long)FontSize);
-                const BOOL wrote = WriteAllA(titleFont, Font, (size_t)FontSize);
-                XBUtil_DebugPrint("Init: WriteAllA('%s') -> %s", titleFont, wrote ? "OK" : "FAIL");
-                if (wrote) {
-                    HRESULT hr2 = m_font.Create(titleFont, 0);
-                    XBUtil_DebugPrint("Init: m_font.Create(rewritten) -> 0x%08lX", hr2);
-                    fontOk = SUCCEEDED(hr2);
-                }
+        if (!SUCCEEDED(hr)) {
+            if (WriteAllA(FONT_XPR_FILEPATH, Font, (size_t)FontSize)) {
+                HRESULT hr2 = m_font.Create(FONT_XPR_FILEPATH, 0);
             }
         }
-        else {
-            // 3) No cached file: write embedded once and load it
-            XBUtil_DebugPrint("Init: No cached font; writing embedded to %s (%lu bytes)",
-                              titleFont, (unsigned long)FontSize);
-            const BOOL wrote = WriteAllA(titleFont, Font, (size_t)FontSize);
-            XBUtil_DebugPrint("Init: WriteAllA('%s') -> %s", titleFont, wrote ? "OK" : "FAIL");
-            if (wrote) {
-                HRESULT hr = m_font.Create(titleFont, 0);
-                XBUtil_DebugPrint("Init: m_font.Create(embedded) -> 0x%08lX", hr);
-                fontOk = SUCCEEDED(hr);
-            }
-        }
-    }
-
-    if (!fontOk) {
-        XBUtil_DebugPrint("Init: WARNING - All font loads failed; text may not render");
     }
     else {
-        XBUtil_DebugPrint("Init: Font loaded successfully");
+        if (WriteAllA(FONT_XPR_FILEPATH, Font, (size_t)FontSize)) {
+            HRESULT hr = m_font.Create(FONT_XPR_FILEPATH, 0);
+        }
     }
 
     XBInput_CreateGamepads();
@@ -1230,13 +1193,12 @@ HRESULT FileBrowserApp::Initialize() {
 
     // Layout derived from current backbuffer size (works for any resolution)
     ComputeResponsiveLayout();
-    XBUtil_DebugPrint("Init: Layout computed");
 
     m_ctx.SetDevice(m_pd3dDevice);
     m_zipSubMenu.SetDevice(m_pd3dDevice);
     m_confirmDelSubMenu.SetDevice(m_pd3dDevice);
 
-    network::init();
+    //network::init();
 
     return S_OK;
 }

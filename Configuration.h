@@ -35,3 +35,6 @@
 #define HIGHLIGHTED_ROW_COLOR        0x30FFFF00
 #define ACTIVE_HIGHLIGHTED_ROW_COLOR 0x60FFFF00
 #define HEADER_TEXT_COLOR            0xFFDDDDDD
+
+// Filepaths
+#define FONT_XPR_FILEPATH "T:\\Font.xpr"

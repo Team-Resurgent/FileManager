@@ -109,11 +109,19 @@ void MapStandardDrives_Io(){
     MapLetterToDevice("D:", "\\Device\\Cdrom0");
     MapLetterToDevice("C:", "\\Device\\Harddisk0\\Partition2");
     MapLetterToDevice("E:", "\\Device\\Harddisk0\\Partition1");
+    MapLetterToDevice("F:", "\\Device\\Harddisk0\\Partition6");
+    MapLetterToDevice("G:", "\\Device\\Harddisk0\\Partition7");
+    MapLetterToDevice("H:", "\\Device\\Harddisk0\\Partition8");
+    MapLetterToDevice("I:", "\\Device\\Harddisk0\\Partition9");
     MapLetterToDevice("X:", "\\Device\\Harddisk0\\Partition3");
     MapLetterToDevice("Y:", "\\Device\\Harddisk0\\Partition4");
     MapLetterToDevice("Z:", "\\Device\\Harddisk0\\Partition5");
-    MapLetterToDevice("F:", "\\Device\\Harddisk0\\Partition6");
-    MapLetterToDevice("G:", "\\Device\\Harddisk0\\Partition7");
+    MapLetterToDevice("B:", "\\Device\\Harddisk1\\Partition2"); // C
+    MapLetterToDevice("J:", "\\Device\\Harddisk1\\Partition1"); // E
+    MapLetterToDevice("K:", "\\Device\\Harddisk1\\Partition6"); // F
+    MapLetterToDevice("L:", "\\Device\\Harddisk1\\Partition7"); // G
+    MapLetterToDevice("M:", "\\Device\\Harddisk1\\Partition8"); // H
+    MapLetterToDevice("N:", "\\Device\\Harddisk1\\Partition9"); // I
 }
 
 // ============================================================================
@@ -247,7 +255,7 @@ void DvdColdRemount(){
 
 namespace {
     // We only care about the OG Xbox set of letters
-    const char* kRoots[] = { "C:\\", "D:\\", "E:\\", "F:\\", "G:\\", "X:\\", "Y:\\", "Z:\\" };
+    const char* kRoots[] = { "C:\\", "D:\\", "E:\\", "F:\\", "G:\\", "H:\\", "I:\\", "X:\\", "Y:\\", "Z:\\", "B:\\", "J:\\", "K:\\", "L:\\", "M:\\", "N:\\" };
     const int   kNumRoots = sizeof(kRoots)/sizeof(kRoots[0]);
     int  g_presentIdx[16];
     int  g_presentCount = 0;
@@ -288,7 +296,19 @@ void BuildDriveItems(std::vector<Item>& out){
         it.size = 0;
         it.isUpEntry = false;
         it.marked = false;
-        it.icon = (it.name[0] == 'D') ? '\x9C' : '\x9A';
+        switch (it.name[0]) {
+        case 'D':
+            it.icon = '\x9C'; break;
+        case 'B':
+        case 'J':
+        case 'K':
+        case 'L':
+        case 'M':
+        case 'N': 
+            it.icon = '\x9B'; break;
+        default: 
+            it.icon = '\x9A';
+        }
         out.push_back(it);
     }
 }
@@ -923,4 +943,21 @@ bool WriteAllA(const char* path, const void* data, DWORD size) {
     if (h == INVALID_HANDLE_VALUE) return false;
     DWORD wrote = 0; BOOL ok = WriteFile(h, data, size, &wrote, NULL); CloseHandle(h);
     return ok && wrote == size;
+}
+
+bool IsRootedPath(const char* path) {
+    if (strlen(path) >= 3 && path[0] >= 'A' && path[0] <= 'Z' && path[1] == ':' && path[2] == '\\') return true;
+    return false;
+}
+
+char GetDisplayRoot(const char* path) {
+    switch (path[0]) {
+    case 'B': return 'C';
+    case 'J': return 'E';
+    case 'K': return 'F';
+    case 'L': return 'G';
+    case 'M': return 'H';
+    case 'N': return 'I';
+    default: return path[0];
+    }
 }

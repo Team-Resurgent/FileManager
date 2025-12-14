@@ -263,7 +263,7 @@ void PaneRenderer::DrawPane(CXBFont& font, LPDIRECT3DDEVICE8 dev, FLOAT baseX, c
     // Header text
     char hdr[600];
     if (p.mode == 0) _snprintf(hdr, sizeof(hdr), "%s", "Detected Drives");
-    else _snprintf(hdr, sizeof(hdr), "%s",  p.curPath);
+    else _snprintf(hdr, sizeof(hdr), "%s", p.curPath);
     hdr[sizeof(hdr) - 1] = 0;
 
     // Center vertically

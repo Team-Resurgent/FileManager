@@ -115,3 +115,6 @@ void  DvdColdRemount();
 
 bool FileExistsA(const char* path);
 bool WriteAllA(const char* path, const void* data, DWORD size);
+
+bool IsRootedPath(const char* path);
+char GetDisplayRoot(const char* path);
