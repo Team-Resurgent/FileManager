@@ -236,26 +236,7 @@ bool WINAPI ftpServer::connectionThread(uint64_t sCmd) {
         } else {
             pszParam = szCmd + strlen(szCmd);
         }
-
-        // Check if IsDriveLetterPath
-        if (*pszParam) {
-            // All commands that legally accept paths
-            if (!_stricmp(szCmd, "CWD")  || !_stricmp(szCmd, "XCWD") ||
-                !_stricmp(szCmd, "LIST") || !_stricmp(szCmd, "NLST") ||
-                !_stricmp(szCmd, "STAT") || !_stricmp(szCmd, "RETR") ||
-                !_stricmp(szCmd, "STOR") || !_stricmp(szCmd, "APPE") ||
-                !_stricmp(szCmd, "SIZE") || !_stricmp(szCmd, "MDTM") ||
-                !_stricmp(szCmd, "RNFR") || !_stricmp(szCmd, "RNTO") ||
-                !_stricmp(szCmd, "MKD")  || !_stricmp(szCmd, "RMD")  ||
-                !_stricmp(szCmd, "DELE") || !_stricmp(szCmd, "XCRC")) {
-                if (IsDriveLetterPath(pszParam)) {
-                    utils::swapString(&currentVirtual, _strdup("/")); // Flush currentVirtual
-                    socketSendString(sCmd, "550 Invalid directory.\r\n");
-                    continue;
-                }
-            }
-        }
-
+        
         if (!_stricmp(szCmd, "USER")) {
             if (!*pszParam) {
                 socketSendString(sCmd, "501 Syntax error in parameters or arguments.\r\n");
@@ -348,6 +329,15 @@ bool WINAPI ftpServer::connectionThread(uint64_t sCmd) {
                 socketSendString(sCmd, "530 Not logged in.\r\n");
             } else {
                 char* newVirtual = resolveRelative(currentVirtual, pszParam);
+
+                // Check if IsDriveLetterPath
+                if (IsDriveLetterPath(newVirtual)) {
+                    utils::swapString(&currentVirtual, _strdup("/")); // Flush currentVirtual
+                    socketSendString(sCmd, "550 Invalid directory. Try reconnecting.\r\n");
+                    free(newVirtual);
+                    continue;
+                }
+
                 bool isFolder = false;
                 if (stringUtility::equals(newVirtual, "/", false)) {
                     isFolder = true;
@@ -377,6 +367,14 @@ bool WINAPI ftpServer::connectionThread(uint64_t sCmd) {
                 socketSendString(sCmd, "530 Not logged in.\r\n");
             } else {
                 utils::swapString(&currentVirtual, resolveRelative(currentVirtual, ".."));
+
+                // Check if IsDriveLetterPath
+                if (IsDriveLetterPath(currentVirtual)) {
+                    utils::swapString(&currentVirtual, _strdup("/")); // Flush currentVirtual
+                    socketSendString(sCmd, "550 Invalid directory. Try reconnecting.\r\n");
+                    continue;
+                }
+
                 socketSendString(sCmd, "250 \"%s\" is now current directory.\r\n", currentVirtual);
             }
         }
@@ -489,6 +487,14 @@ bool WINAPI ftpServer::connectionThread(uint64_t sCmd) {
                 char* newVirtual =
                     pszParam && *pszParam ? resolveRelative(currentVirtual, pszParam) : _strdup(currentVirtual);
 
+                // Check if IsDriveLetterPath
+                if (IsDriveLetterPath(newVirtual)) {
+                    utils::swapString(&currentVirtual, _strdup("/")); // Flush currentVirtual
+                    socketSendString(sCmd, "550 Invalid directory. Try reconnecting.\r\n");
+                    free(newVirtual);
+                    continue;
+                }
+
                 pointerVector<fileSystem::FileInfoDetail*>* fileInfoDetails = getDirectoryListing(newVirtual);
                 if (fileInfoDetails != NULL) {
                     sData = establishDataConnection(&saiData, &sPasv);
@@ -543,6 +549,14 @@ bool WINAPI ftpServer::connectionThread(uint64_t sCmd) {
                 char* newVirtual =
                     pszParam && *pszParam ? resolveRelative(currentVirtual, pszParam) : _strdup(currentVirtual);
 
+                // Check if IsDriveLetterPath
+                if (IsDriveLetterPath(newVirtual)) {
+                    utils::swapString(&currentVirtual, _strdup("/")); // Flush currentVirtual
+                    socketSendString(sCmd, "550 Invalid directory. Try reconnecting.\r\n");
+                    free(newVirtual);
+                    continue;
+                }
+
                 pointerVector<fileSystem::FileInfoDetail*>* fileInfoDetails = getDirectoryListing(newVirtual);
                 if (fileInfoDetails != NULL) {
                     socketSendString(sCmd, "212-Sending directory listing of \"%s\".\r\n", newVirtual);
@@ -579,6 +593,15 @@ bool WINAPI ftpServer::connectionThread(uint64_t sCmd) {
                 socketSendString(sCmd, "530 Not logged in.\r\n");
             } else {
                 char* newVirtual = resolveRelative(currentVirtual, pszParam);
+
+                // Check if IsDriveLetterPath
+                if (IsDriveLetterPath(newVirtual)) {
+                    utils::swapString(&currentVirtual, _strdup("/")); // Flush currentVirtual
+                    socketSendString(sCmd, "550 Invalid directory. Try reconnecting.\r\n");
+                    free(newVirtual);
+                    continue;
+                }
+
                 char* ftpPath = driveManager::mapFtpPath(newVirtual);
 
                 uint32_t fileHandle;
@@ -622,6 +645,15 @@ bool WINAPI ftpServer::connectionThread(uint64_t sCmd) {
                 socketSendString(sCmd, "530 Not logged in.\r\n");
             } else {
                 char* newVirtual = resolveRelative(currentVirtual, pszParam);
+
+                // Check if IsDriveLetterPath
+                if (IsDriveLetterPath(newVirtual)) {
+                    utils::swapString(&currentVirtual, _strdup("/")); // Flush currentVirtual
+                    socketSendString(sCmd, "550 Invalid directory. Try reconnecting.\r\n");
+                    free(newVirtual);
+                    continue;
+                }
+
                 char* ftpPath = driveManager::mapFtpPath(newVirtual);
 
                 uint32_t fileHandle;
@@ -669,6 +701,15 @@ bool WINAPI ftpServer::connectionThread(uint64_t sCmd) {
                 socketSendString(sCmd, "530 Not logged in.\r\n");
             } else {
                 char* newVirtual = resolveRelative(currentVirtual, pszParam);
+
+                // Check if IsDriveLetterPath
+                if (IsDriveLetterPath(newVirtual)) {
+                    utils::swapString(&currentVirtual, _strdup("/")); // Flush currentVirtual
+                    socketSendString(sCmd, "550 Invalid directory. Try reconnecting.\r\n");
+                    free(newVirtual);
+                    continue;
+                }
+
                 char* ftpPath = driveManager::mapFtpPath(newVirtual);
 
                 uint32_t fileHandle;
@@ -719,6 +760,15 @@ bool WINAPI ftpServer::connectionThread(uint64_t sCmd) {
                 }
 
                 char* newVirtual = resolveRelative(currentVirtual, pszParam);
+
+                // Check if IsDriveLetterPath
+                if (IsDriveLetterPath(newVirtual)) {
+                    utils::swapString(&currentVirtual, _strdup("/")); // Flush currentVirtual
+                    socketSendString(sCmd, "550 Invalid directory. Try reconnecting.\r\n");
+                    free(newVirtual);
+                    continue;
+                }
+
                 if (dw == 1) {
                     char* ftpPath = driveManager::mapFtpPath(newVirtual);
                     if (fileSystem::setFileTime(ftpPath, fileTime) == true) {
@@ -753,6 +803,15 @@ bool WINAPI ftpServer::connectionThread(uint64_t sCmd) {
                 socketSendString(sCmd, "530 Not logged in.\r\n");
             } else {
                 char* newVirtual = resolveRelative(currentVirtual, pszParam);
+
+                // Check if IsDriveLetterPath
+                if (IsDriveLetterPath(newVirtual)) {
+                    utils::swapString(&currentVirtual, _strdup("/")); // Flush currentVirtual
+                    socketSendString(sCmd, "550 Invalid directory. Try reconnecting.\r\n");
+                    free(newVirtual);
+                    continue;
+                }
+
                 char* ftpPath = driveManager::mapFtpPath(newVirtual);
                 if (fileSystem::fileDelete(ftpPath) == true) {
                     socketSendString(sCmd, "250 \"%s\" deleted successfully.\r\n", newVirtual);
@@ -771,6 +830,15 @@ bool WINAPI ftpServer::connectionThread(uint64_t sCmd) {
                 socketSendString(sCmd, "530 Not logged in.\r\n");
             } else {
                 char* newVirtual = resolveRelative(currentVirtual, pszParam);
+
+                // Check if IsDriveLetterPath
+                if (IsDriveLetterPath(newVirtual)) {
+                    utils::swapString(&currentVirtual, _strdup("/")); // Flush currentVirtual
+                    socketSendString(sCmd, "550 Invalid directory. Try reconnecting.\r\n");
+                    free(newVirtual);
+                    continue;
+                }
+
                 char* ftpPath = driveManager::mapFtpPath(newVirtual);
                 bool exists;
                 if ((fileSystem::fileExists(ftpPath, exists) == true && exists == true) ||
@@ -794,6 +862,15 @@ bool WINAPI ftpServer::connectionThread(uint64_t sCmd) {
                 socketSendString(sCmd, "503 Bad sequence of commands. Send RNFR first.\r\n");
             } else {
                 char* newVirtual = resolveRelative(currentVirtual, pszParam);
+
+                // Check if IsDriveLetterPath
+                if (IsDriveLetterPath(newVirtual)) {
+                    utils::swapString(&currentVirtual, _strdup("/")); // Flush currentVirtual
+                    socketSendString(sCmd, "550 Invalid directory. Try reconnecting.\r\n");
+                    free(newVirtual);
+                    continue;
+                }
+
                 char* ftpPath = driveManager::mapFtpPath(newVirtual);
 
                 if (fileSystem::fileMove(rnfr, ftpPath) == true) {
@@ -815,6 +892,15 @@ bool WINAPI ftpServer::connectionThread(uint64_t sCmd) {
                 socketSendString(sCmd, "530 Not logged in.\r\n");
             } else {
                 char* newVirtual = resolveRelative(currentVirtual, pszParam);
+
+                // Check if IsDriveLetterPath
+                if (IsDriveLetterPath(newVirtual)) {
+                    utils::swapString(&currentVirtual, _strdup("/")); // Flush currentVirtual
+                    socketSendString(sCmd, "550 Invalid directory. Try reconnecting.\r\n");
+                    free(newVirtual);
+                    continue;
+                }
+
                 char* ftpPath = driveManager::mapFtpPath(newVirtual);
                 if (fileSystem::directoryCreate(ftpPath) == true) {
                     socketSendString(sCmd, "250 \"%s\" created successfully.\r\n", newVirtual);
@@ -833,6 +919,15 @@ bool WINAPI ftpServer::connectionThread(uint64_t sCmd) {
                 socketSendString(sCmd, "530 Not logged in.\r\n");
             } else {
                 char* newVirtual = resolveRelative(currentVirtual, pszParam);
+
+                // Check if IsDriveLetterPath
+                if (IsDriveLetterPath(newVirtual)) {
+                    utils::swapString(&currentVirtual, _strdup("/")); // Flush currentVirtual
+                    socketSendString(sCmd, "550 Invalid directory. Try reconnecting.\r\n");
+                    free(newVirtual);
+                    continue;
+                }
+
                 char* ftpPath = driveManager::mapFtpPath(newVirtual);
                 if (fileSystem::directoryDelete(ftpPath, true) == true) {
                     socketSendString(sCmd, "250 \"%s\" removed successfully.\r\n", newVirtual);
@@ -851,6 +946,15 @@ bool WINAPI ftpServer::connectionThread(uint64_t sCmd) {
                 socketSendString(sCmd, "530 Not logged in.\r\n");
             } else {
                 char* newVirtual = resolveRelative(currentVirtual, pszParam);
+
+                // Check if IsDriveLetterPath
+                if (IsDriveLetterPath(newVirtual)) {
+                    utils::swapString(&currentVirtual, _strdup("/")); // Flush currentVirtual
+                    socketSendString(sCmd, "550 Invalid directory. Try reconnecting.\r\n");
+                    free(newVirtual);
+                    continue;
+                }
+
                 char* ftpPath = driveManager::mapFtpPath(newVirtual);
 
                 uint32_t fileHandle;
@@ -881,6 +985,15 @@ bool WINAPI ftpServer::connectionThread(uint64_t sCmd) {
                 socketSendString(sCmd, "550 Syntax error in parameters or arguments.\r\n");
             } else {
                 char* newVirtual = resolveRelative(currentVirtual, pszParam);
+
+                // Check if IsDriveLetterPath
+                if (IsDriveLetterPath(newVirtual)) {
+                    utils::swapString(&currentVirtual, _strdup("/")); // Flush currentVirtual
+                    socketSendString(sCmd, "550 Invalid directory. Try reconnecting.\r\n");
+                    free(newVirtual);
+                    continue;
+                }
+
                 char* ftpPath = driveManager::mapFtpPath(newVirtual);
 
                 uint64_t totalFree;
