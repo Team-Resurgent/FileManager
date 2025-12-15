@@ -879,21 +879,8 @@ HRESULT FileBrowserApp::FrameMove() {
         if (now >= s_nextPollMs) {
             s_nextPollMs = now + 1200; // ~1.2s
 
-            const unsigned int dBit = (1u << ('D' - 'A'));
-            unsigned int mask    = QueryDriveMaskAZ();    // A:..Z:
-            unsigned int maskNoD = (mask & ~dBit);      // exclude D:
-
-            if (s_lastMaskNoD == 0xFFFFFFFF) {
-                s_lastMaskNoD = maskNoD;               // prime (no toast)
-            } else if (maskNoD != s_lastMaskNoD) {
-                s_lastMaskNoD = maskNoD;
-
-                EnsureListing(m_pane[0]);
-                EnsureListing(m_pane[1]);
-
-                // comment out if you never want this toast:
-                 SetStatus("Drives refreshed");
-            }
+            EnsureListing(m_pane[0]);
+            EnsureListing(m_pane[1]);
         }
     }
 
@@ -932,9 +919,9 @@ HRESULT FileBrowserApp::FrameMove() {
 
 				// Cache total (capacity) and used (sum of files on disc)
 				ULONGLONG fb=0, tb=0;
-				GetDriveFreeTotal("D:\\", fb, tb);
+				GetDriveFreeTotal("DVD-ROM:\\", fb, tb);
 				m_dvdTotalBytes = tb;
-				m_dvdUsedBytes  = DirSizeRecursiveA("D:\\");   // from FsUtil
+				m_dvdUsedBytes  = DirSizeRecursiveA("DVD-ROM:\\");   // from FsUtil
 				m_dvdHaveStats  = true;
 
 				{ char lbl[64]; if (DvdDetectMediaSimple(lbl, sizeof(lbl))) SetStatus("%s", lbl); }
@@ -993,9 +980,9 @@ HRESULT FileBrowserApp::FrameMove() {
                         s_lastDvdSerial = curSer;
 						// refresh cached used/total
 						ULONGLONG fb=0, tb=0;
-						GetDriveFreeTotal("D:\\", fb, tb);
+						GetDriveFreeTotal("DVD-ROM:\\", fb, tb);
 						m_dvdTotalBytes = tb;
-						m_dvdUsedBytes  = DirSizeRecursiveA("D:\\");
+						m_dvdUsedBytes  = DirSizeRecursiveA("DVD-ROM:\\");
 						m_dvdHaveStats  = true;
 
                         for (int iPane = 0; iPane < 2; ++iPane) {

@@ -58,16 +58,6 @@ static inline void StripROSysHiddenA(const char* path){
     if (na != a) SetFileAttributesA(path, na);
 }
 
-// If GetVolumeInformationA fails, treat D:\ (DVD) as read-only to be safe.
-static bool IsReadOnlyVolumeA(const char* path){
-    if (!path || !path[0]) return false;
-    char root[4]; _snprintf(root, sizeof(root), "%c:\\", (char)toupper((unsigned char)path[0])); root[sizeof(root)-1]=0;
-    DWORD fsFlags = 0;
-    if (GetVolumeInformationA(root, NULL, 0, NULL, NULL, &fsFlags, NULL, 0))
-        return (fsFlags & FILE_READ_ONLY_VOLUME) != 0;
-    return (root[0] == 'D'); // OG Xbox DVD (CDFS)
-}
-
 // ============================================================================
 // DVD helpers (tray state, media detect, remount, size cache)
 // ============================================================================
@@ -107,17 +97,17 @@ static void DvdInvalidateSizeCache(){
     g_dvdTotalCache  = 0;
 }
 
-// “Is D:\…” convenience (app also uses a local inline; this is exported)
-bool IsDPath(const char* p){
-    return p && (p[0]=='D' || p[0]=='d') && p[1]==':' && p[2]=='\\';
+// Is D:\ convenience (app also uses a local inline; this is exported)
+bool IsDPath(const char* p) {
+    return (_strnicmp(p, "DVD-ROM", 7) == 0) ? true : false;
 }
 
 // Volume serial helper (used for cache key)
-bool GetDvdVolumeSerial(DWORD* outSerial){
+bool GetDvdVolumeSerial(DWORD* outSerial) {
     if (!outSerial) return false;
-    if (GetFileAttributesA("D:\\") == INVALID_FILE_ATTRIBUTES) return false;
+    if (GetFileAttributesA("DVD-ROM:\\") == INVALID_FILE_ATTRIBUTES) return false;
     DWORD serial = 0;
-    if (!GetVolumeInformationA("D:\\", NULL, 0, &serial, NULL, NULL, NULL, 0))
+    if (!GetVolumeInformationA("DVD-ROM:\\", NULL, 0, &serial, NULL, NULL, NULL, 0))
         return false;
     *outSerial = serial;
     return true;
@@ -129,17 +119,17 @@ int DvdDetectMediaSimple(char* outLabel, size_t cap){
     outLabel[0]=0;
 
     // Xbox game?
-    DWORD a = GetFileAttributesA("D:\\default.xbe");
+    DWORD a = GetFileAttributesA("DVD-ROM:\\default.xbe");
     if (a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY)){
         _snprintf(outLabel, (int)cap, "DVD: Xbox Game"); outLabel[cap-1]=0; return 1;
     }
     // DVD-Video?
-    a = GetFileAttributesA("D:\\VIDEO_TS");
+    a = GetFileAttributesA("DVD-ROM:\\VIDEO_TS");
     if (a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY)){
         _snprintf(outLabel, (int)cap, "DVD: Video"); outLabel[cap-1]=0; return 2;
     }
     // Any content at all => Data
-    WIN32_FIND_DATAA fd; HANDLE h = FindFirstFileA("D:\\*", &fd);
+    WIN32_FIND_DATAA fd; HANDLE h = FindFirstFileA("DVD-ROM:\\*", &fd);
     if (h != INVALID_HANDLE_VALUE){
         do{
             const char* n = fd.cFileName;
@@ -212,7 +202,7 @@ void BuildDriveItems(std::vector<Item>& out) {
         it.marked = false;
 
         // Icon selection (example logic)
-        if (!_strnicmp(mount, "D", 1)) it.icon = '\x9C'; // DVD
+        if (!_strnicmp(mount, "DVD-ROM", 7)) it.icon = '\x9C'; // DVD
         else if (!_strnicmp(mount, "HDD0", 4)) it.icon = '\x9A'; // HDD0 (primary disk)
         else if (!_strnicmp(mount, "HDD1", 4)) it.icon = '\x9B'; // HDD1 (secondary disk)
         else if (!_strnicmp(mount, "H", 1) ||
@@ -455,7 +445,6 @@ bool EnsureDirA(const char* path) {
 bool DeleteRecursiveA(const char* path) {
     if (!path || !path[0]) { SetLastError(ERROR_INVALID_PARAMETER); return false; }
     if (IsDriveRoot(path)) { SetLastError(ERROR_ACCESS_DENIED);     return false; }
-    if (IsReadOnlyVolumeA(path)) { SetLastError(ERROR_WRITE_PROTECT); return false; }
 
     DWORD a = GetFileAttributesA(path);
     if (a == INVALID_FILE_ATTRIBUTES) { SetLastError(ERROR_FILE_NOT_FOUND); return false; }
@@ -727,7 +716,7 @@ void SanitizeFatxNameInPlace(char* s){
 // ============================================================================
 
 void GetDevicePathFromMountedPath(char* devPath, const char* mountPath) {
-    if (!_memicmp(mountPath, "D:", 2)) strcpy(devPath, "\\Device\\Cdrom0");
+    if (!_memicmp(mountPath, "DVD-ROM", 7)) strcpy(devPath, "\\Device\\Cdrom0");
     else if (!_memicmp(mountPath, "HDD0-C", 6)) strcpy(devPath, "\\Device\\Harddisk0\\Partition2");
     else if (!_memicmp(mountPath, "HDD0-E", 6)) strcpy(devPath, "\\Device\\Harddisk0\\Partition1");
     else if (!_memicmp(mountPath, "HDD0-F", 6)) strcpy(devPath, "\\Device\\Harddisk0\\Partition6");
@@ -804,7 +793,7 @@ bool LaunchXbeA(const char* pathOrDir)
     if (devPath[strlen(devPath) - 1] == '\\') devPath[strlen(devPath) - 1] = '\0'; // Remove trailing slash
 
     // Repoint D: to device path of 'dir'
-    char dosD[16]; MakeDosString(dosD, sizeof(dosD), "D:");
+    char dosD[16]; MakeDosString(dosD, sizeof(dosD), "DVD-ROM:");
     STRING sDos; BuildString(sDos, dosD);
     IoDeleteSymbolicLink(&sDos); // ignore result
 
@@ -814,7 +803,7 @@ bool LaunchXbeA(const char* pathOrDir)
 
     // Launch D:\<file>
     char launchPath[512];
-    _snprintf(launchPath, sizeof(launchPath), "D:\\%s", file);
+    _snprintf(launchPath, sizeof(launchPath), "DVD-ROM:\\%s", file);
     launchPath[sizeof(launchPath)-1]=0;
 
     DWORD rc = XLaunchNewImageA(launchPath, (PLAUNCH_DATA)NULL);

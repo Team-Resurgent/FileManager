@@ -186,8 +186,13 @@ void Actions::Execute(Action act) {
 
         // Resolve destination (other pane preferred)
         char dstDir[512];
-        if (!app.ResolveDestDir(dstDir, sizeof(dstDir))) { app.SetStatus("Pick a destination"); break; }
-        if ((dstDir[0] == 'D' || dstDir[0] == 'd') && dstDir[1] == ':') { app.SetStatus("Cannot copy to D:\\"); break; }
+        if (!app.ResolveDestDir(dstDir, sizeof(dstDir))) { 
+            app.SetStatus("Pick a destination"); break; 
+        }
+        if (IsDPath(dstDir)) {
+            app.SetStatus("Cannot copy to DVD-ROM:\\"); 
+            break; 
+        }
         NormalizeDirA(dstDir);
         if (!CanWriteHereA(dstDir)) { app.SetStatusLastErr("Dest not writable"); break; }
 
@@ -307,8 +312,14 @@ void Actions::Execute(Action act) {
         if (src.mode != 1) { app.SetStatus("Open a folder"); break; }
 
         char dstDir[512];
-        if (!app.ResolveDestDir(dstDir, sizeof(dstDir))) { app.SetStatus("Pick a destination"); break; }
-        if ((dstDir[0] == 'D' || dstDir[0] == 'd') && dstDir[1] == ':') { app.SetStatus("Cannot move to D:\\"); break; }
+        if (!app.ResolveDestDir(dstDir, sizeof(dstDir))) { 
+            app.SetStatus("Pick a destination"); 
+            break; 
+        }
+        if (IsDPath(dstDir)) { 
+            app.SetStatus("Cannot move to DVD-ROM:\\"); 
+            break; 
+        }
         NormalizeDirA(dstDir);
         if (!CanWriteHereA(dstDir)) { app.SetStatusLastErr("Dest not writable"); break; }
 
@@ -496,10 +507,14 @@ void Actions::Execute(Action act) {
             }
         }
         baseDir[sizeof(baseDir) - 1] = 0;
-        if (!baseDir[0]) { app.SetStatus("Open a folder or select a drive first"); break; }
+        if (!baseDir[0]) { 
+            app.SetStatus("Open a folder or select a drive first"); 
+            break; 
+        }
 
-        if ((baseDir[0] == 'D' || baseDir[0] == 'd') && baseDir[1] == ':') {
-            app.SetStatus("Cannot create on D:\\ (read-only)"); break;
+        if (IsDPath(baseDir)) {
+            app.SetStatus("Cannot create on DVD-ROM:\\"); 
+            break;
         }
 
         NormalizeDirA(baseDir);
@@ -809,8 +824,8 @@ void Actions::Execute(Action act) {
                 }
             }
 
-            if ((dstDir[0] == 'D' || dstDir[0] == 'd') && dstDir[1] == ':') {
-                app.SetStatus("Cannot extract to D:\\");
+            if (IsDPath(dstDir)) {
+                app.SetStatus("Cannot unzip to DVD-ROM:\\");
                 break;
             }
 
