@@ -1,7 +1,7 @@
 #pragma once
 
 #include "unzipLIB.h"
-#include "FileBrowserApp.h"
+#include "main.h"
 
 // unzipLIB filesystem callbacks
 void* ZipFile_Open(const char* filename, int32_t* size);

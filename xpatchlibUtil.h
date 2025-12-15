@@ -1,6 +1,6 @@
 #pragma once
 
-#include "FileBrowserApp.h"
+#include "main.h"
 
 // CreateBak callback function
 bool UpdateBakProgress(ULONGLONG wb);

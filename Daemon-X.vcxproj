@@ -20,7 +20,7 @@
     <ClCompile Include="..\..\..\..\..\Program Files (x86)\Microsoft Xbox SDK\Samples\Xbox\Common\Src\xbutil.cpp" />
     <ClCompile Include="AppActions.cpp" />
     <ClCompile Include="ContextMenu.cpp" />
-    <ClCompile Include="FileBrowserApp.cpp" />
+    <ClCompile Include="main.cpp" />
     <ClCompile Include="Font.c" />
     <ClCompile Include="FsUtil.cpp" />
     <ClCompile Include="Ftp\ftpCrc32.cpp" />
@@ -35,7 +35,6 @@
     <ClCompile Include="Ftp\stringUtility.cpp" />
     <ClCompile Include="Ftp\utils.cpp" />
     <ClCompile Include="GfxPrims.cpp" />
-    <ClCompile Include="main.cpp" />
     <ClCompile Include="OnScreenKeyboard.cpp" />
     <ClCompile Include="PaneRenderer.cpp" />
     <ClCompile Include="RxdkStubs.cpp" />
@@ -58,7 +57,7 @@
     <ClInclude Include="AppActions.h" />
     <ClInclude Include="ContextMenu.h" />
     <ClInclude Include="Configuration.h" />
-    <ClInclude Include="FileBrowserApp.h" />
+    <ClInclude Include="main.h" />
     <ClInclude Include="Font.h" />
     <ClInclude Include="FsUtil.h" />
     <ClInclude Include="Ftp\ftpCrc32.h" />
