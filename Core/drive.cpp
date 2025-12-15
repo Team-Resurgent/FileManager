@@ -16,6 +16,7 @@ drive::drive(const char* mountPoint, const char* mountPointAlias, const char* sy
 bool drive::mount()
 {
 	if (mDriveType == driveTypeMemoryUnit) {
+		// Disabled
 		return false;
 	}
 

@@ -1,6 +1,6 @@
-#include "TextUtils.h"
+#include "textUtils.h"
 
-#include "Configuration.h"
+#include "configuration.h"
 
 ColorMap DefaultColors(true);
 

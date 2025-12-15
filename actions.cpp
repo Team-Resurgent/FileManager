@@ -1,16 +1,15 @@
-#include "AppActions.h"
+#include "actions.h"
 
 #include "main.h"
 #include "xips.h"
-#include "xpatchlibUtil.h"
-#include "unzipLIBUtil.h"
+#include "xpatchlibUtils.h"
+#include "unzipLIBUtils.h"
 
 // The "toast window" behavior:
 //   1) First B press shows "Press B again to cancel" and arms a window.
 //   2) If the second B happens while the toast is still visible, we cancel.
 //   3) If toast expires before second B, the next B just re-arms the window.
 struct CopyProgCtx {
-    FileBrowserApp* app;
     ULONGLONG base;     // bytes completed from previous items (offset)
     bool canceled;      // set when user confirms cancel
 
@@ -22,12 +21,12 @@ struct CopyProgCtx {
 // Progress callback used by file copy/move loops
 static bool CopyProgThunk(LONGLONG done, LONGLONG total, const char* label, void* user) {
     CopyProgCtx* ctx = (CopyProgCtx*)user;
-    FileBrowserApp* app = ctx->app;
+    FileBrowserApp& app = FileBrowserApp::Get();
 
-    if (done == LLONG_MIN) done = app->m_prog.done;
+    if (done == LLONG_MIN) done = app.m_prog.done;
     else if (done < 0) {
         done = _abs64(done);
-        done += app->m_prog.done;
+        done += app.m_prog.done;
         done += ctx->base;
     }
     else done += ctx->base;
@@ -40,11 +39,11 @@ static bool CopyProgThunk(LONGLONG done, LONGLONG total, const char* label, void
     const bool  bNow = (pad.bAnalogButtons[XINPUT_GAMEPAD_B] > 30);
     const DWORD now  = GetTickCount();
 
-    app->UpdateProgress(done, total, label);
+    app.UpdateProgress(done, total, label);
 
     // Rising-edge B?
     if (bNow && !ctx->prevB){
-        const DWORD statusUntil = app->StatusUntilMs();
+        const DWORD statusUntil = app.StatusUntilMs();
         const bool  toastAlive  = (now < statusUntil);
 
         if (ctx->confirmArmed && toastAlive){
@@ -56,13 +55,13 @@ static bool CopyProgThunk(LONGLONG done, LONGLONG total, const char* label, void
         } else {
             // First B: arm and show "press B again" toast
             ctx->confirmArmed = true;
-            app->SetStatus("Press \x81 again to cancel");
-            ctx->confirmUntil = app->StatusUntilMs(); // snapshot (optional)
+            app.SetStatus("Press \x81 again to cancel");
+            ctx->confirmUntil = app.StatusUntilMs(); // snapshot (optional)
         }
     }
 
     // Disarm if toast has expired
-    if (ctx->confirmArmed && now >= app->StatusUntilMs()) ctx->confirmArmed = false;
+    if (ctx->confirmArmed && now >= app.StatusUntilMs()) ctx->confirmArmed = false;
 
     ctx->prevB = bNow;
     return true; // continue
@@ -96,8 +95,6 @@ static const char* BaseNameOf(const char* path){
     return s ? (s+1) : path;
 }
 
-namespace AppActions {
-
 // Collects selected sources for copy/move/delete:
 // - If any items are marked, returns all marked (excluding "..").
 // - Else returns the single current selection (if not "..").
@@ -124,7 +121,8 @@ static void GatherMarkedOrSelectedFullPaths(const Pane& src, std::vector<std::st
 }
 
 // Main dispatcher: runs the action the user picked from the context menu.
-void Execute(Action act, FileBrowserApp& app) {
+void Actions::Execute(Action act) {
+    FileBrowserApp& app = FileBrowserApp::Get();
     Pane& src = app.m_pane[app.m_active];
 	Pane& dst = app.m_pane[1 - app.m_active];
 
@@ -218,7 +216,7 @@ void Execute(Action act, FileBrowserApp& app) {
 
         // Begin progress + set callback
         app.BeginProgress(total, srcs[0].c_str(), "Copying...");
-        CopyProgCtx ctx = { &app, 0, false, false, 0, false };
+        CopyProgCtx ctx = { 0, false, false, 0, false };
         SetCopyProgressCallback(CopyProgThunk, &ctx);
 
         ULONGLONG base = 0;           // cumulative bytes completed
@@ -340,7 +338,7 @@ void Execute(Action act, FileBrowserApp& app) {
         // --- end preflight ---
 
         app.BeginProgress(total, srcs[0].c_str(), "Moving...");
-        CopyProgCtx ctx = { &app, 0, false, false, 0, false };
+        CopyProgCtx ctx = { 0, false, false, 0, false };
         SetCopyProgressCallback(CopyProgThunk, &ctx);
 
         size_t movedOk = 0, failed = 0, skipped = 0;  // NEW: track results
@@ -706,7 +704,7 @@ void Execute(Action act, FileBrowserApp& app) {
 
                 // Begin progress + set callback
                 app.BeginProgress(total, dstName, "Creaking bak...");
-                CopyProgCtx ctx = { &app, 0, false, false, 0, false };
+                CopyProgCtx ctx = { 0, false, false, 0, false };
                 SetCopyProgressCallback(CopyProgThunk, &ctx);
 
                 int cb = CreateBak(dstFull, false, UpdateBakProgress);
@@ -873,7 +871,7 @@ void Execute(Action act, FileBrowserApp& app) {
 
             // Begin progress + set callback
             app.BeginProgress(total, szName, "Extracting...");
-            CopyProgCtx ctx = { &app, 0, false, false, 0, false };
+            CopyProgCtx ctx = { 0, false, false, 0, false };
             SetCopyProgressCallback(CopyProgThunk, &ctx);
 
             size_t extractedOk = 0, skipped = 0;
@@ -926,5 +924,3 @@ void Execute(Action act, FileBrowserApp& app) {
 
     } // switch
 }
-
-} // namespace AppActions

@@ -1,7 +1,8 @@
 #include "OnScreenKeyboard.h"
 
-#include "GfxPrims.h"
-#include "TextUtils.h"
+#include "drawUtils.h"
+#include "textUtils.h"
+
 #include <StdIO.h>
 
 /*

@@ -1,7 +1,7 @@
-#include "FsUtil.h"
+#include "fsUtils.h"
 
 #include "driveManager.h"
-#include "Configuration.h"
+#include "configuration.h"
 
 #include <Algorithm>
 

@@ -18,29 +18,27 @@
     <ClCompile Include="..\..\..\..\..\Program Files (x86)\Microsoft Xbox SDK\Samples\Xbox\Common\Src\xbresource.cpp" />
     <ClCompile Include="..\..\..\..\..\Program Files (x86)\Microsoft Xbox SDK\Samples\Xbox\Common\Src\xbstopwatch.cpp" />
     <ClCompile Include="..\..\..\..\..\Program Files (x86)\Microsoft Xbox SDK\Samples\Xbox\Common\Src\xbutil.cpp" />
-    <ClCompile Include="AppActions.cpp" />
-    <ClCompile Include="ContextMenu.cpp" />
+    <ClCompile Include="actions.cpp" />
+    <ClCompile Include="contextMenu.cpp" />
+    <ClCompile Include="Core\drive.cpp" />
+    <ClCompile Include="Core\driveManager.cpp" />
+    <ClCompile Include="Core\fileSystem.cpp" />
+    <ClCompile Include="Core\ftpCrc32.cpp" />
+    <ClCompile Include="Core\ftpServer.cpp" />
+    <ClCompile Include="Core\network.cpp" />
+    <ClCompile Include="Core\socketUtility.cpp" />
+    <ClCompile Include="Core\stringUtility.cpp" />
+    <ClCompile Include="Core\utils.cpp" />
+    <ClCompile Include="drawUtils.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="Font.c" />
-    <ClCompile Include="FsUtil.cpp" />
-    <ClCompile Include="Ftp\ftpCrc32.cpp" />
-    <ClCompile Include="Ftp\drive.cpp" />
-    <ClCompile Include="Ftp\driveManager.cpp" />
-    <ClCompile Include="Ftp\fileSystem.cpp" />
-    <ClCompile Include="Ftp\ftpServer.cpp">
-      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(ProjectDir)Ftp;$(ProjectDir)xpatchlib;C:\Program Files %28x86%29\Microsoft Xbox SDK\Samples\Xbox\Common\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-    </ClCompile>
-    <ClCompile Include="Ftp\network.cpp" />
-    <ClCompile Include="Ftp\socketUtility.cpp" />
-    <ClCompile Include="Ftp\stringUtility.cpp" />
-    <ClCompile Include="Ftp\utils.cpp" />
-    <ClCompile Include="GfxPrims.cpp" />
+    <ClCompile Include="fsUtils.cpp" />
     <ClCompile Include="OnScreenKeyboard.cpp" />
-    <ClCompile Include="PaneRenderer.cpp" />
-    <ClCompile Include="RxdkStubs.cpp" />
-    <ClCompile Include="TextUtils.cpp" />
-    <ClCompile Include="xpatchlibUtil.cpp" />
-    <ClCompile Include="unzipLIBUtil.cpp" />
+    <ClCompile Include="paneRenderer.cpp" />
+    <ClCompile Include="rxdkStubs.cpp" />
+    <ClCompile Include="textUtils.cpp" />
+    <ClCompile Include="xpatchlibUtils.cpp" />
+    <ClCompile Include="unzipLIBUtils.cpp" />
     <ClCompile Include="unzipLIB\src\adler32.c" />
     <ClCompile Include="unzipLIB\src\crc32.c" />
     <ClCompile Include="unzipLIB\src\infback.c" />
@@ -54,29 +52,29 @@
     <ClCompile Include="xpatchlib\xpatchlib.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="AppActions.h" />
-    <ClInclude Include="ContextMenu.h" />
-    <ClInclude Include="Configuration.h" />
+    <ClInclude Include="actions.h" />
+    <ClInclude Include="contextMenu.h" />
+    <ClInclude Include="configuration.h" />
+    <ClInclude Include="Core\drive.h" />
+    <ClInclude Include="Core\driveManager.h" />
+    <ClInclude Include="Core\fileSystem.h" />
+    <ClInclude Include="Core\ftpCrc32.h" />
+    <ClInclude Include="Core\ftpServer.h" />
+    <ClInclude Include="Core\network.h" />
+    <ClInclude Include="Core\pointerMap.h" />
+    <ClInclude Include="Core\pointerVector.h" />
+    <ClInclude Include="Core\socketUtility.h" />
+    <ClInclude Include="Core\stringUtility.h" />
+    <ClInclude Include="Core\utils.h" />
+    <ClInclude Include="Core\xboxinternals.h" />
+    <ClInclude Include="drawUtils.h" />
     <ClInclude Include="main.h" />
     <ClInclude Include="Font.h" />
-    <ClInclude Include="FsUtil.h" />
-    <ClInclude Include="Ftp\ftpCrc32.h" />
-    <ClInclude Include="Ftp\drive.h" />
-    <ClInclude Include="Ftp\driveManager.h" />
-    <ClInclude Include="Ftp\fileSystem.h" />
-    <ClInclude Include="Ftp\ftpServer.h" />
-    <ClInclude Include="Ftp\network.h" />
-    <ClInclude Include="Ftp\pointerMap.h" />
-    <ClInclude Include="Ftp\pointerVector.h" />
-    <ClInclude Include="Ftp\socketUtility.h" />
-    <ClInclude Include="Ftp\stringUtility.h" />
-    <ClInclude Include="Ftp\utils.h" />
-    <ClInclude Include="Ftp\xboxinternals.h" />
-    <ClInclude Include="GfxPrims.h" />
+    <ClInclude Include="fsUtils.h" />
     <ClInclude Include="OnScreenKeyboard.h" />
-    <ClInclude Include="PaneRenderer.h" />
-    <ClInclude Include="TextUtils.h" />
-    <ClInclude Include="unzipLIBUtil.h" />
+    <ClInclude Include="paneRenderer.h" />
+    <ClInclude Include="textUtils.h" />
+    <ClInclude Include="unzipLIBUtils.h" />
     <ClInclude Include="unzipLIB\src\crc32.h" />
     <ClInclude Include="unzipLIB\src\gzguts.h" />
     <ClInclude Include="unzipLIB\src\inffast.h" />
@@ -88,7 +86,7 @@
     <ClInclude Include="unzipLIB\src\zconf.h" />
     <ClInclude Include="unzipLIB\src\zlib.h" />
     <ClInclude Include="unzipLIB\src\zutil.h" />
-    <ClInclude Include="xpatchlibUtil.h" />
+    <ClInclude Include="xpatchlibUtils.h" />
     <ClInclude Include="xpatchlib\xips.h" />
     <ClInclude Include="xpatchlib\xpatchlib.h" />
   </ItemGroup>
@@ -156,7 +154,7 @@
       <ConformanceMode>false</ConformanceMode>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <AdditionalIncludeDirectories>$(ProjectDir)xpatchlib;$(ProjectDir)unzipLIB\src;C:\Program Files %28x86%29\Microsoft Xbox SDK\Samples\Xbox\Common\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <AdditionalIncludeDirectories>C:\Program Files %28x86%29\Microsoft Xbox SDK\Samples\Xbox\Common\Include;$(ProjectDir)Ftp;$(ProjectDir)xpatchlib;$(ProjectDir)unzipLIB\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\Program Files %28x86%29\Microsoft Xbox SDK\Samples\Xbox\Common\Include;$(ProjectDir)Core;$(ProjectDir)xpatchlib;$(ProjectDir)unzipLIB\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <BufferSecurityCheck>false</BufferSecurityCheck>
       <ExceptionHandling>false</ExceptionHandling>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>

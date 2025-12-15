@@ -3,7 +3,7 @@
 #include <XTL.h>    
 #include "XBFont.h"
 #include "XBInput.h"
-#include "AppActions.h"
+#include "actions.h"
 
 class ContextMenu {
 public:

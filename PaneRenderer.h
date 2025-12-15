@@ -1,7 +1,7 @@
 #pragma once
 
-#include "TextUtils.h"
-#include "FSUtil.h"
+#include "textUtils.h"
+#include "fsUtils.h"
 
 struct Pane {
     std::vector<Item> items;

@@ -1,7 +1,7 @@
 #include "PaneRenderer.h"
 
-#include "GfxPrims.h"
-#include "Configuration.h"
+#include "drawUtils.h"
+#include "configuration.h"
 
 static const FLOAT kRightGuardPx   = 2.0f; // keep a sliver on the right
 static const FLOAT kMeasureFudgePx = 2.0f; // measurement slack

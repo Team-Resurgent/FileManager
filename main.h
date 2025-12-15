@@ -6,10 +6,7 @@
 #include "OnScreenKeyboard.h"
 #include "ContextMenu.h"
 #include "PaneRenderer.h"
-#include "AppActions.h"
-
-// Allow AppActions to call back into private helpers without exposing them.
-namespace AppActions { void Execute(Action, class FileBrowserApp&); }
+#include "actions.h"
 
 struct ProgState {
     bool        active;         // overlay visible when true
@@ -31,12 +28,12 @@ class FileBrowserApp : public CXBApplication {
 
 public:
 
+    static FileBrowserApp& Get();
+
     ProgState m_prog;
 
     // Allow centralized action runner to call private helpers/members.
-    friend void AppActions::Execute(Action, FileBrowserApp&);
-
-    FileBrowserApp();
+    friend class Actions;
 
     // --- CXBApplication lifecycle ------------------------------------------
     virtual HRESULT Initialize(); // create font, map drives, compute layout
@@ -62,6 +59,10 @@ public:
     DWORD StatusUntilMs() const;                // used by Render() to time out
 
 private:
+    FileBrowserApp();
+    FileBrowserApp(const FileBrowserApp&);
+    FileBrowserApp& operator=(const FileBrowserApp&) { return *this; }
+
     // --- UI helpers ---------------------------------------------------------
     static FLOAT HdrX(FLOAT baseX){ return baseX - 15.0f; } // header left offset
 

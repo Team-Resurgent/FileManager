@@ -1,7 +1,5 @@
 #pragma once
 
-class FileBrowserApp;
-
 typedef enum {
     ACT_NONE,
     ACT_OPEN,         // Enter dir / up one / launch .xbe (context-sensitive)
@@ -30,9 +28,7 @@ typedef enum {
 
 } Action;
 
-namespace AppActions {
-    // Runs the requested action against the running app.
-    // NOTE: FileBrowserApp declares this as a 'friend' to allow access to
-    //       its private helpers/state (pane selection, refresh, status, etc.).
-    void Execute(Action act, FileBrowserApp& app);
-}
+class Actions {
+public:
+    static void Execute(Action act);
+};

@@ -1,11 +1,11 @@
 #include "main.h"
 
-#include "FsUtil.h"
+#include "fsUtils.h"
 #include "Font.h"
-#include "TextUtils.h"
-#include "GfxPrims.h"
+#include "textUtils.h"
 #include "network.h"
-#include "Configuration.h"
+#include "configuration.h"
+#include "drawUtils.h"
 
 // Simple getter used by overlay/status timers.
 DWORD FileBrowserApp::StatusUntilMs() const { return m_statusUntilMs; }
@@ -181,6 +181,8 @@ namespace {
 	}
 
 } // anonymous namespace
+
+FileBrowserApp& FileBrowserApp::Get() { static FileBrowserApp app; return app; }
 
 // ----------------------------------------------------------------------------
 // ComputeResponsiveLayout
@@ -687,7 +689,7 @@ void FileBrowserApp::OnPad_Menu(const XBGAMEPAD& pad) {
         else {
             CloseMenu();
             //SetStatus("Chosen action=%d", (int)act);   // debug toast
-            AppActions::Execute(act, *this);          // perform action
+            Actions::Execute(act);          // perform action
         }
     } 
     if (r == ContextMenu::CLOSED) { // allow fallthrough
@@ -1176,7 +1178,6 @@ void FileBrowserApp::UpOne(Pane& p) {
 // Create font, input, initial drive mapping, and compute responsive layout.
 // ----------------------------------------------------------------------------
 HRESULT FileBrowserApp::Initialize() {
-
     if (FileExistsA(FONT_XPR_FILEPATH)) {
         HRESULT hr = m_font.Create(FONT_XPR_FILEPATH, 0);
 
@@ -1196,7 +1197,6 @@ HRESULT FileBrowserApp::Initialize() {
 
     network::init();
 
-    //RescanDrives();
     BuildDriveItems(m_pane[0].items);
     BuildDriveItems(m_pane[1].items);
 
@@ -1462,7 +1462,7 @@ HRESULT FileBrowserApp::Render() {
 
 int __cdecl main()
 {
-    FileBrowserApp app;
+    FileBrowserApp& app = FileBrowserApp::Get();
     app.Create();
     return app.Run();
 }

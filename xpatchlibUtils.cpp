@@ -1,4 +1,4 @@
-#include "xpatchlibUtil.h"
+#include "xpatchlibUtils.h"
 
 #include "xpatchlib.h"
 

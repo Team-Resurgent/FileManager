@@ -1,8 +1,8 @@
 #include "ContextMenu.h"
 
-#include "GfxPrims.h"
 #include "main.h"
-#include "TextUtils.h"
+#include "textUtils.h"
+#include "drawUtils.h"
 
 /*
 ===============================================================================
