@@ -6,6 +6,7 @@
 #include "network.h"
 #include "configuration.h"
 #include "drawUtils.h"
+#include "stringUtility.h"
 
 // Simple getter used by overlay/status timers.
 DWORD FileBrowserApp::StatusUntilMs() const { return m_statusUntilMs; }
@@ -19,6 +20,8 @@ namespace {
     static const DWORD kProgStepMs      = 150;
     static const DWORD kProgEndPauseMs  = 1200;
     static const int   kProgStepChars   = 1;
+
+    static char mCurrentIp[16] = "0.0.0.0";
 
     // Bigger side insets on SD to avoid CRT overscan clipping.
     inline FLOAT SafeMarginX(FLOAT screenW, FLOAT screenH) {
@@ -183,6 +186,14 @@ namespace {
 } // anonymous namespace
 
 FileBrowserApp& FileBrowserApp::Get() { static FileBrowserApp app; return app; }
+
+char* FileBrowserApp::GetCurrentIp() {
+    return mCurrentIp;
+}
+void FileBrowserApp::SetCurrentIp(char* ip) {
+    strcpy(mCurrentIp, ip);
+    mCurrentIp[sizeof(mCurrentIp) - 1] = '\0';
+}
 
 // ----------------------------------------------------------------------------
 // ComputeResponsiveLayout
@@ -868,6 +879,24 @@ void FileBrowserApp::OnPad(const XBGAMEPAD& pad) {
 
 // Per-frame app logic. Also poll for drive-set changes and refresh panes.
 HRESULT FileBrowserApp::FrameMove() {
+    // Check ip
+    if (network::isReady() == true)
+    {
+        XNADDR addr;
+        memset(&addr, 0, sizeof(addr));
+        DWORD dwState = XNetGetTitleXnAddr(&addr);
+        if (dwState != XNET_GET_XNADDR_PENDING)
+        {
+            char* ipAddress = (XNetGetEthernetLinkStatus() & XNET_ETHERNET_LINK_ACTIVE) ? stringUtility::formatString("%i.%i.%i.%i",
+                addr.ina.S_un.S_un_b.s_b1,
+                addr.ina.S_un.S_un_b.s_b2,
+                addr.ina.S_un.S_un_b.s_b3,
+                addr.ina.S_un.S_un_b.s_b4) : _strdup("0.0.0.0");
+            char* currentIp = GetCurrentIp();
+            if (strcmp(ipAddress, currentIp) != 0) SetCurrentIp(ipAddress);
+        }
+    }
+    
     XBInput_GetInput();
 
     // --- Poll for general drive-set changes (ignore D:) ----------------------
@@ -907,8 +936,7 @@ HRESULT FileBrowserApp::FrameMove() {
 				m_dvdUsedBytes  = 0;
 				m_dvdTotalBytes = 0;
                 needRefresh     = TRUE;
-                if (code == DRIVE_OPEN) SetStatus("DVD: Tray Open");
-                else                     SetStatus("DVD: No Disc");
+                //SetStatus((code == DRIVE_OPEN) ? "Tray opened" : "No disc");
                 break;
 
             case DRIVE_CLOSED_MEDIA_PRESENT: {
@@ -924,7 +952,7 @@ HRESULT FileBrowserApp::FrameMove() {
 				m_dvdUsedBytes  = DirSizeRecursiveA("DVD-ROM:\\");   // from FsUtil
 				m_dvdHaveStats  = true;
 
-				{ char lbl[64]; if (DvdDetectMediaSimple(lbl, sizeof(lbl))) SetStatus("%s", lbl); }
+				//{ char lbl[64]; if (DvdDetectMediaSimple(lbl, sizeof(lbl))) SetStatus("%s", lbl); }
 				needRefresh = TRUE;
 				break; }
 
@@ -1003,7 +1031,7 @@ HRESULT FileBrowserApp::FrameMove() {
                             }
                         }
 
-                        SetStatus("DVD: Media changed");
+                        //{ char lbl[64]; if (DvdDetectMediaSimple(lbl, sizeof(lbl))) SetStatus("%s", lbl); }
                     }
                 }
             }
@@ -1193,7 +1221,7 @@ HRESULT FileBrowserApp::Initialize() {
     m_zipSubMenu.SetDevice(m_pd3dDevice);
     m_confirmDelSubMenu.SetDevice(m_pd3dDevice);
 
-    
+    SetStatus(INITIAL_TOAST);
 
     return S_OK;
 }
@@ -1430,10 +1458,14 @@ HRESULT FileBrowserApp::Render() {
 
     // ---- status toast (also centered and fitted) ----
     DWORD now = GetTickCount();
+    FLOAT toastX = footerX + 5.0f, toastY = footerY + footerH +  2.0f, toastW = footerW - 10.0f;
+    FLOAT rx = DrawAnsiFromRight(m_font, toastX + toastW, toastY, 0xFFBBDDEE, NULL, FileBrowserApp::Get().GetCurrentIp());
+    rx = DrawAnsiFromRight(m_font, rx, toastY, 0x60BBDDEE, NULL, "IP:  ");
+    FLOAT lx = DrawAnsi(m_font, toastX, toastY, 0x60BBDDEE, NULL, "Status:  ");
     if (now < m_statusUntilMs && m_status[0]) {
         char fitted[256];
-        LeftEllipsizeToFit(m_font, m_status, footerW - 10.0f, fitted, sizeof(fitted));
-        DrawAnsiCentered(m_font, footerX, footerY + footerH + 2.0f, 0xFFBBDDEE, &DefaultColors, fitted, footerW);
+        LeftEllipsizeToFit(m_font, m_status, (rx - lx) - 5.0f, fitted, sizeof(fitted));
+        DrawAnsi(m_font, lx, toastY, 0xFFBBDDEE, NULL, fitted);
     }
 
     // ---- overlays ----

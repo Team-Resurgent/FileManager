@@ -121,12 +121,12 @@ int DvdDetectMediaSimple(char* outLabel, size_t cap){
     // Xbox game?
     DWORD a = GetFileAttributesA("DVD-ROM:\\default.xbe");
     if (a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY)){
-        _snprintf(outLabel, (int)cap, "DVD: Xbox Game"); outLabel[cap-1]=0; return 1;
+        _snprintf(outLabel, (int)cap, "\x9C Game"); outLabel[cap - 1] = 0; return 1;
     }
     // DVD-Video?
     a = GetFileAttributesA("DVD-ROM:\\VIDEO_TS");
     if (a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY)){
-        _snprintf(outLabel, (int)cap, "DVD: Video"); outLabel[cap-1]=0; return 2;
+        _snprintf(outLabel, (int)cap, "\x9C Video"); outLabel[cap-1]=0; return 2;
     }
     // Any content at all => Data
     WIN32_FIND_DATAA fd; HANDLE h = FindFirstFileA("DVD-ROM:\\*", &fd);
@@ -134,12 +134,12 @@ int DvdDetectMediaSimple(char* outLabel, size_t cap){
         do{
             const char* n = fd.cFileName;
             if (!strcmp(n,".") || !strcmp(n,"..")) continue;
-            _snprintf(outLabel, (int)cap, "DVD: Data"); outLabel[cap-1]=0;
+            _snprintf(outLabel, (int)cap, "\x9C Data"); outLabel[cap-1]=0;
             FindClose(h); return 3;
         }while(FindNextFileA(h, &fd));
         FindClose(h);
     }
-    _snprintf(outLabel, (int)cap, "DVD: Unknown"); outLabel[cap-1]=0;
+    _snprintf(outLabel, (int)cap, "\x9C Unknown"); outLabel[cap-1]=0;
     return 0;
 }
 
@@ -793,7 +793,7 @@ bool LaunchXbeA(const char* pathOrDir)
     if (devPath[strlen(devPath) - 1] == '\\') devPath[strlen(devPath) - 1] = '\0'; // Remove trailing slash
 
     // Repoint D: to device path of 'dir'
-    char dosD[16]; MakeDosString(dosD, sizeof(dosD), "DVD-ROM:");
+    char dosD[16]; MakeDosString(dosD, sizeof(dosD), "D:");
     STRING sDos; BuildString(sDos, dosD);
     IoDeleteSymbolicLink(&sDos); // ignore result
 
@@ -803,7 +803,7 @@ bool LaunchXbeA(const char* pathOrDir)
 
     // Launch D:\<file>
     char launchPath[512];
-    _snprintf(launchPath, sizeof(launchPath), "DVD-ROM:\\%s", file);
+    _snprintf(launchPath, sizeof(launchPath), "D:\\%s", file);
     launchPath[sizeof(launchPath)-1]=0;
 
     DWORD rc = XLaunchNewImageA(launchPath, (PLAUNCH_DATA)NULL);

@@ -30,6 +30,8 @@ public:
 
     static FileBrowserApp& Get();
 
+    char* GetCurrentIp();
+
     ProgState m_prog;
 
     // Allow centralized action runner to call private helpers/members.
@@ -62,6 +64,8 @@ private:
     FileBrowserApp();
     FileBrowserApp(const FileBrowserApp&);
     FileBrowserApp& operator=(const FileBrowserApp&) { return *this; }
+
+    void SetCurrentIp(char* ip);
 
     // --- UI helpers ---------------------------------------------------------
     static FLOAT HdrX(FLOAT baseX){ return baseX - 15.0f; } // header left offset

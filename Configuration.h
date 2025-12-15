@@ -41,3 +41,6 @@
 
 // FTP
 #define FTP_SERVER_ID "Daemon-X FTP, welcome..."
+
+// Other
+#define INITIAL_TOAST "Presented by Team Resurgent"
