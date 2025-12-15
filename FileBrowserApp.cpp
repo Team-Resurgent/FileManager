@@ -460,9 +460,6 @@ void FileBrowserApp::BuildZipSubMenu() {
         char path[512];
         strncpy(path, p2.curPath, sizeof(path) - 1);
 
-        // Print display root
-        if (IsRootedPath(path)) path[0] = GetDisplayRoot(path);
-
         if (strlen(path) > 33) {
             strncat(unzipToOther, path, 15);
             strcat(unzipToOther, "...");
@@ -890,7 +887,6 @@ HRESULT FileBrowserApp::FrameMove() {
             } else if (maskNoD != s_lastMaskNoD) {
                 s_lastMaskNoD = maskNoD;
 
-                RescanDrives();                         // non-D changes
                 EnsureListing(m_pane[0]);
                 EnsureListing(m_pane[1]);
 
@@ -917,7 +913,6 @@ HRESULT FileBrowserApp::FrameMove() {
             switch (code) {
             case DRIVE_OPEN:
             case DRIVE_CLOSED_NO_MEDIA:
-                DvdUnmap_Io();
                 s_dMapped       = FALSE;
                 s_lastDvdSerial = 0xFFFFFFFF;   // forget old serial
 				m_dvdHaveStats  = false;          // <— clear
@@ -929,7 +924,6 @@ HRESULT FileBrowserApp::FrameMove() {
                 break;
 
             case DRIVE_CLOSED_MEDIA_PRESENT: {
-				DvdColdRemount();
 				s_dMapped = TRUE;
 
 				DWORD curSer = 0;
@@ -953,8 +947,6 @@ HRESULT FileBrowserApp::FrameMove() {
             }
 
             if (needRefresh) {
-                RescanDrives();
-
                 // Refresh both panes; bounce out of D:\ if it vanished
                 for (int iPane = 0; iPane < 2; ++iPane) {
                     Pane& P = m_pane[iPane];
@@ -997,8 +989,6 @@ HRESULT FileBrowserApp::FrameMove() {
                 DWORD curSer = 0;
                 if (GetDvdVolumeSerial(&curSer)) {
                     if (s_lastDvdSerial != 0xFFFFFFFF && curSer != s_lastDvdSerial) {
-                        // New disc detected silently — force remount and refresh
-                        DvdColdRemount();
                         s_lastDvdSerial = curSer;
 						// refresh cached used/total
 						ULONGLONG fb=0, tb=0;
@@ -1007,8 +997,6 @@ HRESULT FileBrowserApp::FrameMove() {
 						m_dvdUsedBytes  = DirSizeRecursiveA("D:\\");
 						m_dvdHaveStats  = true;
 
-
-                        RescanDrives();
                         for (int iPane = 0; iPane < 2; ++iPane) {
                             Pane& P = m_pane[iPane];
                             if (P.mode == 0) {
@@ -1083,30 +1071,32 @@ void FileBrowserApp::EnterSelection(Pane& p) {
     }
 
     // Directory listing
-	if (it.isUpEntry) {
-		// Reselect the folder we’re leaving (same as UpOne)
-		char childName[256]; ExtractLastComponent(p.curPath, childName, sizeof(childName));
+    if (it.isUpEntry) {
 
-		if (strlen(p.curPath) <= 3){
-			char driveRoot[4] = { p.curPath[0], ':', '\\', 0 };
-			p.mode = 0;
-			p.sel = 0; p.scroll = 0;
-			BuildDriveItems(p.items);
-			for (int i=0; i<(int)p.items.size(); ++i){
-				if (_stricmp(p.items[i].name, driveRoot) == 0){ p.sel = i; break; }
-			}
-			if (p.sel < p.scroll) p.scroll = p.sel;
-			if (p.sel >= p.scroll + m_visible) p.scroll = p.sel - (m_visible - 1);
-			p.curPath[0] = 0;
-		}
-        else {
-			ParentPath(p.curPath);
-			p.sel = 0; p.scroll = 0;
-			ListDirectory(p.curPath, p.items);
-			SelectItemInPane(p, childName);
-		}
-		return;
-	}
+        char childName[256]; 
+        ExtractLastComponent(p.curPath, childName, sizeof(childName));
+
+        // If already at drive root -> go to drive list
+        if (IsDriveRoot(p.curPath)) {
+            p.mode = 0;
+            p.sel = 0;
+            p.scroll = 0;
+            p.curPath[0] = 0;
+            BuildDriveItems(p.items);
+            return;
+        }
+
+        // Otherwise go up one directory
+        ParentPath(p.curPath);
+        p.sel = 0;
+        p.scroll = 0;
+        ListDirectory(p.curPath, p.items);
+
+        SelectItemInPane(p, childName);
+
+        return;
+    }
+
     if (it.isDir) {
         // Descend into subdirectory.
         char next[512]; JoinPath(next,sizeof(next),p.curPath,it.name);
@@ -1134,33 +1124,50 @@ void FileBrowserApp::EnterSelection(Pane& p) {
 
 // Move up one level; from root goes back to drive list.
 void FileBrowserApp::UpOne(Pane& p) {
-    if (p.mode==0) return;
+    // Already at drive list -> nothing to do
+    if (p.mode == 0) return;
 
-    // Name of the child we’re currently inside (to reselect in parent)
-    char childName[256]; ExtractLastComponent(p.curPath, childName, sizeof(childName));
+    // Save child name so parent can reselect it
+    char childName[256];
+    ExtractLastComponent(p.curPath, childName, sizeof(childName));
 
-    // If at drive root, go back to drive list and select that drive
-    if (strlen(p.curPath) <= 3){
-        char driveRoot[4] = { p.curPath[0], ':', '\\', 0 };
+    // --- CASE 1: We are at drive root (e.g. "E:\", "HDD0-C:\") ---
+    if (IsDriveRoot(p.curPath)) {
+        char driveRoot[512];
+        strncpy(driveRoot, p.curPath, sizeof(driveRoot) - 1);
+        driveRoot[sizeof(driveRoot) - 1] = 0;
+
+        // Switch to drive list
         p.mode = 0;
-        p.sel = 0; p.scroll = 0;
+        p.sel = 0;
+        p.scroll = 0;
+        p.curPath[0] = 0;
+
         BuildDriveItems(p.items);
 
-        // Try to select the drive we came from
-        for (int i=0; i<(int)p.items.size(); ++i){
-            if (_stricmp(p.items[i].name, driveRoot) == 0){ p.sel = i; break; }
+        // Reselect the drive we came from
+        for (int i = 0; i < (int)p.items.size(); ++i) {
+            if (_stricmp(p.items[i].name, driveRoot) == 0) {
+                p.sel = i;
+                break;
+            }
         }
+
+        // Clamp scroll
         if (p.sel < p.scroll) p.scroll = p.sel;
         if (p.sel >= p.scroll + m_visible) p.scroll = p.sel - (m_visible - 1);
 
-        p.curPath[0] = 0;
         return;
     }
 
-    // Go to parent and select the child folder we just left
+    // --- CASE 2: Normal directory -> go up one level ---
     ParentPath(p.curPath);
-    p.sel = 0; p.scroll = 0;
+
+    p.sel = 0;
+    p.scroll = 0;
     ListDirectory(p.curPath, p.items);
+
+    // Reselect folder we came from
     SelectItemInPane(p, childName);
 }
 
@@ -1186,8 +1193,10 @@ HRESULT FileBrowserApp::Initialize() {
     }
 
     XBInput_CreateGamepads();
-    MapStandardDrives_Io();
-    RescanDrives();
+
+    network::init();
+
+    //RescanDrives();
     BuildDriveItems(m_pane[0].items);
     BuildDriveItems(m_pane[1].items);
 
@@ -1198,7 +1207,7 @@ HRESULT FileBrowserApp::Initialize() {
     m_zipSubMenu.SetDevice(m_pd3dDevice);
     m_confirmDelSubMenu.SetDevice(m_pd3dDevice);
 
-    network::init();
+    
 
     return S_OK;
 }

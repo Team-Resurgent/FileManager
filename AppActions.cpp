@@ -642,18 +642,11 @@ void Execute(Action act, FileBrowserApp& app) {
     {
         app.SetStatus("Formatting cache partitions (X/Y/Z)...");
         const bool ok = FormatCacheXYZ(0, true);  // 0 => default 16KiB; also clears E:\CACHE
-        if (!ok) { app.SetStatus("Format cache failed"); break; }
-
-        // If either pane is browsing X:, Y:, or Z:, refresh it
-        for (int p = 0; p < 2; ++p) {
-            Pane& pane = app.m_pane[p];
-            if (pane.mode == 1 && pane.curPath[0]) {
-                char dl = (char)toupper((unsigned char)pane.curPath[0]);
-                if (dl == 'X' || dl == 'Y' || dl == 'Z') {
-                    ListDirectory(pane.curPath, pane.items);
-                }
-            }
+        if (!ok) { 
+            app.SetStatus("Format cache failed"); 
+            break; 
         }
+
         app.RefreshPane(app.m_pane[0]);
         app.RefreshPane(app.m_pane[1]);
         app.SetStatus("Formatted X/Y/Z and E:\\CACHE");

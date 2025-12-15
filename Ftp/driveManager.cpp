@@ -225,14 +225,14 @@ void driveManager::init()
 		m_drives->add(new drive("HDD1-Y", "HDD1-Y", "\\Device\\Harddisk1\\Partition4", driveTypeHardDrive));
 		m_drives->add(new drive("HDD1-Z", "HDD1-Z", "\\Device\\Harddisk1\\Partition5", driveTypeHardDrive));
 
-		//m_drives->add(new drive("H", "MMU0", "", driveTypeMemoryUnit));
-		//m_drives->add(new drive("I", "MMU1", "", driveTypeMemoryUnit));
-		//m_drives->add(new drive("J", "MMU2", "", driveTypeMemoryUnit));
-		//m_drives->add(new drive("K", "MMU3", "", driveTypeMemoryUnit));
-		//m_drives->add(new drive("L", "MMU4", "", driveTypeMemoryUnit));
-		//m_drives->add(new drive("M", "MMU5", "", driveTypeMemoryUnit));
-		//m_drives->add(new drive("N", "MMU6", "", driveTypeMemoryUnit));
-		//m_drives->add(new drive("O", "MMU7", "", driveTypeMemoryUnit));
+		m_drives->add(new drive("H", "MMU0", "", driveTypeMemoryUnit));
+		m_drives->add(new drive("I", "MMU1", "", driveTypeMemoryUnit));
+		m_drives->add(new drive("J", "MMU2", "", driveTypeMemoryUnit));
+		m_drives->add(new drive("K", "MMU3", "", driveTypeMemoryUnit));
+		m_drives->add(new drive("L", "MMU4", "", driveTypeMemoryUnit));
+		m_drives->add(new drive("M", "MMU5", "", driveTypeMemoryUnit));
+		m_drives->add(new drive("N", "MMU6", "", driveTypeMemoryUnit));
+		m_drives->add(new drive("O", "MMU7", "", driveTypeMemoryUnit));
 
 		//https://github.com/brentdc-nz/xbmc4xbox/blob/13cf4fbab8d70b154941a6b91e101bd05cc5b111/xbmc/utils/MemoryUnitManager.cpp#L77
 

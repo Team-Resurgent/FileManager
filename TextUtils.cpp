@@ -1,7 +1,6 @@
 #include "TextUtils.h"
 
 #include "Configuration.h"
-#include "FsUtil.h"
 
 ColorMap DefaultColors(true);
 
@@ -44,22 +43,17 @@ FLOAT DrawAnsi(CXBFont& font, FLOAT x, FLOAT y, DWORD color, ColorMap* colors, c
     x = Snap(x);
     y = Snap(y);
 
-    // Print display root
-    char* dText = (char*)malloc(sizeof(char) * (strlen(text) + 1));
-    strcpy(dText, text);
-    if (IsRootedPath(text)) dText[0] = GetDisplayRoot(text);
-
     if (colors == NULL) {
-        WCHAR* wbuf = (WCHAR*)malloc(sizeof(WCHAR) * (strlen(dText) + 1));
-        MultiByteToWideChar(CP_ACP, 0, dText, -1, wbuf, strlen(dText) + 1);
+        WCHAR* wbuf = (WCHAR*)malloc(sizeof(WCHAR) * (strlen(text) + 1));
+        MultiByteToWideChar(CP_ACP, 0, text, -1, wbuf, strlen(text) + 1);
         font.DrawText(x, y, color, wbuf);
         x += font.GetTextWidth(wbuf);
         free(wbuf);
     }
     else {
-        int l = strlen(dText);
+        int l = strlen(text);
         for (int i = 0; i < l; i++) {
-            char ch = dText[i];
+            char ch = text[i];
             DWORD c = (colors->m_colors[(unsigned char)ch] != 0) ? colors->m_colors[(unsigned char)ch] : color;
 
             WCHAR wbuf[2];
@@ -69,8 +63,6 @@ FLOAT DrawAnsi(CXBFont& font, FLOAT x, FLOAT y, DWORD color, ColorMap* colors, c
             x += font.GetTextWidth(wbuf);
         }
     }
-
-    free(dText);
 
     return x;
 }

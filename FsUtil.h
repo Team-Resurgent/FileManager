@@ -33,8 +33,6 @@ struct Item {
 };
 
 // ===== Drive mapping / discovery ============================================
-void MapStandardDrives_Io();                     // Map C/E/F/G/X/Y/Z and D
-void RescanDrives();                             // Recompute present roots
 void BuildDriveItems(std::vector<Item>& out);    // Build UI items from roots
 unsigned int QueryDriveMaskAZ();                 // Bitmask A..Z (1<<('A'+n))
 
@@ -44,9 +42,9 @@ bool ListDirectory(const char* path, std::vector<Item>& out);
 // ===== Path helpers ==========================================================
 void JoinPath(char* dst, size_t cap, const char* base, const char* name);
 void EnsureTrailingSlash(char* s, size_t cap);
+bool IsDriveRoot(const char* p);
 void ParentPath(char* path);
 void NormalizeDirA(char* s);
-bool IsDriveRoot(const char* p);
 
 // ===== Simple file/dir ops ===================================================
 bool DirExistsA(const char* path);
@@ -84,10 +82,6 @@ bool HasXbeExt(const char* name);
 // ===== .xbe launching =======================================================
 bool LaunchXbeA(const char* pathOrDir);
 
-// ===== FATX formatting (cache partitions) ===================================
-bool FormatCacheDrive(char driveLetter, unsigned long bytesPerCluster /*0=16KiB*/);
-bool FormatCacheXYZ(unsigned long bytesPerCluster /*0=16KiB*/, bool alsoClearECACHE);
-
 // ================== DVD helpers (keep FileBrowserApp lean) ==================
 // These are all you need in the app; implementation details stay in fsutil.cpp
 
@@ -97,10 +91,6 @@ bool  IsDPath(const char* p);
 // Try to read the current disc’s volume serial from D:\ (returns true on success)
 bool  GetDvdVolumeSerial(DWORD* outSerial);
 
-// Map / unmap DOS D:
-void  DvdMap_Io();                   // D: -> \Device\Cdrom0
-void  DvdUnmap_Io();                 // delete \??\D:
-void  DvdInvalidateSizeCache(); 
 
 // Detect media type in the tray (also forces a light probe of D:\)
 // Returns: 1=game, 2=video, 3=data, 0=unknown. Writes label like "DVD: Xbox Game".
@@ -110,11 +100,7 @@ int   DvdDetectMediaSimple(char* outLabel, size_t cap);
 // returns DRIVE_READY if no change since last call.
 DWORD DvdGetDriveStateOneShot(void);
 
-// Drop old CDFS instance and remap D: cleanly; touches D:\ to force a fresh view.
-void  DvdColdRemount();
-
 bool FileExistsA(const char* path);
 bool WriteAllA(const char* path, const void* data, DWORD size);
 
-bool IsRootedPath(const char* path);
-char GetDisplayRoot(const char* path);
+bool FormatCacheXYZ(unsigned long bytesPerCluster, bool alsoClearECACHE);

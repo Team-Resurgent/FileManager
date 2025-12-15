@@ -1,5 +1,8 @@
 #include "FsUtil.h"
 
+#include "driveManager.h"
+#include "Configuration.h"
+
 #include <Algorithm>
 
 /*
@@ -15,21 +18,6 @@
   - No dependency on undocumented.h; minimal kernel shims are declared here.
 ============================================================================
 */
-
-// --- xboxkrnl shims ----------------------------------------------------------
-// We create DOS-style links like "\??\E:" that point to kernel device paths such
-// as "\Device\Harddisk0\Partition1". On Xbox, STATUS_SUCCESS == 0 (not Win32).
-// We also expose SMC tray IO and the Cdrom dismount entrypoint.
-extern "C" {
-    typedef struct _STRING { USHORT Length; USHORT MaximumLength; PCHAR Buffer; } STRING, *PSTRING;
-
-    LONG __stdcall IoCreateSymbolicLink(PSTRING SymbolicLinkName, PSTRING DeviceName);
-    LONG __stdcall IoDeleteSymbolicLink(PSTRING SymbolicLinkName);
-    LONG __stdcall IoDismountVolumeByName(PSTRING VolumeName);
-
-    VOID    __stdcall HalReadSMCTrayState(DWORD* pdwTrayState, DWORD* pdwTrayCount);
-    BOOLEAN __stdcall HalWriteSMBusValue(UCHAR Address, UCHAR Command, BOOLEAN ReadWord, UCHAR Data);
-}
 
 // TRAY_* and DRIVE_* come from FsUtil.h (kept out of this .cpp on purpose).
 
@@ -82,49 +70,6 @@ static bool IsReadOnlyVolumeA(const char* path){
 }
 
 // ============================================================================
-// Drive letter mapping (DOS -> device) via IoCreateSymbolicLink
-// ============================================================================
-
-static BOOL MapLetterToDevice(const char* letter, const char* devicePath){
-    // Remove any stale mapping first (deleting a non-existent link is fine)
-    char dosBuf[16]={0}; MakeDosString(dosBuf, sizeof(dosBuf), letter);
-    STRING sDos; BuildString(sDos, dosBuf);
-    IoDeleteSymbolicLink(&sDos);
-
-    // Create new mapping; STATUS_SUCCESS == 0 on Xbox
-    STRING sDev; BuildString(sDev, devicePath);
-    if (IoCreateSymbolicLink(&sDos, &sDev) != 0) return FALSE;
-
-    // Light probe to confirm the new link resolves to something real
-    char root[8]={0}; _snprintf(root, sizeof(root), "%s\\", letter);
-    if (GetFileAttributesA(root) == INVALID_FILE_ATTRIBUTES){
-        IoDeleteSymbolicLink(&sDos);
-        return FALSE;
-    }
-    return TRUE;
-}
-
-// Standard OG Xbox letters: C/E/X/Y/Z/F/G plus D (DVD).
-void MapStandardDrives_Io(){
-    MapLetterToDevice("D:", "\\Device\\Cdrom0");
-    MapLetterToDevice("C:", "\\Device\\Harddisk0\\Partition2");
-    MapLetterToDevice("E:", "\\Device\\Harddisk0\\Partition1");
-    MapLetterToDevice("F:", "\\Device\\Harddisk0\\Partition6");
-    MapLetterToDevice("G:", "\\Device\\Harddisk0\\Partition7");
-    MapLetterToDevice("H:", "\\Device\\Harddisk0\\Partition8");
-    MapLetterToDevice("I:", "\\Device\\Harddisk0\\Partition9");
-    MapLetterToDevice("X:", "\\Device\\Harddisk0\\Partition3");
-    MapLetterToDevice("Y:", "\\Device\\Harddisk0\\Partition4");
-    MapLetterToDevice("Z:", "\\Device\\Harddisk0\\Partition5");
-    MapLetterToDevice("B:", "\\Device\\Harddisk1\\Partition2"); // C
-    MapLetterToDevice("J:", "\\Device\\Harddisk1\\Partition1"); // E
-    MapLetterToDevice("K:", "\\Device\\Harddisk1\\Partition6"); // F
-    MapLetterToDevice("L:", "\\Device\\Harddisk1\\Partition7"); // G
-    MapLetterToDevice("M:", "\\Device\\Harddisk1\\Partition8"); // H
-    MapLetterToDevice("N:", "\\Device\\Harddisk1\\Partition9"); // I
-}
-
-// ============================================================================
 // DVD helpers (tray state, media detect, remount, size cache)
 // ============================================================================
 
@@ -163,10 +108,6 @@ static void DvdInvalidateSizeCache(){
     g_dvdTotalCache  = 0;
 }
 
-// Map/unmap D: with cache invalidation
-void DvdMap_Io(){    MapLetterToDevice("D:", "\\Device\\Cdrom0"); DvdInvalidateSizeCache(); }
-void DvdUnmap_Io(){  char dosBuf[16]; MakeDosString(dosBuf, sizeof(dosBuf), "D:"); STRING s; BuildString(s, dosBuf); IoDeleteSymbolicLink(&s); DvdInvalidateSizeCache(); }
-
 // “Is D:\…” convenience (app also uses a local inline; this is exported)
 bool IsDPath(const char* p){
     return p && (p[0]=='D' || p[0]=='d') && p[1]==':' && p[2]=='\\';
@@ -188,21 +129,18 @@ int DvdDetectMediaSimple(char* outLabel, size_t cap){
     if (!outLabel || cap==0) return 0;
     outLabel[0]=0;
 
-    // Make sure D: points to the physical Cdrom0
-    MapLetterToDevice("D:", "\\Device\\Cdrom0");
-
     // Xbox game?
-    DWORD a = GetFileAttributesA("D:\\default.xbe");
+    DWORD a = GetFileAttributesA("DVD-ROM:\\default.xbe");
     if (a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY)){
         _snprintf(outLabel, (int)cap, "DVD: Xbox Game"); outLabel[cap-1]=0; return 1;
     }
     // DVD-Video?
-    a = GetFileAttributesA("D:\\VIDEO_TS");
+    a = GetFileAttributesA("DVD-ROM:\\VIDEO_TS");
     if (a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY)){
         _snprintf(outLabel, (int)cap, "DVD: Video"); outLabel[cap-1]=0; return 2;
     }
     // Any content at all => Data
-    WIN32_FIND_DATAA fd; HANDLE h = FindFirstFileA("D:\\*", &fd);
+    WIN32_FIND_DATAA fd; HANDLE h = FindFirstFileA("DVD-ROM:\\*", &fd);
     if (h != INVALID_HANDLE_VALUE){
         do{
             const char* n = fd.cFileName;
@@ -227,36 +165,12 @@ DWORD DvdGetDriveStateOneShot(){
     return DRIVE_READY;
 }
 
-// Force old CDFS instance to drop, then remap D: to Cdrom0 and "touch" root.
-// Helps ensure fresh directory trees after fast disc swaps.
-void DvdColdRemount(){
-    // Best-effort unmap D:
-    DvdUnmap_Io();
-
-    // Dismount the cdrom device so CDFS forgets previous disc
-    char dev[] = "\\Device\\Cdrom0";
-    STRING sDev; BuildString(sDev, dev);
-    IoDismountVolumeByName(&sDev);
-
-    // Give the kernel a beat to settle
-    Sleep(120);
-
-    // Remap D: -> Cdrom0 and force a root directory probe
-    DvdMap_Io();
-    Sleep(120);
-    WIN32_FIND_DATAA fd;
-    HANDLE h = FindFirstFileA("D:\\*", &fd);
-    if (h != INVALID_HANDLE_VALUE) FindClose(h);
-}
-
 // ============================================================================
 // Drive discovery for the drive list
 // ============================================================================
 
 namespace {
     // We only care about the OG Xbox set of letters
-    const char* kRoots[] = { "C:\\", "D:\\", "E:\\", "F:\\", "G:\\", "H:\\", "I:\\", "X:\\", "Y:\\", "Z:\\", "B:\\", "J:\\", "K:\\", "L:\\", "M:\\", "N:\\" };
-    const int   kNumRoots = sizeof(kRoots)/sizeof(kRoots[0]);
     int  g_presentIdx[16];
     int  g_presentCount = 0;
 
@@ -274,43 +188,39 @@ unsigned int QueryDriveMaskAZ(){
     return mask;
 }
 
-// Probe which standard roots exist and record indices into kRoots[]
-void RescanDrives(){
-    g_presentCount = 0;
-    for (int i=0;i<kNumRoots && g_presentCount<(int)(sizeof(g_presentIdx)/sizeof(g_presentIdx[0])); ++i){
-        DWORD a = GetFileAttributesA(kRoots[i]);
-        if (a != INVALID_FILE_ATTRIBUTES) g_presentIdx[g_presentCount++] = i;
-    }
-}
-
 // Build drive items (e.g., "E:\") into 'out'.
-void BuildDriveItems(std::vector<Item>& out){
+void BuildDriveItems(std::vector<Item>& out) {
     out.clear();
-    for (int j=0; j<g_presentCount; ++j){
-        int i = g_presentIdx[j];
-        Item it; 
+
+    // Ask driveManager for mounted drives
+    pointerVector<char*>* drives = driveManager::getMountedDrives();
+    if (!drives) return;
+
+    for (uint32_t i = 0; i < drives->count(); ++i) {
+        const char* mount = drives->get(i);
+        if (!mount || !mount[0]) continue;
+
+        Item it;
         ZeroMemory(&it, sizeof(it));
-        strncpy(it.name, kRoots[i], 255);
-        it.name[255]=0;
+
+        // Build root path: "HDD0-C:\"
+        _snprintf(it.name, sizeof(it.name), "%s:\\", mount);
+        it.name[sizeof(it.name) - 1] = 0;
+
         it.isDir = true;
         it.size = 0;
         it.isUpEntry = false;
         it.marked = false;
-        switch (it.name[0]) {
-        case 'D':
-            it.icon = '\x9C'; break;
-        case 'B':
-        case 'J':
-        case 'K':
-        case 'L':
-        case 'M':
-        case 'N': 
-            it.icon = '\x9B'; break;
-        default: 
-            it.icon = '\x9A';
-        }
+
+        // Icon selection (example logic)
+        if (!_strnicmp(mount, "DVD", 3)) it.icon = '\x9C'; // DVD
+        else if (!_strnicmp(mount, "HDD1", 4)) it.icon = '\x9B'; // HDD1 (secondary disk)
+        else it.icon = '\x9A'; // HDD0 / normal}
+
         out.push_back(it);
     }
+
+    delete drives; // pointerVector allocated it
 }
 
 // ============================================================================
@@ -330,18 +240,53 @@ void JoinPath(char* dst, size_t cap, const char* base, const char* name){
     dst[cap-1] = 0;
 }
 
-void ParentPath(char* path){
-    size_t n = strlen(path);
-    if (n <= 3) { path[0]=0; return; }
-    while (n && path[n-1]=='\\') { path[--n]=0; }
-    char* p = strrchr(path,'\\');
-    if (!p) { path[0] = 0; return; }
-    if (p == path+2) *(p+1) = 0;
-    else *p = 0;
+bool IsDriveRoot(const char* path) {
+    if (!path || !path[0]) return false;
+
+    size_t len = strlen(path);
+
+    // Must end with ":\"
+    if (len < 3) return false;
+
+    if (path[len - 1] != '\\') return false;
+
+    // Find colon
+    const char* colon = strchr(path, ':');
+    if (!colon) return false;
+
+    // Colon must be immediately before the slash
+    if (colon[1] != '\\') return false;
+
+    // Colon must be the *only* colon
+    if (strchr(colon + 1, ':') != nullptr) return false;
+
+    return true;
 }
 
-bool IsDriveRoot(const char* p){
-    return p && strlen(p)==3 && p[1]==':' && p[2]=='\\';
+void ParentPath(char* path) {
+    if (!path) return;
+
+    // Already at drive list
+    if (path[0] == 0) return;
+
+    // If we're at a mounted drive root go back to drive list
+    if (IsDriveRoot(path)) {
+        path[0] = 0;
+        return;
+    }
+
+    // Strip trailing slashes
+    size_t n = strlen(path);
+    while (n && path[n - 1] == '\\') path[--n] = 0;
+
+    // Remove last path component
+    char* p = strrchr(path, '\\');
+    if (!p) {
+        path[0] = 0;
+        return;
+    }
+
+    *(p + 1) = 0;
 }
 
 void NormalizeDirA(char* s){
@@ -452,38 +397,32 @@ void FormatSize(ULONGLONG bytes, char* out, size_t cap) {
 // confusion, we intentionally return "0 / <used_on_disc>" for DVDs.
 // We recompute <used_on_disc> only when the volume serial changes.
 void GetDriveFreeTotal(const char* anyPathInDrive, ULONGLONG& freeBytes, ULONGLONG& totalBytes) {
-    freeBytes = 0; totalBytes = 0;
+    freeBytes = 0;
+    totalBytes = 0;
     if (!anyPathInDrive || !anyPathInDrive[0]) return;
 
-    const char letter = (char)toupper((unsigned char)anyPathInDrive[0]);
+    // Extract mount root (up to and including ":\")
+    char root[256];
+    root[0] = 0;
 
-    if (letter == 'D') {
-        // If D:\ is gone, leave 0/0.
-        if (GetFileAttributesA("D:\\") == INVALID_FILE_ATTRIBUTES) return;
+    const char* colon = strchr(anyPathInDrive, ':');
+    if (!colon || colon[1] != '\\') return; // not a valid mounted path
 
-        DWORD serial = 0xFFFFFFFF;
-        GetVolumeInformationA("D:\\", NULL, 0, &serial, NULL, NULL, NULL, 0);
+    size_t len = (colon - anyPathInDrive) + 2; // include ":\"
+    if (len >= sizeof(root)) return;
 
-        if (serial != g_dvdSerialCache) {
-            // Disc changed (or first time) — recompute and cache
-            ULARGE_INTEGER a, t, f; a.QuadPart = t.QuadPart = f.QuadPart = 0;
-            GetDiskFreeSpaceExA("D:\\", &a, &t, &f);   // capacity of media
-            g_dvdTotalCache  = t.QuadPart;             // kept for reference
-            g_dvdUsedCache   = DirSizeRecursiveA("D:\\");
-            g_dvdSerialCache = serial;
-        }
+    memcpy(root, anyPathInDrive, len);
+    root[len] = 0;
 
-        // "Free / Total"   =>   "0 / <used>"
-        freeBytes  = 0;
-        totalBytes = g_dvdUsedCache;
-        return;
+    ULARGE_INTEGER avail, total, free;
+    avail.QuadPart = total.QuadPart = free.QuadPart = 0;
+
+    if (GetDiskFreeSpaceExA(root, &avail, &total, &free)) {
+        freeBytes = free.QuadPart;
+        totalBytes = total.QuadPart;
     }
-
-    // Normal drives: true free/total via GetDiskFreeSpaceExA
-    char root[8]; _snprintf(root, sizeof(root), "%c:\\", letter); root[sizeof(root)-1]=0;
-    ULARGE_INTEGER a, t, f; a.QuadPart = t.QuadPart = f.QuadPart = 0;
-    if (GetDiskFreeSpaceExA(root, &a, &t, &f)) { freeBytes = f.QuadPart; totalBytes = t.QuadPart; }
 }
+
 
 // ============================================================================
 // Basic FS ops
@@ -779,28 +718,45 @@ void SanitizeFatxNameInPlace(char* s){
 //  - Repoints D: to the folder's *device path* and calls XLaunchNewImageA.
 // ============================================================================
 
-static bool DosToDevicePathA(const char* dos, char* out, size_t cap){
-    if (!dos || strlen(dos) < 2 || dos[1] != ':') return false;
-    char drive = (char)toupper((unsigned char)dos[0]);
-    const char* tail = dos + 2;
-    while (*tail == '\\') ++tail;
-
-    const char* prefix = NULL;
-    switch (drive){
-        case 'C': prefix="\\Device\\Harddisk0\\Partition2"; break;
-        case 'E': prefix="\\Device\\Harddisk0\\Partition1"; break;
-        case 'X': prefix="\\Device\\Harddisk0\\Partition3"; break;
-        case 'Y': prefix="\\Device\\Harddisk0\\Partition4"; break;
-        case 'Z': prefix="\\Device\\Harddisk0\\Partition5"; break;
-        case 'F': prefix="\\Device\\Harddisk0\\Partition6"; break;
-        case 'G': prefix="\\Device\\Harddisk0\\Partition7"; break;
-        case 'D': prefix="\\Device\\Cdrom0";                break;
-        default: return false;
+void GetDevicePathFromMountedPath(char* devPath, const char* mountPath) {
+    if (!_memicmp(mountPath, "DVD-ROM", 7)) strcpy(devPath, "\\Device\\Cdrom0");
+    else if (!_memicmp(mountPath, "HDD0-C", 6)) strcpy(devPath, "\\Device\\Harddisk0\\Partition2");
+    else if (!_memicmp(mountPath, "HDD0-E", 6)) strcpy(devPath, "\\Device\\Harddisk0\\Partition1");
+    else if (!_memicmp(mountPath, "HDD0-F", 6)) strcpy(devPath, "\\Device\\Harddisk0\\Partition6");
+    else if (!_memicmp(mountPath, "HDD0-G", 6)) strcpy(devPath, "\\Device\\Harddisk0\\Partition7");
+    else if (!_memicmp(mountPath, "HDD0-H", 6)) strcpy(devPath, "\\Device\\Harddisk0\\Partition8");
+    else if (!_memicmp(mountPath, "HDD0-I", 6)) strcpy(devPath, "\\Device\\Harddisk0\\Partition9");
+    else if (!_memicmp(mountPath, "HDD0-J", 6)) strcpy(devPath, "\\Device\\Harddisk0\\Partition10");
+    else if (!_memicmp(mountPath, "HDD0-K", 6)) strcpy(devPath, "\\Device\\Harddisk0\\Partition11");
+    else if (!_memicmp(mountPath, "HDD0-L", 6)) strcpy(devPath, "\\Device\\Harddisk0\\Partition12");
+    else if (!_memicmp(mountPath, "HDD0-M", 6)) strcpy(devPath, "\\Device\\Harddisk0\\Partition13");
+    else if (!_memicmp(mountPath, "HDD0-N", 6)) strcpy(devPath, "\\Device\\Harddisk0\\Partition14");
+    else if (!_memicmp(mountPath, "HDD0-X", 6)) strcpy(devPath, "\\Device\\Harddisk0\\Partition3");
+    else if (!_memicmp(mountPath, "HDD0-Y", 6)) strcpy(devPath, "\\Device\\Harddisk0\\Partition4");
+    else if (!_memicmp(mountPath, "HDD0-Z", 6)) strcpy(devPath, "\\Device\\Harddisk0\\Partition5");
+    else if (!_memicmp(mountPath, "HDD0-C", 6)) strcpy(devPath, "\\Device\\Harddisk1\\Partition2");
+    else if (!_memicmp(mountPath, "HDD0-E", 6)) strcpy(devPath, "\\Device\\Harddisk1\\Partition1");
+    else if (!_memicmp(mountPath, "HDD0-F", 6)) strcpy(devPath, "\\Device\\Harddisk1\\Partition6");
+    else if (!_memicmp(mountPath, "HDD0-G", 6)) strcpy(devPath, "\\Device\\Harddisk1\\Partition7");
+    else if (!_memicmp(mountPath, "HDD0-H", 6)) strcpy(devPath, "\\Device\\Harddisk1\\Partition8");
+    else if (!_memicmp(mountPath, "HDD0-I", 6)) strcpy(devPath, "\\Device\\Harddisk1\\Partition9");
+    else if (!_memicmp(mountPath, "HDD0-J", 6)) strcpy(devPath, "\\Device\\Harddisk1\\Partition10");
+    else if (!_memicmp(mountPath, "HDD0-K", 6)) strcpy(devPath, "\\Device\\Harddisk1\\Partition11");
+    else if (!_memicmp(mountPath, "HDD0-L", 6)) strcpy(devPath, "\\Device\\Harddisk1\\Partition12");
+    else if (!_memicmp(mountPath, "HDD0-M", 6)) strcpy(devPath, "\\Device\\Harddisk1\\Partition13");
+    else if (!_memicmp(mountPath, "HDD0-N", 6)) strcpy(devPath, "\\Device\\Harddisk1\\Partition14");
+    else if (!_memicmp(mountPath, "HDD0-X", 6)) strcpy(devPath, "\\Device\\Harddisk1\\Partition3");
+    else if (!_memicmp(mountPath, "HDD0-Y", 6)) strcpy(devPath, "\\Device\\Harddisk1\\Partition4");
+    else if (!_memicmp(mountPath, "HDD0-Z", 6)) strcpy(devPath, "\\Device\\Harddisk1\\Partition5");
+    else {
+        strcpy(devPath, mountPath);
+        return;
     }
-    if (!*tail) _snprintf(out,(int)cap,"%s", prefix);
-    else        _snprintf(out,(int)cap,"%s\\%s", prefix, tail);
-    out[cap-1]=0;
-    return true;
+
+    char* delim = strchr(mountPath, '\\');
+    if (delim != NULL) {
+        strcat(devPath, delim);
+    }
 }
 
 bool LaunchXbeA(const char* pathOrDir)
@@ -833,13 +789,11 @@ bool LaunchXbeA(const char* pathOrDir)
         SetLastError(ERROR_FILE_NOT_FOUND);
         return false;
     }
+    
+    char devPath[512];
+    GetDevicePathFromMountedPath(devPath, dir);
 
-    // Build device path for 'dir'
-    char devPath[1024];
-    if (!DosToDevicePathA(dir, devPath, sizeof(devPath))){
-        SetLastError(ERROR_INVALID_PARAMETER);
-        return false;
-    }
+    if (devPath[strlen(devPath) - 1] == '\\') devPath[strlen(devPath) - 1] = '\0'; // Remove trailing slash
 
     // Repoint D: to device path of 'dir'
     char dosD[16]; MakeDosString(dosD, sizeof(dosD), "D:");
@@ -862,77 +816,6 @@ bool LaunchXbeA(const char* pathOrDir)
     return false;
 }
 
-// ============================================================================
-// FATX cache format helpers (X/Y/Z) using XapiFormatFATVolumeEx
-//  - We pass device paths to guarantee a real format (not a file on a volume).
-//  - Temporarily unmap the DOS letter to reduce open-handle surprises.
-//  - Always restore standard mappings afterward.
-// ============================================================================
-
-extern "C" {
-typedef struct _ANSI_STRING_ { USHORT Length; USHORT MaximumLength; PCHAR Buffer; } ANSI_STRING_, *PANSI_STRING_;
-BOOL  WINAPI XapiFormatFATVolumeEx(PANSI_STRING_ VolumePath, ULONG BytesPerCluster);
-}
-
-static const char* _CacheLetterToDevice(char dl)
-{
-    char c = (dl >= 'a' && dl <= 'z') ? (char)(dl - 32) : dl;
-    switch (c) {
-        case 'X': return "\\Device\\Harddisk0\\Partition3";
-        case 'Y': return "\\Device\\Harddisk0\\Partition4";
-        case 'Z': return "\\Device\\Harddisk0\\Partition5";
-        default:  return 0;
-    }
-}
-
-static bool _FormatDeviceFatx(const char* devicePath, unsigned long bytesPerCluster)
-{
-    if (!devicePath || !devicePath[0]) { SetLastError(ERROR_INVALID_PARAMETER); return false; }
-    if (bytesPerCluster == 0) bytesPerCluster = 16 * 1024; // default for cache
-
-    // Manual init (avoid RtlInitAnsiString to keep header surface small)
-    ANSI_STRING_ vol;
-    vol.Buffer = (PCHAR)devicePath;
-    vol.Length = (USHORT)strlen(devicePath);
-    vol.MaximumLength = vol.Length + 1;
-
-    // Nonzero on success per XDK
-    BOOL ok = XapiFormatFATVolumeEx(&vol, bytesPerCluster);
-    if (!ok) return false;
-    return true;
-}
-
-bool FormatCacheDrive(char driveLetter, unsigned long bytesPerCluster)
-{
-    const char* dev = _CacheLetterToDevice(driveLetter);
-    if (!dev) { SetLastError(ERROR_INVALID_PARAMETER); return false; }
-
-    // Best-effort unmap DOS link first
-    char dosBuf[16] = {0};
-    _snprintf(dosBuf, sizeof(dosBuf), "\\??\\%c:", (driveLetter >= 'a' && driveLetter <= 'z') ? (driveLetter - 32) : driveLetter);
-    STRING sDos; BuildString(sDos, dosBuf);
-    IoDeleteSymbolicLink(&sDos);
-
-    bool ok = _FormatDeviceFatx(dev, bytesPerCluster);
-
-    // Always restore standard letters so the app keeps working
-    MapStandardDrives_Io();
-    return ok;
-}
-
-bool FormatCacheXYZ(unsigned long bytesPerCluster, bool alsoClearECACHE)
-{
-    bool okX = FormatCacheDrive('X', bytesPerCluster);
-    bool okY = FormatCacheDrive('Y', bytesPerCluster);
-    bool okZ = FormatCacheDrive('Z', bytesPerCluster);
-
-    if (alsoClearECACHE) {
-        DeleteRecursiveA("E:\\CACHE");
-        EnsureDirA("E:\\CACHE");
-    }
-    return okX && okY && okZ;
-}
-
 bool FileExistsA(const char* path) {
     DWORD a = GetFileAttributesA(path);
     return (a != INVALID_FILE_ATTRIBUTES) && !(a & FILE_ATTRIBUTE_DIRECTORY);
@@ -945,19 +828,38 @@ bool WriteAllA(const char* path, const void* data, DWORD size) {
     return ok && wrote == size;
 }
 
-bool IsRootedPath(const char* path) {
-    if (strlen(path) >= 3 && path[0] >= 'A' && path[0] <= 'Z' && path[1] == ':' && path[2] == '\\') return true;
-    return false;
+static bool FormatDeviceFatx(const char* devicePath, unsigned long bytesPerCluster)
+{
+    if (!devicePath || !devicePath[0]) { SetLastError(ERROR_INVALID_PARAMETER); return false; }
+    if (bytesPerCluster == 0) bytesPerCluster = 16 * 1024; // default for cache
+
+    // Manual init (avoid RtlInitAnsiString to keep header surface small)
+    STRING vol;
+    vol.Buffer = (PCHAR)devicePath;
+    vol.Length = (USHORT)strlen(devicePath);
+    vol.MaximumLength = vol.Length + 1;
+
+    // Nonzero on success per XDK
+    BOOL ok = XapiFormatFATVolumeEx(&vol, bytesPerCluster);
+    if (!ok) return false;
+    return true;
 }
 
-char GetDisplayRoot(const char* path) {
-    switch (path[0]) {
-    case 'B': return 'C';
-    case 'J': return 'E';
-    case 'K': return 'F';
-    case 'L': return 'G';
-    case 'M': return 'H';
-    case 'N': return 'I';
-    default: return path[0];
+bool FormatCacheXYZ(unsigned long bytesPerCluster, bool alsoClearECACHE) {
+    // Try to format HDD0 and keep error
+    bool okX = FormatDeviceFatx("\\Device\\Harddisk0\\Partition3", bytesPerCluster);
+    bool okY = FormatDeviceFatx("\\Device\\Harddisk0\\Partition4", bytesPerCluster);
+    bool okZ = FormatDeviceFatx("\\Device\\Harddisk0\\Partition5", bytesPerCluster);
+
+    // Try to format HDD1 and throw away error
+    FormatDeviceFatx("\\Device\\Harddisk1\\Partition3", bytesPerCluster);
+    FormatDeviceFatx("\\Device\\Harddisk1\\Partition4", bytesPerCluster);
+    FormatDeviceFatx("\\Device\\Harddisk1\\Partition5", bytesPerCluster);
+
+    if (alsoClearECACHE && DirExistsA(E_CACHE_FILEPATH)) {
+        DeleteRecursiveA(E_CACHE_FILEPATH);
+        EnsureDirA(E_CACHE_FILEPATH);
     }
+
+    return okX && okY && okZ;
 }
