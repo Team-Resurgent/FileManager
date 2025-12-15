@@ -802,16 +802,21 @@ void Actions::Execute(Action act) {
             // Resolve destination
             char dstDir[512];
             if (act == ACT_UNZIPHERE) {
-                if (!app.ResolveSrcDir(dstDir, sizeof(dstDir))) {
-                    app.SetStatus("Pick a destination");
+                app.ResolveSrcDir(dstDir, sizeof(dstDir));
+
+                if (!CanWriteHereA(dstDir)) {
+                    app.SetStatusLastErr("Dest not writable");
                     break;
                 }
             }
             else if (act == ACT_UNZIPTO) {
-                if (!app.ResolveSrcDir(dstDir, sizeof(dstDir))) {
-                    app.SetStatus("Pick a destination");
+                app.ResolveSrcDir(dstDir, sizeof(dstDir));
+
+                if (!CanWriteHereA(dstDir)) {
+                    app.SetStatusLastErr("Dest not writable");
                     break;
                 }
+
                 char name[64];
                 strcpy(name, sel->name);
                 name[strlen(name) - 4] = '\0';
@@ -822,16 +827,15 @@ void Actions::Execute(Action act) {
                     app.SetStatus("Pick a destination");
                     break;
                 }
+
+                if (!CanWriteHereA(dstDir)) {
+                    app.SetStatusLastErr("Dest not writable");
+                    break;
+                }
             }
 
             if (IsDPath(dstDir)) {
                 app.SetStatus("Cannot unzip to DVD-ROM:\\");
-                break;
-            }
-
-            NormalizeDirA(dstDir);
-            if (!CanWriteHereA(dstDir)) {
-                app.SetStatusLastErr("Dest not writable");
                 break;
             }
 
@@ -886,6 +890,8 @@ void Actions::Execute(Action act) {
             SetCopyProgressCallback(CopyProgThunk, &ctx);
 
             size_t extractedOk = 0, skipped = 0;
+
+            EnsureDirA(dstDir);
 
             while (rc == UNZ_OK) {
 

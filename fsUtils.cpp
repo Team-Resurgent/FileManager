@@ -58,18 +58,6 @@ static inline void StripROSysHiddenA(const char* path){
     if (na != a) SetFileAttributesA(path, na);
 }
 
-// ============================================================================
-// DVD helpers (tray state, media detect, remount, size cache)
-// ============================================================================
-
-// TRAY_* -> DRIVE_* normalize (our app logic uses DRIVE_* consistently)
-static inline DWORD _NormalizeToDriveCode(DWORD code){
-    if (code == TRAY_OPEN)                 return DRIVE_OPEN;
-    if (code == TRAY_CLOSED_NO_MEDIA)      return DRIVE_CLOSED_NO_MEDIA;
-    if (code == TRAY_CLOSED_MEDIA_PRESENT) return DRIVE_CLOSED_MEDIA_PRESENT;
-    return code; // already DRIVE_* or unknown
-}
-
 // Minimal wrapper; keeps SMC calls private to this TU.
 class CIoSupport {
 public:
@@ -143,15 +131,26 @@ int DvdDetectMediaSimple(char* outLabel, size_t cap){
     return 0;
 }
 
-// Return a DRIVE_* code only when the tray/media state *changes*; otherwise READY.
-DWORD DvdGetDriveStateOneShot(){
-    static DWORD      s_last = 0xFFFFFFFFu;
+// Return a TRAY_* code only when the tray/media state *changes*; otherwise READY.
+DWORD DvdGetDriveStateOneShot() {
+    static DWORD s_lastCode = 0xFFFFFFFFu;
+    static DWORD s_lastSerial;
     static CIoSupport s_io;
 
-    DWORD raw  = s_io.GetTrayState();         // TRAY_*
-    DWORD code = _NormalizeToDriveCode(raw);  // DRIVE_*
-    if (code != s_last){ s_last = code; return code; }
-    return DRIVE_READY;
+    DWORD curCode  = s_io.GetTrayState();
+    
+    if (s_lastCode != curCode) {
+        s_lastCode = curCode;
+        return curCode;
+    }
+    if (curCode == TRAY_CLOSED_MEDIA_PRESENT) {
+        DWORD curSerial = 0;
+        if (GetDvdVolumeSerial(&curSerial) && s_lastSerial != curSerial) {
+            s_lastSerial = curSerial;
+            return curCode;
+        }
+    }
+    return TRAY_NO_CHANGE;
 }
 
 // ============================================================================
@@ -290,6 +289,7 @@ void ParentPath(char* path) {
 void NormalizeDirA(char* s){
     // "E:" -> "E:\" ; always ensure trailing slash
     size_t n = strlen(s);
+    // Needs rewrite here
     if (n==2 && s[1]==':'){ s[2]='\\'; s[3]=0; return; }
     EnsureTrailingSlash(s, 512);
 }

@@ -914,7 +914,6 @@ HRESULT FileBrowserApp::FrameMove() {
     }
 
     // --- DVD tray/media polling + serial watchdog (no stale listings) ----------
-{
     static DWORD s_nextDvdPollMs = 0;
     static DWORD s_lastDvdSerial = 0xFFFFFFFF; // unknown
     static BOOL  s_dMapped       = FALSE;      // our belief about D: mapping
@@ -924,41 +923,36 @@ HRESULT FileBrowserApp::FrameMove() {
         s_nextDvdPollMs = now2 + 250; // ~4 Hz
 
         DWORD code = DvdGetDriveStateOneShot(); // DRIVE_* or DRIVE_READY (no change)
-        if (code != DRIVE_READY) {
+        if (code != TRAY_NO_CHANGE) {
             BOOL needRefresh = FALSE;
 
             switch (code) {
-            case DRIVE_OPEN:
-            case DRIVE_CLOSED_NO_MEDIA:
-                s_dMapped       = FALSE;
+            case TRAY_OPEN:
+            case TRAY_CLOSED_NO_MEDIA:
+                s_dMapped = FALSE;
                 s_lastDvdSerial = 0xFFFFFFFF;   // forget old serial
-				m_dvdHaveStats  = false;          // <— clear
-				m_dvdUsedBytes  = 0;
-				m_dvdTotalBytes = 0;
-                needRefresh     = TRUE;
+                m_dvdHaveStats = false;          // <— clear
+                m_dvdUsedBytes = 0;
+                m_dvdTotalBytes = 0;
+                needRefresh = TRUE;
                 //SetStatus((code == DRIVE_OPEN) ? "Tray opened" : "No disc");
                 break;
 
-            case DRIVE_CLOSED_MEDIA_PRESENT: {
-				s_dMapped = TRUE;
+            case TRAY_CLOSED_MEDIA_PRESENT:
+                s_dMapped = TRUE;
 
-				DWORD curSer = 0;
-				if (GetDvdVolumeSerial(&curSer)) s_lastDvdSerial = curSer;
+                DWORD curSer = 0;
+                if (GetDvdVolumeSerial(&curSer)) s_lastDvdSerial = curSer;
 
-				// Cache total (capacity) and used (sum of files on disc)
-				ULONGLONG fb=0, tb=0;
-				GetDriveFreeTotal("DVD-ROM:\\", fb, tb);
-				m_dvdTotalBytes = tb;
-				m_dvdUsedBytes  = DirSizeRecursiveA("DVD-ROM:\\");   // from FsUtil
-				m_dvdHaveStats  = true;
+                // Cache total (capacity) and used (sum of files on disc)
+                ULONGLONG fb = 0, tb = 0;
+                GetDriveFreeTotal("DVD-ROM:\\", fb, tb);
+                m_dvdTotalBytes = tb;
+                m_dvdUsedBytes = DirSizeRecursiveA("DVD-ROM:\\");   // from FsUtil
+                m_dvdHaveStats = true;
 
-				//{ char lbl[64]; if (DvdDetectMediaSimple(lbl, sizeof(lbl))) SetStatus("%s", lbl); }
-				needRefresh = TRUE;
-				break; }
-
-
-            case DRIVE_NOT_READY:
-            default:
+                //{ char lbl[64]; if (DvdDetectMediaSimple(lbl, sizeof(lbl))) SetStatus("%s", lbl); }
+                needRefresh = TRUE;
                 break;
             }
 
@@ -993,51 +987,6 @@ HRESULT FileBrowserApp::FrameMove() {
             }
         }
     }
-
-    // Serial watchdog: catches fast swaps if tray state change was missed
-    {
-        static DWORD s_nextSerChk = 0;
-        DWORD now3 = GetTickCount();
-        if (now3 >= s_nextSerChk) {
-            s_nextSerChk = now3 + 800; // ~1.25 Hz
-
-            if (s_dMapped) {
-                DWORD curSer = 0;
-                if (GetDvdVolumeSerial(&curSer)) {
-                    if (s_lastDvdSerial != 0xFFFFFFFF && curSer != s_lastDvdSerial) {
-                        s_lastDvdSerial = curSer;
-						// refresh cached used/total
-						ULONGLONG fb=0, tb=0;
-						GetDriveFreeTotal("DVD-ROM:\\", fb, tb);
-						m_dvdTotalBytes = tb;
-						m_dvdUsedBytes  = DirSizeRecursiveA("DVD-ROM:\\");
-						m_dvdHaveStats  = true;
-
-                        for (int iPane = 0; iPane < 2; ++iPane) {
-                            Pane& P = m_pane[iPane];
-                            if (P.mode == 0) {
-                                BuildDriveItems(P.items);
-                                if (P.sel >= (int)P.items.size()) P.sel = (int)P.items.size()-1;
-                                if (P.sel < 0) P.sel = 0;
-                                P.scroll = 0;
-                            } else if (IsDPath(P.curPath)) {
-                                ListDirectory(P.curPath, P.items);
-                                if (P.sel >= (int)P.items.size()) P.sel = (int)P.items.size()-1;
-                                if (P.sel < 0) P.sel = 0;
-                                if (P.scroll > P.sel) P.scroll = P.sel;
-                                { int maxScroll = (int)P.items.size() - m_visible; if (maxScroll < 0) maxScroll = 0; if (P.scroll > maxScroll) P.scroll = maxScroll; }
-                            } else {
-                                RefreshPane(P);
-                            }
-                        }
-
-                        //{ char lbl[64]; if (DvdDetectMediaSimple(lbl, sizeof(lbl))) SetStatus("%s", lbl); }
-                    }
-                }
-            }
-        }
-    }
-}
 
     OnPad(g_Gamepads[0]);
     return S_OK;

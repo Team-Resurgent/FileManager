@@ -7,19 +7,12 @@
 #define INVALID_FILE_ATTRIBUTES 0xFFFFFFFF
 #endif
 
-// ---------------- DVD tray codes (SMC) + normalized drive codes -------------
+// ---------------- DVD tray codes (SMC) -------------
 #ifndef TRAY_OPEN
 #define TRAY_OPEN                   16
 #define TRAY_CLOSED_NO_MEDIA        64
 #define TRAY_CLOSED_MEDIA_PRESENT   96
-#endif
-
-#ifndef DRIVE_OPEN
-#define DRIVE_OPEN                      0
-#define DRIVE_NOT_READY                 1
-#define DRIVE_READY                     2   // "no change" sentinel from one-shot API
-#define DRIVE_CLOSED_NO_MEDIA           3
-#define DRIVE_CLOSED_MEDIA_PRESENT      4
+#define TRAY_NO_CHANGE                   0
 #endif
 
 // ----- Pane item (shared with UI) -------------------------------------------
