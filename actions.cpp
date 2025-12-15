@@ -638,13 +638,12 @@ void Actions::Execute(Action act) {
     // ---- Format cache (X/Y/Z + clear E:\CACHE) --------------------------------
     case ACT_FORMAT_CACHE:
     {
-        app.SetStatus("Formatting cache partitions (X/Y/Z)...");
-        const bool ok = FormatCacheXYZ(0);  // 0 => default 16KiB
+        app.SetStatus("Formatting cache partitions and directories...");
 
         if (DeleteRecursiveA("HDD0-E:\\CACHE")) EnsureDirA("HDD0-E:\\CACHE");
         if (DeleteRecursiveA("HDD1-E:\\CACHE")) EnsureDirA("HDD1-E:\\CACHE");
 
-        if (!ok) { 
+        if (FormatCacheXYZ(0)) { // 0 => default 16KiB
             app.SetStatus("Format cache failed"); 
             break; 
         }
@@ -652,13 +651,6 @@ void Actions::Execute(Action act) {
         app.RefreshPane(app.m_pane[0]);
         app.RefreshPane(app.m_pane[1]);
         app.SetStatus("Formatted X/Y/Z and E:\\CACHE");
-        break;
-    }
-
-    // ---- Switch active pane ---------------------------------------------------
-    case ACT_SWITCHMEDIA:
-    {
-        app.m_active = 1 - app.m_active;
         break;
     }
 	

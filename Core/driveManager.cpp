@@ -193,7 +193,7 @@ void driveManager::init()
 	{
 		m_drives = new pointerVector<drive*>(true);
 
-		m_drives->add(new drive("DVD-ROM", "DVD-ROM", "\\Device\\Cdrom0", driveTypeCdRom));
+		m_drives->add(new drive("D", "DVD-ROM", "\\Device\\Cdrom0", driveTypeCdRom));
 
 		m_drives->add(new drive("HDD0-C", "HDD0-C", "\\Device\\Harddisk0\\Partition2", driveTypeHardDrive));
 		m_drives->add(new drive("HDD0-E", "HDD0-E", "\\Device\\Harddisk0\\Partition1", driveTypeHardDrive));

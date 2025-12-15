@@ -15,7 +15,6 @@ typedef enum {
     ACT_MARK_ALL,     // Mark all regular entries (skip "..")
     ACT_INVERT_MARKS, // Toggle mark flag on each regular entry
 
-    ACT_SWITCHMEDIA,  // Switch active pane (left <-> right)
     ACT_FORMAT_CACHE, // Format X/Y/Z cache partitions (+ clear E:\CACHE)
 
     ACT_APPLYIPS,     //xpatchlib

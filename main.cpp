@@ -539,7 +539,6 @@ void FileBrowserApp::BuildContextMenu() {
     m_ctx.AddItem("Make new folder", ACT_MKDIR,       (inDir));
     m_ctx.AddItem("Calculate size",  ACT_CALCSIZE,    (hasSel));
     m_ctx.AddItem("Go to root",      ACT_GOROOT,      (inDir));
-    //AddMenuItem("Switch pane",     ACT_SWITCHMEDIA, (hasSel));
 
     // Marking tools (directory mode only; skip the ".." row)
     if (inDir) {

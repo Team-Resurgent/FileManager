@@ -129,17 +129,17 @@ int DvdDetectMediaSimple(char* outLabel, size_t cap){
     outLabel[0]=0;
 
     // Xbox game?
-    DWORD a = GetFileAttributesA("DVD-ROM:\\default.xbe");
+    DWORD a = GetFileAttributesA("D:\\default.xbe");
     if (a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY)){
         _snprintf(outLabel, (int)cap, "DVD: Xbox Game"); outLabel[cap-1]=0; return 1;
     }
     // DVD-Video?
-    a = GetFileAttributesA("DVD-ROM:\\VIDEO_TS");
+    a = GetFileAttributesA("D:\\VIDEO_TS");
     if (a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY)){
         _snprintf(outLabel, (int)cap, "DVD: Video"); outLabel[cap-1]=0; return 2;
     }
     // Any content at all => Data
-    WIN32_FIND_DATAA fd; HANDLE h = FindFirstFileA("DVD-ROM:\\*", &fd);
+    WIN32_FIND_DATAA fd; HANDLE h = FindFirstFileA("D:\\*", &fd);
     if (h != INVALID_HANDLE_VALUE){
         do{
             const char* n = fd.cFileName;
@@ -212,9 +212,18 @@ void BuildDriveItems(std::vector<Item>& out) {
         it.marked = false;
 
         // Icon selection (example logic)
-        if (!_strnicmp(mount, "DVD", 3)) it.icon = '\x9C'; // DVD
+        if (!_strnicmp(mount, "D", 1)) it.icon = '\x9C'; // DVD
+        else if (!_strnicmp(mount, "HDD0", 4)) it.icon = '\x9A'; // HDD0 (primary disk)
         else if (!_strnicmp(mount, "HDD1", 4)) it.icon = '\x9B'; // HDD1 (secondary disk)
-        else it.icon = '\x9A'; // HDD0 / normal}
+        else if (!_strnicmp(mount, "H", 1) ||
+                 !_strnicmp(mount, "I", 1) || 
+                 !_strnicmp(mount, "J", 1) || 
+                 !_strnicmp(mount, "K", 1) || 
+                 !_strnicmp(mount, "L", 1) || 
+                 !_strnicmp(mount, "M", 1) || 
+                 !_strnicmp(mount, "N", 1) || 
+                 !_strnicmp(mount, "O", 1)) it.icon = '\x98';
+        else it.icon = '\x9D'; // default to blank
 
         out.push_back(it);
     }
@@ -718,7 +727,7 @@ void SanitizeFatxNameInPlace(char* s){
 // ============================================================================
 
 void GetDevicePathFromMountedPath(char* devPath, const char* mountPath) {
-    if (!_memicmp(mountPath, "DVD-ROM", 7)) strcpy(devPath, "\\Device\\Cdrom0");
+    if (!_memicmp(mountPath, "D:", 2)) strcpy(devPath, "\\Device\\Cdrom0");
     else if (!_memicmp(mountPath, "HDD0-C", 6)) strcpy(devPath, "\\Device\\Harddisk0\\Partition2");
     else if (!_memicmp(mountPath, "HDD0-E", 6)) strcpy(devPath, "\\Device\\Harddisk0\\Partition1");
     else if (!_memicmp(mountPath, "HDD0-F", 6)) strcpy(devPath, "\\Device\\Harddisk0\\Partition6");
