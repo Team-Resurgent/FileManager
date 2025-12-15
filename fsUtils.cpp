@@ -165,17 +165,6 @@ namespace {
     inline int ci_cmp(const char* a,const char* b){ return _stricmp(a,b); }
 }
 
-// 26-bit A..Z mask (handy for quick change detection)
-unsigned int QueryDriveMaskAZ(){
-    unsigned int mask = 0;
-    for (char d='A'; d<='Z'; ++d){
-        char root[4] = { d, ':', '\\', 0 };
-        DWORD attr = GetFileAttributesA(root);
-        if (attr != INVALID_FILE_ATTRIBUTES) mask |= (1u << (d - 'A'));
-    }
-    return mask;
-}
-
 // Build drive items (e.g., "E:\") into 'out'.
 void BuildDriveItems(std::vector<Item>& out) {
     out.clear();

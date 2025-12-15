@@ -880,6 +880,8 @@ void Actions::Execute(Action act) {
             }
             // --- end preflight ---
 
+            EnsureDirA(dstDir);
+
             if ((rc = zip->gotoFirstFile()) == UNZ_OK) {
                 rc = zip->getFileInfo(&fi, szName, 512, NULL, 0, NULL, 0);
             }
@@ -890,8 +892,6 @@ void Actions::Execute(Action act) {
             SetCopyProgressCallback(CopyProgThunk, &ctx);
 
             size_t extractedOk = 0, skipped = 0;
-
-            EnsureDirA(dstDir);
 
             while (rc == UNZ_OK) {
 

@@ -879,6 +879,8 @@ void FileBrowserApp::OnPad(const XBGAMEPAD& pad) {
 
 // Per-frame app logic. Also poll for drive-set changes and refresh panes.
 HRESULT FileBrowserApp::FrameMove() {
+    XBInput_GetInput();
+
     // Check ip
     if (network::isReady() == true)
     {
@@ -897,22 +899,6 @@ HRESULT FileBrowserApp::FrameMove() {
         }
     }
     
-    XBInput_GetInput();
-
-    // --- Poll for general drive-set changes (ignore D:) ----------------------
-    {
-        static DWORD        s_nextPollMs  = 0;
-        static unsigned int s_lastMaskNoD = 0xFFFFFFFF; // sentinel = uninitialized
-
-        DWORD now = GetTickCount();
-        if (now >= s_nextPollMs) {
-            s_nextPollMs = now + 1200; // ~1.2s
-
-            EnsureListing(m_pane[0]);
-            EnsureListing(m_pane[1]);
-        }
-    }
-
     // --- DVD tray/media polling + serial watchdog (no stale listings) ----------
     static DWORD s_nextDvdPollMs = 0;
     static DWORD s_lastDvdSerial = 0xFFFFFFFF; // unknown

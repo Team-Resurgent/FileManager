@@ -27,7 +27,6 @@ struct Item {
 
 // ===== Drive mapping / discovery ============================================
 void BuildDriveItems(std::vector<Item>& out);    // Build UI items from roots
-unsigned int QueryDriveMaskAZ();                 // Bitmask A..Z (1<<('A'+n))
 
 // ===== Directory listing =====================================================
 bool ListDirectory(const char* path, std::vector<Item>& out);
