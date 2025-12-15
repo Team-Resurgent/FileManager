@@ -19,7 +19,7 @@
     <ClCompile Include="..\..\..\..\..\Program Files (x86)\Microsoft Xbox SDK\Samples\Xbox\Common\Src\xbstopwatch.cpp" />
     <ClCompile Include="..\..\..\..\..\Program Files (x86)\Microsoft Xbox SDK\Samples\Xbox\Common\Src\xbutil.cpp" />
     <ClCompile Include="actions.cpp" />
-    <ClCompile Include="contextMenu.cpp" />
+    <ClCompile Include="ContextMenu.cpp" />
     <ClCompile Include="Core\drive.cpp" />
     <ClCompile Include="Core\driveManager.cpp" />
     <ClCompile Include="Core\fileSystem.cpp" />
@@ -34,7 +34,7 @@
     <ClCompile Include="Font.c" />
     <ClCompile Include="fsUtils.cpp" />
     <ClCompile Include="OnScreenKeyboard.cpp" />
-    <ClCompile Include="paneRenderer.cpp" />
+    <ClCompile Include="PaneRenderer.cpp" />
     <ClCompile Include="rxdkStubs.cpp" />
     <ClCompile Include="textUtils.cpp" />
     <ClCompile Include="xpatchlibUtils.cpp" />
@@ -53,7 +53,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="actions.h" />
-    <ClInclude Include="contextMenu.h" />
+    <ClInclude Include="ContextMenu.h" />
     <ClInclude Include="configuration.h" />
     <ClInclude Include="Core\drive.h" />
     <ClInclude Include="Core\driveManager.h" />
@@ -72,7 +72,7 @@
     <ClInclude Include="Font.h" />
     <ClInclude Include="fsUtils.h" />
     <ClInclude Include="OnScreenKeyboard.h" />
-    <ClInclude Include="paneRenderer.h" />
+    <ClInclude Include="PaneRenderer.h" />
     <ClInclude Include="textUtils.h" />
     <ClInclude Include="unzipLIBUtils.h" />
     <ClInclude Include="unzipLIB\src\crc32.h" />

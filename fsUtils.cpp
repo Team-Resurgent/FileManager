@@ -1,7 +1,6 @@
 #include "fsUtils.h"
 
 #include "driveManager.h"
-#include "configuration.h"
 
 #include <Algorithm>
 
@@ -845,7 +844,7 @@ static bool FormatDeviceFatx(const char* devicePath, unsigned long bytesPerClust
     return true;
 }
 
-bool FormatCacheXYZ(unsigned long bytesPerCluster, bool alsoClearECACHE) {
+bool FormatCacheXYZ(unsigned long bytesPerCluster) {
     // Try to format HDD0 and keep error
     bool okX = FormatDeviceFatx("\\Device\\Harddisk0\\Partition3", bytesPerCluster);
     bool okY = FormatDeviceFatx("\\Device\\Harddisk0\\Partition4", bytesPerCluster);
@@ -855,11 +854,6 @@ bool FormatCacheXYZ(unsigned long bytesPerCluster, bool alsoClearECACHE) {
     FormatDeviceFatx("\\Device\\Harddisk1\\Partition3", bytesPerCluster);
     FormatDeviceFatx("\\Device\\Harddisk1\\Partition4", bytesPerCluster);
     FormatDeviceFatx("\\Device\\Harddisk1\\Partition5", bytesPerCluster);
-
-    if (alsoClearECACHE && DirExistsA(E_CACHE_FILEPATH)) {
-        DeleteRecursiveA(E_CACHE_FILEPATH);
-        EnsureDirA(E_CACHE_FILEPATH);
-    }
 
     return okX && okY && okZ;
 }

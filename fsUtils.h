@@ -103,4 +103,4 @@ DWORD DvdGetDriveStateOneShot(void);
 bool FileExistsA(const char* path);
 bool WriteAllA(const char* path, const void* data, DWORD size);
 
-bool FormatCacheXYZ(unsigned long bytesPerCluster, bool alsoClearECACHE);
+bool FormatCacheXYZ(unsigned long bytesPerCluster);

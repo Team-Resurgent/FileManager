@@ -639,7 +639,11 @@ void Actions::Execute(Action act) {
     case ACT_FORMAT_CACHE:
     {
         app.SetStatus("Formatting cache partitions (X/Y/Z)...");
-        const bool ok = FormatCacheXYZ(0, true);  // 0 => default 16KiB; also clears E:\CACHE
+        const bool ok = FormatCacheXYZ(0);  // 0 => default 16KiB
+
+        if (DeleteRecursiveA("HDD0-E:\\CACHE")) EnsureDirA("HDD0-E:\\CACHE");
+        if (DeleteRecursiveA("HDD1-E:\\CACHE")) EnsureDirA("HDD1-E:\\CACHE");
+
         if (!ok) { 
             app.SetStatus("Format cache failed"); 
             break; 
