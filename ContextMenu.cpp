@@ -34,7 +34,7 @@ ContextMenu::ContextMenu(){
     m_count=0; m_sel=0;
     m_open=false; m_waitRelease=false;
     m_x=0; m_y=0; m_w=0; m_rowH=28;
-    m_mw = 160;
+    m_mw = 160; m_Mw = 320;
     m_prevA=m_prevB=m_prevX=m_prevWhite=m_prevBlack=0;
     m_prevButtons=0;
     m_parentMenu = NULL;

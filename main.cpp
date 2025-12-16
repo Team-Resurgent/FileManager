@@ -120,30 +120,6 @@ namespace {
         }
     }
 
-    // Ellipsize the left side to fit maxW, keeping the tail (useful for paths).
-    inline void LeftEllipsizeToFit(CXBFont& font, const char* src, FLOAT maxW, char* out, size_t cap) {
-        if (!src) { out[0]=0; return; }
-        FLOAT w=0,h=0; GetAnsiWH(font, src, &w, &h);
-        if (w <= maxW) { _snprintf(out, (int)cap, "%s", src); out[cap-1]=0; return; }
-
-        const char* tail = src + strlen(src);
-        const char* p    = tail;
-        char buf[1024];  // temp
-        // Walk leftward until "...<suffix>" fits.
-        for (;;) {
-            if (p == src) break;
-            --p;
-            _snprintf(buf, sizeof(buf), "...%s", p);
-            GetAnsiWH(font, buf, &w, &h);
-            if (w > maxW){
-                ++p; // last good char is one ahead
-                break;
-            }
-        }
-        _snprintf(out, (int)cap, "...%s", p);
-        out[cap-1]=0;
-    }
-
     // Return first byte index whose rendered width reaches px (for marquee).
     static const char* SkipToPixelOffset(CXBFont& font, const char* s, FLOAT px, FLOAT& skippedW){
         skippedW = 0.0f;
@@ -187,13 +163,8 @@ namespace {
 
 FileBrowserApp& FileBrowserApp::Get() { static FileBrowserApp app; return app; }
 
-char* FileBrowserApp::GetCurrentIp() {
-    return mCurrentIp;
-}
-void FileBrowserApp::SetCurrentIp(char* ip) {
-    strcpy(mCurrentIp, ip);
-    mCurrentIp[sizeof(mCurrentIp) - 1] = '\0';
-}
+char* FileBrowserApp::GetCurrentIp() { return mCurrentIp; }
+void FileBrowserApp::SetCurrentIp(char* ip) { strncpy(mCurrentIp, ip, sizeof(mCurrentIp)); mCurrentIp[sizeof(mCurrentIp) - 1] = '\0'; }
 
 // ----------------------------------------------------------------------------
 // ComputeResponsiveLayout
@@ -452,43 +423,34 @@ void FileBrowserApp::BuildZipSubMenu() {
         if (inDir && !cur.isUpEntry && !cur.isDir) isFile = true;
     }
 
-    char unzipTo[256] = "to ";
+    m_zipSubMenu.Clear();
+    m_zipSubMenu.AddItem("here", ACT_UNZIPHERE, (true));
+
     if (isFile) {
-        strcat(unzipTo, "\"");
+        char buf[256] = "to ";
+        strcat(buf, "\"");
         char name[64];
         strcpy(name, p.items[p.sel].name);
         name[strlen(name) - 4] = '\0';
-        if (strlen(name) > 33) {
-            strncat(unzipTo, name, 15);
-            strcat(unzipTo, "...");
-            strcat(unzipTo, name + strlen(name) - 15);
-        }
-        else strcat(unzipTo, name);
-        strcat(unzipTo, "\\\"");
+        strcat(buf, name);
+        strcat(buf, "\\\"");
+
+        char unzipTo[256];
+        EllipsizeAnsiToFit(m_font, buf, m_zipSubMenu.m_Mw, unzipTo, sizeof(unzipTo), ELLIPSIZE_CENTER);
+        m_zipSubMenu.AddItem(unzipTo, ACT_UNZIPTO, (true));
     }
 
-    char unzipToOther[256] = "to ";
     if (isFile && inDir2) {
-        strcat(unzipToOther, "\"");
-        char path[512];
-        strncpy(path, p2.curPath, sizeof(path) - 1);
+        char buf[512] = "to ";
+        strcat(buf, "\"");
+        strcat(buf, p2.curPath);
+        if (buf[strlen(buf) - 1] != '\\') strcat(buf, "\\");
+        strcat(buf, "\"");
 
-        if (strlen(path) > 33) {
-            strncat(unzipToOther, path, 15);
-            strcat(unzipToOther, "...");
-            strcat(unzipToOther, path + strlen(path) - 15);
-        }
-        else strcat(unzipToOther, path);
-        if (unzipToOther[strlen(unzipToOther) - 1] != '\\') strcat(unzipToOther, "\\");
-        strcat(unzipToOther, "\"");
+        char unzipTo[256];
+        EllipsizeAnsiToFit(m_font, buf, m_zipSubMenu.m_Mw, unzipTo, sizeof(unzipTo), ELLIPSIZE_CENTER);
+        m_zipSubMenu.AddItem(unzipTo, ACT_UNZIPTOOTHER, (true));
     }
-
-    m_zipSubMenu.Clear();
-
-    m_zipSubMenu.AddItem("here", ACT_UNZIPHERE, (true));
-    m_zipSubMenu.AddItem(unzipTo, ACT_UNZIPTO, (true));
-    if (inDir2)
-    m_zipSubMenu.AddItem(unzipToOther, ACT_UNZIPTOOTHER, (true));
 }
 
 void FileBrowserApp::BuildConfirmDelSubMenu() {
@@ -1351,9 +1313,7 @@ HRESULT FileBrowserApp::Render() {
         const char* hintsCompact = "\x8A Move | \x89 Pane | \x80 Enter | \x82 Menu | \x87 / \x86 Pg";
         const char* base = smallFooter ? hintsCompact : hintsVerbose;
 
-        char fitted[256];
-        LeftEllipsizeToFit(m_font, base, footerW - 10.0f, fitted, sizeof(fitted));
-        DrawAnsiCentered(m_font, footerX, footerY, 0xFFCCCCCC, &DefaultColors, fitted, footerW, footerH);
+        DrawAnsiCentered(m_font, footerX, footerY, 0xFFCCCCCC, &DefaultColors, base, footerW, footerH);
     }
     else {
         const char* curPath = m_pane[m_active].curPath;
@@ -1386,9 +1346,7 @@ HRESULT FileBrowserApp::Render() {
         }
         bar[sizeof(bar)-1] = 0;
 
-        char fitted[420];
-        LeftEllipsizeToFit(m_font, bar, footerW - 10.0f, fitted, sizeof(fitted));
-        DrawAnsiCentered(m_font, footerX, footerY, 0xFFCCCCCC, &DefaultColors, fitted, footerW, 28.0f);
+        DrawAnsiCentered(m_font, footerX, footerY, 0xFFCCCCCC, &DefaultColors, bar, footerW, 28.0f);
     }
 
     // ---- status toast (also centered and fitted) ----
@@ -1399,7 +1357,7 @@ HRESULT FileBrowserApp::Render() {
     FLOAT lx = DrawAnsi(m_font, toastX, toastY, 0x60BBDDEE, NULL, "Status:  ");
     if (now < m_statusUntilMs && m_status[0]) {
         char fitted[256];
-        LeftEllipsizeToFit(m_font, m_status, (rx - lx) - 5.0f, fitted, sizeof(fitted));
+        EllipsizeAnsiToFit(m_font, m_status, (rx - lx) - 5.0f, fitted, sizeof(fitted), ELLIPSIZE_LEFT);
         DrawAnsi(m_font, lx, toastY, 0xFFBBDDEE, NULL, fitted);
     }
 

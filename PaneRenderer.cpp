@@ -66,33 +66,9 @@ void PaneRenderer::DrawNameFittedOrMarquee(CXBFont& font, FLOAT x, FLOAT y, FLOA
     MarqueeState& M = m_marq[paneIndex];
 
     if (!isSelected){ // Not selected
-        if (fullW <= fitW_now + kMeasureFudgePx) DrawAnsiCentered(font, x, y, color, NULL, s, NULL, h);
-        else {
-            char tmp[512];            
-            const FLOAT fitW = (maxW > kRightGuardPx) ? (maxW - kRightGuardPx) : 0.0f;
-
-            FLOAT tw, th;
-            GetAnsiWH(font, s, &tw, &th);
-            if (tw <= fitW + kMeasureFudgePx) {
-                _snprintf(tmp, sizeof(tmp), "%s", s); 
-                tmp[sizeof(tmp) - 1] = 0; 
-                return; 
-            }
-
-            size_t hi = len, lo = 0;
-            char buf[512];
-            while (lo < hi) {
-                size_t mid = (lo + hi) / 2;
-                _snprintf(buf, sizeof(buf), "%.*s...", mid, s);
-                GetAnsiWH(font, buf, &tw, &th);
-                if (tw <= fitW + kMeasureFudgePx) lo = mid + 1; else hi = mid;
-            }
-
-            size_t take = (lo > 0) ? lo - 1 : 0;
-            _snprintf(tmp, sizeof(tmp), "%.*s...", take, s);
-            tmp[sizeof(tmp) - 1] = 0;
-            DrawAnsiCentered(font, x, y, color, NULL, tmp, NULL, h);
-        }
+        char buf[512];
+        EllipsizeAnsiToFit(font, s, fitW_now + kMeasureFudgePx, buf, sizeof(buf));
+        DrawAnsiCentered(font, x, y, color, NULL, buf, NULL, h);
 
         if (M.row == rowIndex) { M.row = -1; M.px = 0.0f; M.fitWLock = 0.0f; M.nextTick = 0; M.resetPause = 0; }
         return;

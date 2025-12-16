@@ -63,6 +63,8 @@ public:
     //   - Returns NOOP otherwise
     Result OnPad(const XBGAMEPAD& pad, Action& outAct);
 
+    float m_Mw; // max width
+
 private:
     // Internal representation of one row in the menu
     struct Item {

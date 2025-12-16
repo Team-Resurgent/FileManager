@@ -102,3 +102,86 @@ void GetAnsiWH(CXBFont& font, const char* text, FLOAT* w, FLOAT* h) {
     font.GetTextExtent(wbuf, w, h);
     free(wbuf);
 }
+
+void EllipsizeAnsiToFit(CXBFont& font, const char* src, FLOAT mW, char* dst, size_t s, EllipsizeMode mode) {
+    if (!dst || s < 4 || src == NULL || src[0] == '\0') {
+        if (dst && s > 0) dst[0] = '\0';
+        return;
+    }
+
+    FLOAT tW = GetAnsiW(font, src);
+    if (tW <= mW) {
+        strncpy(dst, src, s);
+        dst[s - 1] = '\0';
+        return;
+    }
+
+    const char* ellipses = "...";
+    mW -= GetAnsiW(font, ellipses);
+
+    switch (mode) {
+    case ELLIPSIZE_LEFT:
+    {
+        strcpy(dst, ellipses);
+        const char* p = src + strlen(src);
+        for (;;) {
+            if (p == src) break;
+            if (strlen(p) >= s - 4) break;
+            --p;
+            if (GetAnsiW(font, p) > mW) {
+                ++p;
+                break;
+            }
+        }
+        strcat(dst, p);
+        break;
+    }
+
+    case ELLIPSIZE_RIGHT:
+    {
+        memset(dst, 0, sizeof(char) * s);
+        int l = strlen(src);
+        for (int i = 0; i < l; i++) {
+            if (i >= s - 4) break;
+            dst[i] = src[i];
+            if (GetAnsiW(font, dst) > mW) {
+                dst[i] = '\0';
+                break;
+            }
+        }
+
+        strcat(dst, ellipses);
+        break;
+    }
+
+    case ELLIPSIZE_CENTER:
+    {
+        int l = strlen(src);         
+
+        const char* ls = src + (l / 2);         const char* lp = src;
+        const char* rs = (l % 2) ? ls + 1 : ls; const char* rp = src + l;        
+
+        char* lb = (char*)malloc(sizeof(char) * s);
+        memset(lb, 0, sizeof(char) * s);
+
+        for (;;) {
+            if (lp == ls || rp == rs) break;
+            if ((lp - src) + strlen(rp) >= s - 4) break;
+            ++lp; --rp;
+            lb[lp - src - 1] = src[lp - src - 1];
+            if (GetAnsiW(font, lb) + GetAnsiW(font, rp) > mW) {
+                --lp; ++rp;
+                lb[lp - src - 1] = '\0';
+                break;
+            }
+        }
+        strcpy(dst, lb);
+        strcat(dst, ellipses);
+        strcat(dst, rp);
+
+        free(lb);
+
+        break;
+    }
+    } // switch
+}

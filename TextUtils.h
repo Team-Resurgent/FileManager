@@ -3,6 +3,12 @@
 #include <XTL.h>
 #include "XBFont.h"
 
+typedef enum {
+    ELLIPSIZE_RIGHT,
+    ELLIPSIZE_LEFT,
+    ELLIPSIZE_CENTER
+} EllipsizeMode;
+
 class ColorMap {
 public:
     DWORD m_colors[256] = { 0 };
@@ -22,4 +28,6 @@ FLOAT DrawAnsiFromRight(CXBFont& font, FLOAT x, FLOAT y, DWORD color, ColorMap* 
 
 FLOAT GetAnsiW(CXBFont& font, const char* text);
 void GetAnsiWH(CXBFont& font, const char* text, FLOAT* width, FLOAT* height);
+
+void EllipsizeAnsiToFit(CXBFont& font, const char* source, FLOAT maxWidth, char* destination, size_t size, EllipsizeMode mode = ELLIPSIZE_RIGHT);
 
