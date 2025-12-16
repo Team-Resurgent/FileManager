@@ -426,6 +426,7 @@ void FileBrowserApp::BuildZipSubMenu() {
     m_zipSubMenu.Clear();
     m_zipSubMenu.AddItem("here", ACT_UNZIPHERE, (true));
 
+    char* offset = "   ";
     if (isFile) {
         char buf[256] = "to ";
         strcat(buf, "\"");
@@ -433,10 +434,13 @@ void FileBrowserApp::BuildZipSubMenu() {
         strcpy(name, p.items[p.sel].name);
         name[strlen(name) - 4] = '\0';
         strcat(buf, name);
-        strcat(buf, "\\\"");
+        strcat(buf, "\\\"");        
+        strcat(buf, offset);
 
         char unzipTo[256];
-        EllipsizeAnsiToFit(m_font, buf, m_zipSubMenu.m_Mw, unzipTo, sizeof(unzipTo), ELLIPSIZE_CENTER);
+        EllipsizeAnsiToFit(m_font, buf, m_zipSubMenu.m_Mw + GetAnsiW(m_font, offset), unzipTo, sizeof(unzipTo), ELLIPSIZE_CENTER);
+        unzipTo[strlen(unzipTo) - strlen(offset)] = '\0';
+
         m_zipSubMenu.AddItem(unzipTo, ACT_UNZIPTO, (true));
     }
 
@@ -446,9 +450,12 @@ void FileBrowserApp::BuildZipSubMenu() {
         strcat(buf, p2.curPath);
         if (buf[strlen(buf) - 1] != '\\') strcat(buf, "\\");
         strcat(buf, "\"");
+        strcat(buf, offset);
 
         char unzipTo[256];
-        EllipsizeAnsiToFit(m_font, buf, m_zipSubMenu.m_Mw, unzipTo, sizeof(unzipTo), ELLIPSIZE_CENTER);
+        EllipsizeAnsiToFit(m_font, buf, m_zipSubMenu.m_Mw + GetAnsiW(m_font, offset), unzipTo, sizeof(unzipTo), ELLIPSIZE_CENTER);
+        unzipTo[strlen(unzipTo) - strlen(offset)] = '\0';
+
         m_zipSubMenu.AddItem(unzipTo, ACT_UNZIPTOOTHER, (true));
     }
 }
