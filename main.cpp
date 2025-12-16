@@ -1343,13 +1343,11 @@ HRESULT FileBrowserApp::Render() {
         char bar[420];
         if (smallFooter) {
             _snprintf(bar, sizeof(bar),
-                "\x81 Up | %s: %s / %s | \x82 Menu | \x83 %s | Pg \x87 / \x86",
-                (m_active==0 ? "L" : "R"), leftLabel, leftStr, rightStr, yLab);
+                "\x81 Up | %s: %s / %s | \x82 Menu | \x83 %s | Pg \x87 / \x86", leftLabel, leftStr, rightStr, yLab);
         }
         else {
             _snprintf(bar, sizeof(bar),
-                "Active: %s   |   \x81 Up   |   %s: %s / Total: %s   |   \x82 Menu   |   \x83 %s   |   \x87 / \x86 Page",
-                (m_active==0 ? "Left" : "Right"), leftLabel, leftStr, rightStr, yLab);
+                "\x81 Up   |   %s: %s / Total: %s   |   \x82 Menu   |   \x83 %s   |   \x87 / \x86 Page", leftLabel, leftStr, rightStr, yLab);
         }
         bar[sizeof(bar)-1] = 0;
 
